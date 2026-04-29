@@ -1,4 +1,4 @@
-# myapp
+# CriptoControlMx v2
 
 A new Flutter project.
 
