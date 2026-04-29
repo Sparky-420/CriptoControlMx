@@ -1,16 +1,26 @@
-# myapp
+# CriptoControlMx
 
-A new Flutter project.
+Aplicación Flutter para registrar movimientos de criptomonedas, calcular costo base, break even, objetivos netos y respaldos JSON.
 
-## Getting Started
+## Ramas de trabajo
 
-This project is a starting point for a Flutter application.
+- `master`: base actual publicada desde Firebase Studio.
+- `stable`: rama para la versión estable y validada.
+- `experimental`: rama para pruebas, cambios de UI y funciones nuevas sin romper la base.
 
-A few resources to get you started if this is your first Flutter project:
+## Estado actual
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+La app incluye:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- registro, edición y borrado de movimientos
+- cálculo de costo base y P/L
+- break even bruto y neto
+- objetivos netos por comisión de salida
+- respaldo e importación JSON
+- icono y nombre de app `CriptoControlMx`
+
+## Flujo recomendado
+
+1. cambios confiables y revisados -> `stable`
+2. ideas nuevas, prototipos o pruebas -> `experimental`
+3. `master` se conserva como punto de origen histórico de la migración desde Firebase Studio
