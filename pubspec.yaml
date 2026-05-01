@@ -30,3 +30,5 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/import/backup_v2.json
