@@ -14,11 +14,19 @@ Future<void> main() async {
 
 Future<void> _seedFromBundledBackupIfNeeded() async {
   final prefs = await SharedPreferences.getInstance();
-  final existingMovements = prefs.getString('movements_json');
+  final existingMovementsRaw = prefs.getString('movements_json');
 
-  if (existingMovements != null && existingMovements.trim().isNotEmpty) {
-    return;
+  var hasExistingMovements = false;
+  if (existingMovementsRaw != null && existingMovementsRaw.trim().isNotEmpty) {
+    try {
+      final existingDecoded = jsonDecode(existingMovementsRaw);
+      hasExistingMovements = existingDecoded is List && existingDecoded.isNotEmpty;
+    } catch (_) {
+      hasExistingMovements = true;
+    }
   }
+
+  if (hasExistingMovements) return;
 
   try {
     final raw = await rootBundle.loadString('assets/import/backup_v2.json');
@@ -30,7 +38,7 @@ Future<void> _seedFromBundledBackupIfNeeded() async {
     final currentPrices = decoded['currentPrices'];
     final settings = decoded['settings'];
 
-    if (movements is! List || currentPrices is! Map) return;
+    if (movements is! List || movements.isEmpty || currentPrices is! Map) return;
 
     await prefs.setString('movements_json', jsonEncode(movements));
     await prefs.setString('prices_json', jsonEncode(currentPrices));
