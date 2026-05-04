@@ -1,8 +1,6 @@
 name: Flutter V2 Check
 
 on:
-  push:
-    branches: [ experimental ]
   pull_request:
     branches: [ master ]
   workflow_dispatch:
