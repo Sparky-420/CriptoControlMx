@@ -4,9 +4,9 @@ Aplicación Flutter para registrar movimientos de criptomonedas, calcular costo 
 
 ## Ramas de trabajo
 
-- `master`: base actual publicada desde Firebase Studio.
-- `stable`: rama para la versión estable y validada.
-- `experimental`: rama para pruebas, cambios de UI y funciones nuevas sin romper la base.
+- `master`: rama estable y principal.
+- `experimental`: rama para la versión 2, pruebas de UI, importadores y funciones nuevas.
+- `stable`: rama histórica sincronizada con `master` para no perder referencia anterior.
 
 ## Estado actual
 
@@ -21,6 +21,6 @@ La app incluye:
 
 ## Flujo recomendado
 
-1. cambios confiables y revisados -> `stable`
-2. ideas nuevas, prototipos o pruebas -> `experimental`
-3. `master` se conserva como punto de origen histórico de la migración desde Firebase Studio
+1. todo lo confiable y validado vive en `master`
+2. todo experimento o versión 2 vive en `experimental`
+3. `stable` se conserva solo como rama espejo/histórica de `master`
