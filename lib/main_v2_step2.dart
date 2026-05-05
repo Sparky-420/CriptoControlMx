@@ -1381,10 +1381,10 @@ class _ScenarioSimulatorSheetState extends State<ScenarioSimulatorSheet> {
     if (_type == ScenarioType.buy) {
       final fee = amount * feePercent / 100;
       final netAmount = amount - fee;
-      final boughtQty = netAmount > 0 ? netAmount / price : 0;
-      final simulatedQty = s.quantity + boughtQty;
-      final simulatedCostBase = s.costBase + amount;
-      final simulatedAvg = simulatedQty > 0 ? simulatedCostBase / simulatedQty : 0;
+      final double boughtQty = netAmount > 0 ? netAmount / price : 0.0;
+      final double simulatedQty = s.quantity + boughtQty;
+      final double simulatedCostBase = s.costBase + amount;
+      final double simulatedAvg = simulatedQty > 0 ? simulatedCostBase / simulatedQty : 0.0;
 
       return ScenarioResult(
         valid: true,
@@ -1417,9 +1417,9 @@ class _ScenarioSimulatorSheetState extends State<ScenarioSimulatorSheet> {
     final avg = s.avgPrice;
     final removedCost = avg * sellQty;
     final realizedPL = netSale - removedCost;
-    final remainingQty = s.quantity - sellQty;
-    final remainingCostBase = s.costBase - removedCost;
-    final remainingAvg = remainingQty > 0 ? remainingCostBase / remainingQty : 0;
+    final double remainingQty = s.quantity - sellQty;
+    final double remainingCostBase = s.costBase - removedCost;
+    final double remainingAvg = remainingQty > 0 ? remainingCostBase / remainingQty : 0.0;
 
     return ScenarioResult(
       valid: true,
