@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart' as xl;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:pdf/pdf.dart';
@@ -1382,6 +1383,44 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     }
   }
 
+  Future<void> _applyBackupJson(String rawJson) async {
+    final dynamic decoded = jsonDecode(rawJson.trim());
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException();
+    }
+
+    final dynamic movementsRaw = decoded['movements'];
+    final dynamic pricesRaw = decoded['currentPrices'];
+    final dynamic settingsRaw = decoded['settings'];
+
+    if (movementsRaw is! List || pricesRaw is! Map) {
+      throw const FormatException();
+    }
+
+    final List<Movement> imported = movementsRaw
+        .map(
+          (dynamic e) => Movement.fromJson(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+    final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
+
+    setState(() {
+      _movements
+        ..clear()
+        ..addAll(imported);
+
+      for (final String coin in _coins) {
+        _currentPrices[coin] = numberFromJson(pricesMap[coin]);
+      }
+
+      if (settingsRaw is Map && settingsRaw['sellFeePercent'] is num) {
+        _sellFeePercent = (settingsRaw['sellFeePercent'] as num).toDouble();
+      }
+    });
+
+    await _saveData();
+  }
+
   Future<void> _importBackup(BuildContext pageContext) async {
     final TextEditingController controller = TextEditingController();
 
@@ -1410,50 +1449,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 pageContext,
               );
               try {
-                final dynamic decoded = jsonDecode(controller.text.trim());
-                if (decoded is! Map<String, dynamic>) {
-                  throw const FormatException();
-                }
-
-                final dynamic movementsRaw = decoded['movements'];
-                final dynamic pricesRaw = decoded['currentPrices'];
-                final dynamic settingsRaw = decoded['settings'];
-
-                if (movementsRaw is! List || pricesRaw is! Map) {
-                  throw const FormatException();
-                }
-
-                final List<Movement> imported = movementsRaw
-                    .map(
-                      (dynamic e) => Movement.fromJson(
-                        Map<String, dynamic>.from(e as Map),
-                      ),
-                    )
-                    .toList();
-
-                setState(() {
-                  _movements
-                    ..clear()
-                    ..addAll(imported);
-
-                  final Map<String, dynamic> pricesMap =
-                      Map<String, dynamic>.from(pricesRaw);
-
-                  for (final String coin in _coins) {
-                    final dynamic value = pricesMap[coin];
-                    _currentPrices[coin] = value is num
-                        ? value.toDouble()
-                        : 0.0;
-                  }
-
-                  if (settingsRaw is Map &&
-                      settingsRaw['sellFeePercent'] is num) {
-                    _sellFeePercent = (settingsRaw['sellFeePercent'] as num)
-                        .toDouble();
-                  }
-                });
-
-                await _saveData();
+                await _applyBackupJson(controller.text);
 
                 if (!mounted) return;
                 navigator.pop();
@@ -1471,6 +1467,37 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         ],
       ),
     );
+  }
+
+  Future<void> _importBackupFile(BuildContext pageContext) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+
+    try {
+      final FilePickerResult? result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: <String>['json'],
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final PlatformFile file = result.files.single;
+      final Uint8List? bytes = file.bytes;
+      if (bytes == null) throw const FormatException();
+
+      await _applyBackupJson(utf8.decode(bytes));
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        SnackBar(content: Text('Respaldo importado: ${file.name}')),
+      );
+    } catch (_) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No se pudo importar el archivo JSON')),
+        );
+      }
+    }
   }
 
   void _snack(BuildContext context, String message) {
@@ -1561,6 +1588,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onExportPdf: () => _exportPdf(pageContext),
               onExportBackup: () => _exportBackup(pageContext),
               onImportBackup: () => _importBackup(pageContext),
+              onImportBackupFile: () => _importBackupFile(pageContext),
             ),
           ];
 
@@ -2384,6 +2412,7 @@ class SettingsTab extends StatelessWidget {
   final VoidCallback onExportPdf;
   final VoidCallback onExportBackup;
   final VoidCallback onImportBackup;
+  final VoidCallback onImportBackupFile;
 
   const SettingsTab({
     super.key,
@@ -2404,6 +2433,7 @@ class SettingsTab extends StatelessWidget {
     required this.onExportPdf,
     required this.onExportBackup,
     required this.onImportBackup,
+    required this.onImportBackupFile,
   });
 
   @override
@@ -2514,7 +2544,12 @@ class SettingsTab extends StatelessWidget {
               ),
               FilledButton.tonal(
                 onPressed: onImportBackup,
-                child: const Text('Importar JSON'),
+                child: const Text('Pegar JSON'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: onImportBackupFile,
+                icon: const Icon(Icons.upload_file_outlined),
+                label: const Text('Importar archivo'),
               ),
             ],
           ),

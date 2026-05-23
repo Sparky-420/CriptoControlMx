@@ -11,7 +11,7 @@ V2 ya fue promovida a `master` y la app principal vive en `lib/cripto_control_ap
 - Campos opcionales por movimiento: origen, cartera y red.
 - Actualización automática de precios en MXN con cache local.
 - Actualización manual de precios desde la barra superior y Ajustes.
-- Respaldo/importación JSON compatible con respaldos anteriores.
+- Respaldo/importación JSON compatible con respaldos anteriores, pegado o desde archivo.
 - Exportación CSV de historial, resumen y snapshots.
 - Exportación XLSX de historial, resumen y snapshots.
 - Exportación PDF de reporte.
@@ -28,4 +28,3 @@ V2 ya fue promovida a `master` y la app principal vive en `lib/cripto_control_ap
 - Publicar build release firmado.
 - Migrar Gradle, Android Gradle Plugin y Kotlin a las versiones futuras recomendadas por Flutter.
 - Agregar gráficos históricos a partir de snapshots.
-- Agregar importación desde archivo, además de pegar JSON.

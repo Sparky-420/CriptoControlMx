@@ -22,7 +22,7 @@ La app incluye:
 - simulador de compra y venta
 - snapshots de cartera
 - exportación CSV, XLSX y PDF
-- respaldo e importación JSON
+- respaldo JSON e importación pegada o desde archivo
 - icono y nombre de app `CriptoControlMx`
 
 ## Flujo recomendado

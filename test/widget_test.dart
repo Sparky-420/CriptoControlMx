@@ -39,4 +39,12 @@ void main() {
     expect(stats.netBreakEvenPrice(1), closeTo(505.0505, 0.0001));
     expect(stats.isAtOrAboveNetBreakEven(1), isTrue);
   });
+
+  test('json number parser accepts nums, strings and missing values', () {
+    expect(numberFromJson(12), 12);
+    expect(numberFromJson(12.5), 12.5);
+    expect(numberFromJson('42.75'), 42.75);
+    expect(numberFromJson(null), 0);
+    expect(numberFromJson('bad'), 0);
+  });
 }
