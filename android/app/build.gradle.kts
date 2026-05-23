@@ -8,7 +8,9 @@ plugins {
 android {
     namespace = "com.example.myapp"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pin a stable NDK version instead of using flutter.ndkVersion. This avoids builds
+    // failing when a locally cached Flutter-selected NDK folder is malformed/corrupt.
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

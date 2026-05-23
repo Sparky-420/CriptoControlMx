@@ -18,5 +18,8 @@ app_*.apk
 app_*.aab
 app_*.ipa
 
+# Local/private crypto backups
+assets/import/backup_v2.json
+
 # Log files
 *.log
