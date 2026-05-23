@@ -45,6 +45,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   int _currentIndex = 0;
   double _sellFeePercent = 0.0;
   bool _darkMode = false;
+  DateTime? _pricesUpdatedAt;
+  bool _isRefreshingPrices = false;
 
   @override
   void initState() {
@@ -73,7 +75,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     }
 
     final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
-    _applyPrices(priceCache.prices);
+    _applyPriceCache(priceCache);
 
     final String? snapshotsRaw = prefs.getString(_snapshotsKey);
     if (snapshotsRaw != null && snapshotsRaw.trim().isNotEmpty) {
@@ -105,17 +107,49 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     await _refreshPricesIfNeeded(prefs);
   }
 
-  void _applyPrices(Map<String, double> prices) {
+  void _applyPriceCache(PriceCache cache) {
     for (final String coin in _coins) {
-      _currentPrices[coin] = prices[coin] ?? 0.0;
+      _currentPrices[coin] = cache.prices[coin] ?? 0.0;
     }
+    _pricesUpdatedAt = cache.updatedAt;
   }
 
   Future<void> _refreshPricesIfNeeded(SharedPreferences prefs) async {
     final PriceCache priceCache = await _priceService.refreshIfStale(prefs);
     if (!mounted) return;
 
-    setState(() => _applyPrices(priceCache.prices));
+    setState(() => _applyPriceCache(priceCache));
+  }
+
+  Future<void> _refreshPricesNow(BuildContext pageContext) async {
+    if (_isRefreshingPrices) return;
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    setState(() => _isRefreshingPrices = true);
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final PriceCache priceCache = await _priceService.fetchAndCachePrices(
+        prefs,
+      );
+      if (!mounted) return;
+
+      setState(() => _applyPriceCache(priceCache));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Precios actualizados')),
+      );
+    } catch (_) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('No se pudieron actualizar los precios'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshingPrices = false);
+      }
+    }
   }
 
   Future<void> _saveData() async {
@@ -391,12 +425,16 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               final double? value = double.tryParse(controller.text.trim());
               if (value == null || value < 0) return;
 
-              setState(() => _currentPrices[coin] = value);
-              await _priceService.saveManualPrices(
-                await SharedPreferences.getInstance(),
-                _currentPrices,
-              );
+              _currentPrices[coin] = value;
+              final PriceCache priceCache = await _priceService
+                  .saveManualPrices(
+                    await SharedPreferences.getInstance(),
+                    _currentPrices,
+                  );
               if (!dialogContext.mounted) return;
+              if (mounted) {
+                setState(() => _applyPriceCache(priceCache));
+              }
               Navigator.of(dialogContext).pop();
             },
             child: const Text('Guardar'),
@@ -1301,7 +1339,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               darkMode: _darkMode,
               sellFeePercent: _sellFeePercent,
               snapshotCount: _snapshots.length,
+              pricesUpdatedAt: _pricesUpdatedAt,
+              isRefreshingPrices: _isRefreshingPrices,
               onDarkModeChanged: _toggleDarkMode,
+              onRefreshPrices: () => _refreshPricesNow(pageContext),
               onEditSellFee: () => _showSellFeeDialog(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
@@ -1318,6 +1359,19 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             appBar: AppBar(
               title: const Text('CriptoControlMx'),
               actions: <Widget>[
+                IconButton(
+                  tooltip: 'Actualizar precios',
+                  onPressed: _isRefreshingPrices
+                      ? null
+                      : () => _refreshPricesNow(pageContext),
+                  icon: _isRefreshingPrices
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync),
+                ),
                 IconButton(
                   tooltip: 'Nuevo movimiento',
                   onPressed: () => _showAddMovementSheet(pageContext),
@@ -2015,7 +2069,10 @@ class SettingsTab extends StatelessWidget {
   final bool darkMode;
   final double sellFeePercent;
   final int snapshotCount;
+  final DateTime? pricesUpdatedAt;
+  final bool isRefreshingPrices;
   final ValueChanged<bool> onDarkModeChanged;
+  final VoidCallback onRefreshPrices;
   final VoidCallback onEditSellFee;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
@@ -2031,7 +2088,10 @@ class SettingsTab extends StatelessWidget {
     required this.darkMode,
     required this.sellFeePercent,
     required this.snapshotCount,
+    required this.pricesUpdatedAt,
+    required this.isRefreshingPrices,
     required this.onDarkModeChanged,
+    required this.onRefreshPrices,
     required this.onEditSellFee,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
@@ -2066,6 +2126,26 @@ class SettingsTab extends StatelessWidget {
             child: FilledButton.tonal(
               onPressed: onEditSellFee,
               child: const Text('Editar comisión'),
+            ),
+          ),
+        ),
+        CardPanel(
+          title: 'Precios',
+          subtitle: priceUpdatedLabel(pricesUpdatedAt),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: isRefreshingPrices ? null : onRefreshPrices,
+              icon: isRefreshingPrices
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sync),
+              label: Text(
+                isRefreshingPrices ? 'Actualizando' : 'Actualizar ahora',
+              ),
             ),
           ),
         ),
@@ -2712,6 +2792,21 @@ String shortDate(DateTime date) {
 
 String longDate(DateTime date) {
   return '${shortDate(date)} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+}
+
+String priceUpdatedLabel(DateTime? updatedAt) {
+  if (updatedAt == null) return 'Sin actualización registrada';
+
+  final Duration age = DateTime.now().difference(updatedAt);
+  if (age.inMinutes < 1) return 'Actualizado hace menos de 1 min';
+  if (age.inHours < 1) {
+    return 'Actualizado hace ${age.inMinutes} min';
+  }
+  if (age.inDays < 1) {
+    return 'Actualizado hace ${age.inHours} h';
+  }
+
+  return 'Actualizado ${longDate(updatedAt)}';
 }
 
 String isoDate(DateTime date) {

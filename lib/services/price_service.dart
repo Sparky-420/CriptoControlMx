@@ -67,7 +67,7 @@ class PriceService {
     return PriceCache(prices: prices, updatedAt: updatedAt);
   }
 
-  Future<void> saveManualPrices(
+  Future<PriceCache> saveManualPrices(
     SharedPreferences prefs,
     Map<String, double> prices,
   ) async {
@@ -75,6 +75,8 @@ class PriceService {
 
     await prefs.setString(pricesKey, jsonEncode(prices));
     await prefs.setInt(pricesUpdatedAtKey, updatedAt.millisecondsSinceEpoch);
+
+    return PriceCache(prices: prices, updatedAt: updatedAt);
   }
 
   Future<Map<String, double>> _fetchMxnPrices() async {
