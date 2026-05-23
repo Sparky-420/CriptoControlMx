@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:excel/excel.dart' as xl;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:pdf/pdf.dart';
@@ -462,6 +463,15 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     final TextEditingController feeController = TextEditingController(
       text: existing == null ? '0' : compact(existing.fee),
     );
+    final TextEditingController sourceController = TextEditingController(
+      text: existing?.source ?? '',
+    );
+    final TextEditingController walletController = TextEditingController(
+      text: existing?.wallet ?? '',
+    );
+    final TextEditingController networkController = TextEditingController(
+      text: existing?.network ?? '',
+    );
     final TextEditingController noteController = TextEditingController(
       text: existing?.note ?? '',
     );
@@ -497,7 +507,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<MovementType>(
-                          value: selectedType,
+                          initialValue: selectedType,
                           decoration: const InputDecoration(
                             labelText: 'Tipo',
                             border: OutlineInputBorder(),
@@ -519,7 +529,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
-                          value: selectedCoin,
+                          initialValue: selectedCoin,
                           decoration: const InputDecoration(
                             labelText: 'Moneda',
                             border: OutlineInputBorder(),
@@ -589,6 +599,30 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                         ),
                         const SizedBox(height: 12),
                         TextField(
+                          controller: sourceController,
+                          decoration: const InputDecoration(
+                            labelText: 'Origen',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: walletController,
+                          decoration: const InputDecoration(
+                            labelText: 'Cartera',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: networkController,
+                          decoration: const InputDecoration(
+                            labelText: 'Red',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
                           controller: noteController,
                           decoration: const InputDecoration(
                             labelText: 'Nota',
@@ -635,6 +669,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                 quantity: quantity,
                                 unitPrice: unitPrice,
                                 fee: fee,
+                                source: sourceController.text.trim(),
+                                wallet: walletController.text.trim(),
+                                network: networkController.text.trim(),
                                 note: noteController.text.trim(),
                               );
 
@@ -772,6 +809,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   }
 
   Future<void> _saveSnapshot(BuildContext pageContext) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     final Map<String, CoinStats> stats = _computeStats();
     final PortfolioTotals totals = _totals(stats);
 
@@ -799,7 +837,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     await _saveSnapshots();
 
     if (mounted) {
-      _snack(pageContext, 'Snapshot guardado');
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Snapshot guardado')),
+      );
     }
   }
 
@@ -918,6 +958,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         'precio_unitario_mxn',
         'comision_mxn',
         'total_bruto_mxn',
+        'origen',
+        'cartera',
+        'red',
         'nota',
       ],
       ..._movements.map((Movement m) {
@@ -930,6 +973,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           fixed(m.unitPrice, 2),
           fixed(m.fee, 2),
           fixed(m.quantity * m.unitPrice, 2),
+          m.source,
+          m.wallet,
+          m.network,
           m.note,
         ];
       }),
@@ -1043,6 +1089,137 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         .join('\n');
   }
 
+  Uint8List _buildXlsxBytes() {
+    final Map<String, CoinStats> stats = _computeStats();
+    final xl.Excel excel = xl.Excel.createExcel();
+
+    final xl.Sheet history = excel['Historial'];
+    _appendExcelRow(history, <Object?>[
+      'Fecha',
+      'Tipo',
+      'Tipo raw',
+      'Cripto',
+      'Cantidad',
+      'Precio unitario MXN',
+      'Comisión MXN',
+      'Total bruto MXN',
+      'Origen',
+      'Cartera',
+      'Red',
+      'Nota',
+    ]);
+
+    for (final Movement movement in _movements) {
+      _appendExcelRow(history, <Object?>[
+        isoDate(movement.date),
+        movement.type.label,
+        movement.type.name,
+        movement.coin,
+        movement.quantity,
+        movement.unitPrice,
+        movement.fee,
+        movement.quantity * movement.unitPrice,
+        movement.source,
+        movement.wallet,
+        movement.network,
+        movement.note,
+      ]);
+    }
+
+    final xl.Sheet summary = excel['Resumen'];
+    _appendExcelRow(summary, <Object?>[
+      'Cripto',
+      'Cantidad actual',
+      'Invertido actual MXN',
+      'Precio promedio MXN',
+      'Precio actual MXN',
+      'Valor actual MXN',
+      'Resultado actual MXN',
+      'Resultado vendido MXN',
+      'Precio para recuperar MXN',
+      'Comisiones acumuladas MXN',
+    ]);
+
+    for (final String coin in _coins) {
+      final CoinStats stat = stats[coin]!;
+      _appendExcelRow(summary, <Object?>[
+        stat.coin,
+        stat.quantity,
+        stat.costBase,
+        stat.avgPrice,
+        stat.currentPrice,
+        stat.currentValue,
+        stat.unrealizedPL,
+        stat.realizedPL,
+        stat.netBreakEvenPrice(_sellFeePercent),
+        stat.feesPaid,
+      ]);
+    }
+
+    final xl.Sheet snapshots = excel['Snapshots'];
+    _appendExcelRow(snapshots, <Object?>[
+      'Snapshot ID',
+      'Fecha',
+      'Invertido total MXN',
+      'Valor actual total MXN',
+      'Resultado actual MXN',
+      'Resultado vendido MXN',
+      'Movimientos',
+      'Cripto',
+      'Cantidad',
+      'Invertido MXN',
+      'Promedio MXN',
+      'Valor actual MXN',
+      'Resultado actual moneda MXN',
+      'Resultado vendido moneda MXN',
+    ]);
+
+    for (final PortfolioSnapshot snapshot in _snapshots) {
+      if (snapshot.coins.isEmpty) {
+        _appendExcelRow(snapshots, <Object?>[
+          snapshot.id,
+          snapshot.createdAt.toIso8601String(),
+          snapshot.totalCostBase,
+          snapshot.totalCurrentValue,
+          snapshot.totalUnrealizedPL,
+          snapshot.totalRealizedPL,
+          snapshot.movementCount,
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+        ]);
+      } else {
+        for (final CoinSnapshot coin in snapshot.coins) {
+          _appendExcelRow(snapshots, <Object?>[
+            snapshot.id,
+            snapshot.createdAt.toIso8601String(),
+            snapshot.totalCostBase,
+            snapshot.totalCurrentValue,
+            snapshot.totalUnrealizedPL,
+            snapshot.totalRealizedPL,
+            snapshot.movementCount,
+            coin.coin,
+            coin.quantity,
+            coin.costBase,
+            coin.avgPrice,
+            coin.currentValue,
+            coin.unrealizedPL,
+            coin.realizedPL,
+          ]);
+        }
+      }
+    }
+
+    excel.setDefaultSheet('Resumen');
+    final List<int>? bytes = excel.encode();
+    if (bytes == null) throw StateError('No se pudo crear el XLSX');
+    return Uint8List.fromList(bytes);
+  }
+
   Future<Uint8List> _buildPdfBytes() async {
     final Map<String, CoinStats> stats = _computeStats();
     final PortfolioTotals totals = _totals(stats);
@@ -1107,7 +1284,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   }
 
   Future<void> _shareDataFile({
-    required BuildContext pageContext,
+    required ScaffoldMessengerState messenger,
     required String fileName,
     required String mimeType,
     required List<int> bytes,
@@ -1128,15 +1305,21 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         ),
       );
 
-      if (mounted) _snack(pageContext, successMessage);
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(successMessage)));
+      }
     } catch (_) {
-      if (mounted) _snack(pageContext, 'No se pudo exportar el archivo');
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No se pudo exportar el archivo')),
+        );
+      }
     }
   }
 
   Future<void> _exportMovementsCsv(BuildContext pageContext) async {
     await _shareDataFile(
-      pageContext: pageContext,
+      messenger: ScaffoldMessenger.of(pageContext),
       fileName: 'criptocontrolmx_historial.csv',
       mimeType: 'text/csv',
       bytes: utf8.encode('\ufeff${_buildMovementsCsv()}'),
@@ -1146,7 +1329,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
   Future<void> _exportSummaryCsv(BuildContext pageContext) async {
     await _shareDataFile(
-      pageContext: pageContext,
+      messenger: ScaffoldMessenger.of(pageContext),
       fileName: 'criptocontrolmx_resumen.csv',
       mimeType: 'text/csv',
       bytes: utf8.encode('\ufeff${_buildSummaryCsv()}'),
@@ -1156,7 +1339,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
   Future<void> _exportSnapshotsCsv(BuildContext pageContext) async {
     await _shareDataFile(
-      pageContext: pageContext,
+      messenger: ScaffoldMessenger.of(pageContext),
       fileName: 'criptocontrolmx_snapshots.csv',
       mimeType: 'text/csv',
       bytes: utf8.encode('\ufeff${_buildSnapshotsCsv()}'),
@@ -1164,12 +1347,24 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     );
   }
 
+  Future<void> _exportXlsx(BuildContext pageContext) async {
+    await _shareDataFile(
+      messenger: ScaffoldMessenger.of(pageContext),
+      fileName: 'criptocontrolmx_reporte.xlsx',
+      mimeType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      bytes: _buildXlsxBytes(),
+      successMessage: 'XLSX listo',
+    );
+  }
+
   Future<void> _exportPdf(BuildContext pageContext) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     final Uint8List bytes = await _buildPdfBytes();
     if (!mounted) return;
 
     await _shareDataFile(
-      pageContext: pageContext,
+      messenger: messenger,
       fileName: 'criptocontrolmx_reporte.pdf',
       mimeType: 'application/pdf',
       bytes: bytes,
@@ -1178,8 +1373,13 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   }
 
   Future<void> _exportBackup(BuildContext pageContext) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     await Clipboard.setData(ClipboardData(text: _buildBackupJson()));
-    if (mounted) _snack(pageContext, 'Respaldo JSON copiado');
+    if (mounted) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Respaldo JSON copiado')),
+      );
+    }
   }
 
   Future<void> _importBackup(BuildContext pageContext) async {
@@ -1205,6 +1405,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           ),
           FilledButton(
             onPressed: () async {
+              final NavigatorState navigator = Navigator.of(dialogContext);
+              final ScaffoldMessengerState messenger = ScaffoldMessenger.of(
+                pageContext,
+              );
               try {
                 final dynamic decoded = jsonDecode(controller.text.trim());
                 if (decoded is! Map<String, dynamic>) {
@@ -1252,10 +1456,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 await _saveData();
 
                 if (!mounted) return;
-                Navigator.of(dialogContext).pop();
-                _snack(pageContext, 'Respaldo importado');
+                navigator.pop();
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Respaldo importado')),
+                );
               } catch (_) {
-                _snack(pageContext, 'JSON inválido o incompleto');
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('JSON inválido o incompleto')),
+                );
               }
             },
             child: const Text('Importar'),
@@ -1349,6 +1557,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
               onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
               onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
+              onExportXlsx: () => _exportXlsx(pageContext),
               onExportPdf: () => _exportPdf(pageContext),
               onExportBackup: () => _exportBackup(pageContext),
               onImportBackup: () => _importBackup(pageContext),
@@ -1589,13 +1798,39 @@ class MovementsTab extends StatefulWidget {
 class _MovementsTabState extends State<MovementsTab> {
   String _coinFilter = 'TODAS';
   String _typeFilter = 'TODOS';
+  final TextEditingController _searchController = TextEditingController();
+  DateTime? _fromDate;
+  DateTime? _toDate;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final String query = _searchController.text.trim().toLowerCase();
     final List<Movement> filtered = widget.movements.where((Movement m) {
       final bool coinOk = _coinFilter == 'TODAS' || m.coin == _coinFilter;
       final bool typeOk = _typeFilter == 'TODOS' || m.type.name == _typeFilter;
-      return coinOk && typeOk;
+      final bool fromOk =
+          _fromDate == null || !m.date.isBefore(dateOnly(_fromDate!));
+      final bool toOk =
+          _toDate == null || m.date.isBefore(dateOnly(_toDate!).add(days1));
+      final bool textOk =
+          query.isEmpty ||
+          <String>[
+            m.coin,
+            m.type.label,
+            m.type.shortLabel,
+            m.source,
+            m.wallet,
+            m.network,
+            m.note,
+          ].any((String value) => value.toLowerCase().contains(query));
+
+      return coinOk && typeOk && fromOk && toOk && textOk;
     }).toList()..sort((Movement a, Movement b) => b.date.compareTo(a.date));
 
     return ListView(
@@ -1605,7 +1840,7 @@ class _MovementsTabState extends State<MovementsTab> {
           children: <Widget>[
             Expanded(
               child: DropdownButtonFormField<String>(
-                value: _coinFilter,
+                initialValue: _coinFilter,
                 decoration: const InputDecoration(
                   labelText: 'Moneda',
                   border: OutlineInputBorder(),
@@ -1628,7 +1863,7 @@ class _MovementsTabState extends State<MovementsTab> {
             const SizedBox(width: 10),
             Expanded(
               child: DropdownButtonFormField<String>(
-                value: _typeFilter,
+                initialValue: _typeFilter,
                 decoration: const InputDecoration(
                   labelText: 'Tipo',
                   border: OutlineInputBorder(),
@@ -1650,6 +1885,69 @@ class _MovementsTabState extends State<MovementsTab> {
                 },
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _searchController,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            labelText: 'Buscar',
+            prefixIcon: Icon(Icons.search),
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            OutlinedButton.icon(
+              onPressed: () async {
+                final DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate: _fromDate ?? DateTime.now(),
+                  firstDate: DateTime(2010),
+                  lastDate: DateTime(2100),
+                );
+                if (picked != null) {
+                  setState(() => _fromDate = picked);
+                }
+              },
+              icon: const Icon(Icons.calendar_today_outlined),
+              label: Text(
+                _fromDate == null ? 'Desde' : 'Desde ${shortDate(_fromDate!)}',
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate: _toDate ?? _fromDate ?? DateTime.now(),
+                  firstDate: DateTime(2010),
+                  lastDate: DateTime(2100),
+                );
+                if (picked != null) {
+                  setState(() => _toDate = picked);
+                }
+              },
+              icon: const Icon(Icons.event_available_outlined),
+              label: Text(
+                _toDate == null ? 'Hasta' : 'Hasta ${shortDate(_toDate!)}',
+              ),
+            ),
+            if (_fromDate != null || _toDate != null || query.isNotEmpty)
+              OutlinedButton.icon(
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() {
+                    _fromDate = null;
+                    _toDate = null;
+                  });
+                },
+                icon: const Icon(Icons.filter_alt_off_outlined),
+                label: const Text('Limpiar'),
+              ),
           ],
         ),
         const SizedBox(height: 12),
@@ -1700,6 +1998,9 @@ class _MovementsTabState extends State<MovementsTab> {
                     money(m.quantity * m.unitPrice),
                     emphasized: true,
                   ),
+                  if (m.source.isNotEmpty) InfoLine('Origen', m.source),
+                  if (m.wallet.isNotEmpty) InfoLine('Cartera', m.wallet),
+                  if (m.network.isNotEmpty) InfoLine('Red', m.network),
                   if (m.note.isNotEmpty) InfoLine('Nota', m.note),
                 ],
               ),
@@ -1775,7 +2076,7 @@ class _SimulationTabState extends State<SimulationTab> {
           child: Column(
             children: <Widget>[
               DropdownButtonFormField<String>(
-                value: _coin,
+                initialValue: _coin,
                 decoration: const InputDecoration(
                   labelText: 'Moneda',
                   border: OutlineInputBorder(),
@@ -2079,6 +2380,7 @@ class SettingsTab extends StatelessWidget {
   final VoidCallback onExportMovementsCsv;
   final VoidCallback onExportSummaryCsv;
   final VoidCallback onExportSnapshotsCsv;
+  final VoidCallback onExportXlsx;
   final VoidCallback onExportPdf;
   final VoidCallback onExportBackup;
   final VoidCallback onImportBackup;
@@ -2098,6 +2400,7 @@ class SettingsTab extends StatelessWidget {
     required this.onExportMovementsCsv,
     required this.onExportSummaryCsv,
     required this.onExportSnapshotsCsv,
+    required this.onExportXlsx,
     required this.onExportPdf,
     required this.onExportBackup,
     required this.onImportBackup,
@@ -2189,6 +2492,10 @@ class SettingsTab extends StatelessWidget {
               FilledButton.tonal(
                 onPressed: onExportPdf,
                 child: const Text('PDF reporte'),
+              ),
+              FilledButton.tonal(
+                onPressed: onExportXlsx,
+                child: const Text('XLSX reporte'),
               ),
             ],
           ),
@@ -2407,7 +2714,7 @@ class StatusPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
       ),
       child: Text(
         label,
@@ -2522,6 +2829,9 @@ class Movement {
   final double quantity;
   final double unitPrice;
   final double fee;
+  final String source;
+  final String wallet;
+  final String network;
   final String note;
 
   Movement({
@@ -2531,6 +2841,9 @@ class Movement {
     required this.quantity,
     required this.unitPrice,
     required this.fee,
+    this.source = '',
+    this.wallet = '',
+    this.network = '',
     required this.note,
   });
 
@@ -2541,6 +2854,9 @@ class Movement {
     'quantity': quantity,
     'unitPrice': unitPrice,
     'fee': fee,
+    'source': source,
+    'wallet': wallet,
+    'network': network,
     'note': note,
   };
 
@@ -2552,6 +2868,9 @@ class Movement {
       quantity: numberFromJson(json['quantity']),
       unitPrice: numberFromJson(json['unitPrice'] ?? json['unit_price']),
       fee: numberFromJson(json['fee'] ?? json['commission']),
+      source: textFromJson(json['source'] ?? json['origin'] ?? json['origen']),
+      wallet: textFromJson(json['wallet'] ?? json['cartera']),
+      network: textFromJson(json['network'] ?? json['red']),
       note: json['note']?.toString() ?? '',
     );
   }
@@ -2771,6 +3090,14 @@ double numberFromJson(dynamic value) {
   return double.tryParse(value?.toString() ?? '') ?? 0.0;
 }
 
+String textFromJson(dynamic value) => value?.toString().trim() ?? '';
+
+DateTime dateOnly(DateTime value) {
+  return DateTime(value.year, value.month, value.day);
+}
+
+const Duration days1 = Duration(days: 1);
+
 String money(double value) => '\$${value.toStringAsFixed(2)} MXN';
 
 String moneyShort(double value) => '\$${value.toStringAsFixed(0)}';
@@ -2819,6 +3146,16 @@ String csvEscape(Object? value) {
       text.contains(',') || text.contains('"') || text.contains('\n');
   final String escaped = text.replaceAll('"', '""');
   return needsEscape ? '"$escaped"' : escaped;
+}
+
+void _appendExcelRow(xl.Sheet sheet, List<Object?> values) {
+  sheet.appendRow(values.map(toExcelValue).toList());
+}
+
+xl.CellValue? toExcelValue(Object? value) {
+  if (value is int) return xl.IntCellValue(value);
+  if (value is double) return xl.DoubleCellValue(value);
+  return xl.TextCellValue(value?.toString() ?? '');
 }
 
 Color pnlColor(double value) {

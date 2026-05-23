@@ -4,12 +4,12 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:myapp/main_v2_step3.dart' as v2;
+import 'package:myapp/cripto_control_app.dart' as app;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _seedFromBundledBackupIfNeeded();
-  v2.main();
+  app.main();
 }
 
 Future<void> _seedFromBundledBackupIfNeeded() async {

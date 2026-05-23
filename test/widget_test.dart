@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:myapp/main_v2_step3.dart';
+import 'package:myapp/cripto_control_app.dart';
 
 void main() {
   test('movement parser keeps stored JSON values compatible', () {
@@ -10,6 +10,9 @@ void main() {
       'quantity': '2.5',
       'unit_price': '300',
       'commission': '4.5',
+      'origen': 'exchange',
+      'cartera': 'ledger',
+      'red': 'ethereum',
       'note': 'cold wallet',
     });
 
@@ -18,6 +21,9 @@ void main() {
     expect(movement.quantity, 2.5);
     expect(movement.unitPrice, 300);
     expect(movement.fee, 4.5);
+    expect(movement.source, 'exchange');
+    expect(movement.wallet, 'ledger');
+    expect(movement.network, 'ethereum');
     expect(movement.note, 'cold wallet');
   });
 

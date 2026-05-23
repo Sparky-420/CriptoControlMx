@@ -16,6 +16,12 @@ La app incluye:
 - cálculo de costo base y P/L
 - break even bruto y neto
 - objetivos netos por comisión de salida
+- actualización automática y manual de precios en MXN
+- filtros de movimientos por moneda, tipo, fecha y texto
+- campos opcionales de origen, cartera y red por movimiento
+- simulador de compra y venta
+- snapshots de cartera
+- exportación CSV, XLSX y PDF
 - respaldo e importación JSON
 - icono y nombre de app `CriptoControlMx`
 

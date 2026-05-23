@@ -7,12 +7,6 @@
 
 include: package:flutter_lints/flutter.yaml
 
-analyzer:
-  exclude:
-    # step4 is a scratch/experimental implementation and is not imported by lib/main.dart.
-    # Keep it out of CI until it is promoted intentionally.
-    - lib/main_v2_step4.dart
-
 linter:
   rules:
     # avoid_print: false
