@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.myapp"
+    namespace = "mx.criptocontrolmx.app"
     compileSdk = flutter.compileSdkVersion
     // Pin a stable NDK version instead of using flutter.ndkVersion. This avoids builds
     // failing when a locally cached Flutter-selected NDK folder is malformed/corrupt.
@@ -22,8 +22,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.myapp"
+        applicationId = "mx.criptocontrolmx.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -34,8 +33,7 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Uses debug signing until a private production keystore is configured.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

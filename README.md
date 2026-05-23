@@ -21,6 +21,7 @@ La app incluye:
 - campos opcionales de origen, cartera y red por movimiento
 - simulador de compra y venta
 - snapshots de cartera
+- gráficos históricos desde snapshots
 - exportación CSV, XLSX y PDF
 - respaldo JSON e importación pegada o desde archivo
 - icono y nombre de app `CriptoControlMx`

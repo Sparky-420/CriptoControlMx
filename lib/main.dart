@@ -4,7 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:myapp/cripto_control_app.dart' as app;
+import 'package:cripto_control_mx/cripto_control_app.dart' as app;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

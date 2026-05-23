@@ -16,6 +16,7 @@ V2 ya fue promovida a `master` y la app principal vive en `lib/cripto_control_ap
 - Exportación XLSX de historial, resumen y snapshots.
 - Exportación PDF de reporte.
 - Snapshots de cartera.
+- Gráficos históricos de valor, invertido y resultados desde snapshots.
 - Simulador de compra y venta.
 
 ## Criterio de cierre
@@ -27,4 +28,3 @@ V2 ya fue promovida a `master` y la app principal vive en `lib/cripto_control_ap
 ## Siguientes mejoras opcionales
 - Publicar build release firmado.
 - Migrar Gradle, Android Gradle Plugin y Kotlin a las versiones futuras recomendadas por Flutter.
-- Agregar gráficos históricos a partir de snapshots.

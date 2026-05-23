@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:myapp/cripto_control_app.dart';
+import 'package:cripto_control_mx/cripto_control_app.dart';
 
 void main() {
   test('movement parser keeps stored JSON values compatible', () {

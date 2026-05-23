@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart' as xl;
@@ -877,7 +878,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                             subtitle:
                                 'Guarda una foto de cartera desde Ajustes.',
                           )
-                        else
+                        else ...<Widget>[
+                          SnapshotTrendPanel(snapshots: _snapshots),
                           ..._snapshots.map(
                             (PortfolioSnapshot snapshot) => CardPanel(
                               title: longDate(snapshot.createdAt),
@@ -928,6 +930,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                               ),
                             ),
                           ),
+                        ],
                       ],
                     );
                   },
@@ -2554,6 +2557,307 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
+      ],
+    );
+  }
+}
+
+class SnapshotTrendPanel extends StatelessWidget {
+  final List<PortfolioSnapshot> snapshots;
+
+  const SnapshotTrendPanel({super.key, required this.snapshots});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<PortfolioSnapshot> ordered = snapshots.toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final PortfolioSnapshot first = ordered.first;
+    final PortfolioSnapshot latest = ordered.last;
+    final double valueChange =
+        latest.totalCurrentValue - first.totalCurrentValue;
+    final double plChange = latest.totalUnrealizedPL - first.totalUnrealizedPL;
+
+    return CardPanel(
+      title: 'Tendencia histórica',
+      subtitle: ordered.length < 2
+          ? 'Guarda otro snapshot para ver líneas comparativas.'
+          : '${ordered.length} snapshots entre ${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (ordered.length >= 2) ...<Widget>[
+            SnapshotLineChart(
+              snapshots: ordered,
+              height: 220,
+              includeZero: true,
+              series: <SnapshotChartSeries>[
+                SnapshotChartSeries(
+                  label: 'Vale hoy',
+                  color: colors.primary,
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.totalCurrentValue)
+                      .toList(),
+                ),
+                SnapshotChartSeries(
+                  label: 'Invertido',
+                  color: colors.tertiary,
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.totalCostBase)
+                      .toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SnapshotLineChart(
+              snapshots: ordered,
+              height: 180,
+              includeZero: true,
+              series: <SnapshotChartSeries>[
+                SnapshotChartSeries(
+                  label: 'Resultado actual',
+                  color: pnlColor(latest.totalUnrealizedPL),
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.totalUnrealizedPL)
+                      .toList(),
+                ),
+                SnapshotChartSeries(
+                  label: 'Resultado vendido',
+                  color: colors.secondary,
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.totalRealizedPL)
+                      .toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              ChartLegendDot(label: 'Vale hoy', color: colors.primary),
+              ChartLegendDot(label: 'Invertido', color: colors.tertiary),
+              ChartLegendDot(
+                label: 'Resultado actual',
+                color: pnlColor(latest.totalUnrealizedPL),
+              ),
+              ChartLegendDot(
+                label: 'Resultado vendido',
+                color: colors.secondary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          InfoLine(
+            'Cambio en valor',
+            money(valueChange),
+            valueColor: pnlColor(valueChange),
+            emphasized: true,
+          ),
+          InfoLine(
+            'Cambio en resultado',
+            money(plChange),
+            valueColor: pnlColor(plChange),
+          ),
+          InfoLine('Último valor', money(latest.totalCurrentValue)),
+        ],
+      ),
+    );
+  }
+}
+
+class SnapshotLineChart extends StatelessWidget {
+  final List<PortfolioSnapshot> snapshots;
+  final List<SnapshotChartSeries> series;
+  final double height;
+  final bool includeZero;
+
+  const SnapshotLineChart({
+    super.key,
+    required this.snapshots,
+    required this.series,
+    required this.height,
+    required this.includeZero,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: CustomPaint(
+        painter: SnapshotLineChartPainter(
+          snapshots: snapshots,
+          series: series,
+          includeZero: includeZero,
+          axisColor: Theme.of(context).colorScheme.outlineVariant,
+          labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class SnapshotChartSeries {
+  final String label;
+  final Color color;
+  final List<double> values;
+
+  const SnapshotChartSeries({
+    required this.label,
+    required this.color,
+    required this.values,
+  });
+}
+
+class SnapshotLineChartPainter extends CustomPainter {
+  final List<PortfolioSnapshot> snapshots;
+  final List<SnapshotChartSeries> series;
+  final bool includeZero;
+  final Color axisColor;
+  final Color labelColor;
+
+  SnapshotLineChartPainter({
+    required this.snapshots,
+    required this.series,
+    required this.includeZero,
+    required this.axisColor,
+    required this.labelColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (snapshots.isEmpty || series.isEmpty) return;
+
+    final Rect chart = Rect.fromLTWH(
+      54,
+      12,
+      math.max(1, size.width - 66),
+      math.max(1, size.height - 42),
+    );
+
+    final Iterable<double> allValues = series.expand(
+      (SnapshotChartSeries s) => s.values,
+    );
+    double minValue = allValues.reduce(math.min);
+    double maxValue = allValues.reduce(math.max);
+    if (includeZero) {
+      minValue = math.min(minValue, 0);
+      maxValue = math.max(maxValue, 0);
+    }
+
+    if ((maxValue - minValue).abs() < 0.000001) {
+      final double pad = math.max(1, maxValue.abs() * 0.1);
+      minValue -= pad;
+      maxValue += pad;
+    }
+
+    final Paint gridPaint = Paint()
+      ..color = axisColor
+      ..strokeWidth = 1;
+
+    for (int i = 0; i <= 4; i++) {
+      final double y = chart.top + chart.height * i / 4;
+      canvas.drawLine(Offset(chart.left, y), Offset(chart.right, y), gridPaint);
+
+      final double value = maxValue - ((maxValue - minValue) * i / 4);
+      _drawLabel(canvas, moneyShort(value), Offset(0, y - 8), labelColor);
+    }
+
+    final int pointCount = snapshots.length;
+    double xFor(int index) => pointCount == 1
+        ? chart.center.dx
+        : chart.left + chart.width * index / (pointCount - 1);
+    double yFor(double value) =>
+        chart.bottom -
+        ((value - minValue) / (maxValue - minValue)).clamp(0.0, 1.0) *
+            chart.height;
+
+    for (final SnapshotChartSeries item in series) {
+      if (item.values.length != pointCount) continue;
+
+      final Path path = Path();
+      for (int i = 0; i < pointCount; i++) {
+        final Offset point = Offset(xFor(i), yFor(item.values[i]));
+        if (i == 0) {
+          path.moveTo(point.dx, point.dy);
+        } else {
+          path.lineTo(point.dx, point.dy);
+        }
+      }
+
+      final Paint linePaint = Paint()
+        ..color = item.color
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      canvas.drawPath(path, linePaint);
+
+      final Paint dotPaint = Paint()..color = item.color;
+      for (int i = 0; i < pointCount; i++) {
+        canvas.drawCircle(Offset(xFor(i), yFor(item.values[i])), 3.5, dotPaint);
+      }
+    }
+
+    _drawLabel(
+      canvas,
+      shortDate(snapshots.first.createdAt),
+      Offset(chart.left, chart.bottom + 10),
+      labelColor,
+    );
+    _drawLabel(
+      canvas,
+      shortDate(snapshots.last.createdAt),
+      Offset(chart.right - 82, chart.bottom + 10),
+      labelColor,
+    );
+  }
+
+  void _drawLabel(Canvas canvas, String text, Offset offset, Color color) {
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: color, fontSize: 10),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: 90);
+    painter.paint(canvas, offset);
+  }
+
+  @override
+  bool shouldRepaint(covariant SnapshotLineChartPainter oldDelegate) {
+    return oldDelegate.snapshots != snapshots ||
+        oldDelegate.series != series ||
+        oldDelegate.axisColor != axisColor ||
+        oldDelegate.labelColor != labelColor ||
+        oldDelegate.includeZero != includeZero;
+  }
+}
+
+class ChartLegendDot extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const ChartLegendDot({super.key, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
   }
