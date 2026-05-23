@@ -4,7 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'main_v2_step3.dart' as v2;
+import 'package:myapp/main_v2_step3.dart' as v2;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,8 +39,9 @@ Future<void> _seedFromBundledBackupIfNeeded() async {
     final currentPrices = decoded['currentPrices'];
     final settings = decoded['settings'];
 
-    if (movements is! List || movements.isEmpty || currentPrices is! Map)
+    if (movements is! List || movements.isEmpty || currentPrices is! Map) {
       return;
+    }
 
     await prefs.setString('movements_json', jsonEncode(movements));
     await prefs.setString('prices_json', jsonEncode(currentPrices));

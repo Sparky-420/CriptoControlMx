@@ -139,7 +139,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   bool _wouldCreateInvalidPosition(Movement candidate, {int? replaceIndex}) {
     final testList = [..._movements];
 
-    if (replaceIndex != null && replaceIndex >= 0 && replaceIndex < testList.length) {
+    if (replaceIndex != null &&
+        replaceIndex >= 0 &&
+        replaceIndex < testList.length) {
       testList[replaceIndex] = candidate;
     } else {
       testList.add(candidate);
@@ -336,10 +338,22 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
   Future<Uint8List> _buildPdfBytes() async {
     final stats = _computeStats();
-    final totalCostBase = stats.values.fold<double>(0, (sum, s) => sum + s.costBase);
-    final totalCurrentValue = stats.values.fold<double>(0, (sum, s) => sum + s.currentValue);
-    final totalUnrealized = stats.values.fold<double>(0, (sum, s) => sum + s.unrealizedPL);
-    final totalRealized = stats.values.fold<double>(0, (sum, s) => sum + s.realizedPL);
+    final totalCostBase = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.costBase,
+    );
+    final totalCurrentValue = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.currentValue,
+    );
+    final totalUnrealized = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.unrealizedPL,
+    );
+    final totalRealized = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.realizedPL,
+    );
 
     final pdf = pw.Document();
     pdf.addPage(
@@ -372,7 +386,15 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           pw.SizedBox(height: 8),
           pw.TableHelper.fromTextArray(
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-            headers: ['Cripto', 'Cantidad', 'Costo base', 'Valor', 'P/L', 'BE neto', 'Estado'],
+            headers: [
+              'Cripto',
+              'Cantidad',
+              'Costo base',
+              'Valor',
+              'P/L',
+              'BE neto',
+              'Estado',
+            ],
             data: _coins.map((coin) {
               final s = stats[coin]!;
               return [
@@ -421,7 +443,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       );
       messenger.showSnackBar(SnackBar(content: Text(successMessage)));
     } catch (_) {
-      messenger.showSnackBar(const SnackBar(content: Text('No se pudo exportar el archivo')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No se pudo exportar el archivo')),
+      );
     }
   }
 
@@ -449,7 +473,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     await _shareDataFile(
       pageContext: pageContext,
       fileName: 'criptocontrolmx_reporte.xlsx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      mimeType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       bytes: _buildXlsxBytes(),
       successMessage: 'XLSX listo para compartir',
     );
@@ -488,7 +513,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               Clipboard.setData(ClipboardData(text: backupJson));
               Navigator.of(dialogContext).pop();
               ScaffoldMessenger.of(pageContext).showSnackBar(
-                const SnackBar(content: Text('Respaldo copiado al portapapeles')),
+                const SnackBar(
+                  content: Text('Respaldo copiado al portapapeles'),
+                ),
               );
             },
             child: const Text('Copiar'),
@@ -556,13 +583,16 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 final importedPrices = <String, double>{};
                 for (final coin in _coins) {
                   final value = pricesRaw[coin];
-                  importedPrices[coin] = value == null ? 0 : (value as num).toDouble();
+                  importedPrices[coin] = value == null
+                      ? 0
+                      : (value as num).toDouble();
                 }
 
                 double importedSellFeePercent = 0;
                 if (settingsRaw is Map) {
                   final feeValue = settingsRaw['sellFeePercent'];
-                  if (feeValue is num) importedSellFeePercent = feeValue.toDouble();
+                  if (feeValue is num)
+                    importedSellFeePercent = feeValue.toDouble();
                 }
 
                 setState(() {
@@ -579,11 +609,15 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 if (!mounted) return;
                 Navigator.of(dialogContext).pop();
                 ScaffoldMessenger.of(pageContext).showSnackBar(
-                  const SnackBar(content: Text('Respaldo importado correctamente')),
+                  const SnackBar(
+                    content: Text('Respaldo importado correctamente'),
+                  ),
                 );
               } catch (_) {
                 ScaffoldMessenger.of(pageContext).showSnackBar(
-                  const SnackBar(content: Text('El JSON no es válido o está incompleto')),
+                  const SnackBar(
+                    content: Text('El JSON no es válido o está incompleto'),
+                  ),
                 );
               }
             },
@@ -669,7 +703,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   }
 
   void _showEditPriceDialog(BuildContext pageContext, String coin) {
-    final controller = TextEditingController(text: (_currentPrices[coin] ?? 0).toString());
+    final controller = TextEditingController(
+      text: (_currentPrices[coin] ?? 0).toString(),
+    );
 
     showDialog<void>(
       context: pageContext,
@@ -678,7 +714,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         content: TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Precio en MXN', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            labelText: 'Precio en MXN',
+            border: OutlineInputBorder(),
+          ),
         ),
         actions: [
           TextButton(
@@ -714,14 +753,24 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     if (picked != null) onPicked(picked);
   }
 
-  void _showAddMovementSheet(BuildContext pageContext, {Movement? existing, int? index}) {
+  void _showAddMovementSheet(
+    BuildContext pageContext, {
+    Movement? existing,
+    int? index,
+  }) {
     MovementType selectedType = existing?.type ?? MovementType.buy;
     String selectedCoin = existing?.coin ?? _coins.first;
     DateTime selectedDate = existing?.date ?? DateTime.now();
 
-    final qtyController = TextEditingController(text: existing != null ? fmtCompact(existing.quantity) : '');
-    final priceController = TextEditingController(text: existing != null ? fmtCompact(existing.unitPrice) : '');
-    final feeController = TextEditingController(text: existing != null ? fmtCompact(existing.fee) : '0');
+    final qtyController = TextEditingController(
+      text: existing != null ? fmtCompact(existing.quantity) : '',
+    );
+    final priceController = TextEditingController(
+      text: existing != null ? fmtCompact(existing.unitPrice) : '',
+    );
+    final feeController = TextEditingController(
+      text: existing != null ? fmtCompact(existing.fee) : '0',
+    );
     final noteController = TextEditingController(text: existing?.note ?? '');
 
     showModalBottomSheet<void>(
@@ -731,36 +780,68 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final isOut = selectedType == MovementType.sell || selectedType == MovementType.transferOut;
+            final isOut =
+                selectedType == MovementType.sell ||
+                selectedType == MovementType.transferOut;
             return Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                16 + MediaQuery.of(context).viewInsets.bottom,
+              ),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      existing != null ? 'Editar movimiento' : 'Agregar movimiento',
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      existing != null
+                          ? 'Editar movimiento'
+                          : 'Agregar movimiento',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<MovementType>(
                       initialValue: selectedType,
-                      decoration: const InputDecoration(labelText: 'Tipo', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo',
+                        border: OutlineInputBorder(),
+                      ),
                       items: MovementType.values
-                          .map((type) => DropdownMenuItem(value: type, child: Text(type.label)))
+                          .map(
+                            (type) => DropdownMenuItem(
+                              value: type,
+                              child: Text(type.label),
+                            ),
+                          )
                           .toList(),
                       onChanged: (value) {
-                        if (value != null) setModalState(() => selectedType = value);
+                        if (value != null)
+                          setModalState(() => selectedType = value);
                       },
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: selectedCoin,
-                      decoration: const InputDecoration(labelText: 'Moneda', border: OutlineInputBorder()),
-                      items: _coins.map((coin) => DropdownMenuItem(value: coin, child: Text(coin))).toList(),
+                      decoration: const InputDecoration(
+                        labelText: 'Moneda',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _coins
+                          .map(
+                            (coin) => DropdownMenuItem(
+                              value: coin,
+                              child: Text(coin),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (value) {
-                        if (value != null) setModalState(() => selectedCoin = value);
+                        if (value != null)
+                          setModalState(() => selectedCoin = value);
                       },
                     ),
                     const SizedBox(height: 12),
@@ -776,53 +857,83 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: qtyController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Cantidad', border: OutlineInputBorder()),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Cantidad',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: priceController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       decoration: InputDecoration(
-                        labelText: isOut ? 'Precio unitario en MXN (0 si no aplica)' : 'Precio unitario en MXN',
+                        labelText: isOut
+                            ? 'Precio unitario en MXN (0 si no aplica)'
+                            : 'Precio unitario en MXN',
                         border: const OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: feeController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Comisión en MXN', border: OutlineInputBorder()),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Comisión en MXN',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: noteController,
-                      decoration: const InputDecoration(labelText: 'Nota', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Nota',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
                         onPressed: () {
-                          final quantity = double.tryParse(qtyController.text.trim());
-                          final unitPrice = double.tryParse(priceController.text.trim());
-                          final fee = double.tryParse(feeController.text.trim()) ?? 0;
+                          final quantity = double.tryParse(
+                            qtyController.text.trim(),
+                          );
+                          final unitPrice = double.tryParse(
+                            priceController.text.trim(),
+                          );
+                          final fee =
+                              double.tryParse(feeController.text.trim()) ?? 0;
 
                           if (quantity == null || quantity <= 0) {
                             ScaffoldMessenger.of(pageContext).showSnackBar(
-                              const SnackBar(content: Text('Pon una cantidad válida')),
+                              const SnackBar(
+                                content: Text('Pon una cantidad válida'),
+                              ),
                             );
                             return;
                           }
                           if (unitPrice == null || unitPrice < 0) {
                             ScaffoldMessenger.of(pageContext).showSnackBar(
-                              const SnackBar(content: Text('Pon un precio válido')),
+                              const SnackBar(
+                                content: Text('Pon un precio válido'),
+                              ),
                             );
                             return;
                           }
                           if (fee < 0) {
                             ScaffoldMessenger.of(pageContext).showSnackBar(
-                              const SnackBar(content: Text('La comisión no puede ser negativa')),
+                              const SnackBar(
+                                content: Text(
+                                  'La comisión no puede ser negativa',
+                                ),
+                              ),
                             );
                             return;
                           }
@@ -837,7 +948,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                             note: noteController.text.trim(),
                           );
 
-                          if (_wouldCreateInvalidPosition(updated, replaceIndex: existing != null ? index : null)) {
+                          if (_wouldCreateInvalidPosition(
+                            updated,
+                            replaceIndex: existing != null ? index : null,
+                          )) {
                             ScaffoldMessenger.of(pageContext).showSnackBar(
                               SnackBar(
                                 content: Text(
@@ -849,7 +963,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                           }
 
                           setState(() {
-                            if (existing != null && index != null && index >= 0 && index < _movements.length) {
+                            if (existing != null &&
+                                index != null &&
+                                index >= 0 &&
+                                index < _movements.length) {
                               _movements[index] = updated;
                             } else {
                               _movements.add(updated);
@@ -859,7 +976,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                           Navigator.of(sheetContext).pop();
                         },
                         icon: Icon(existing != null ? Icons.save : Icons.add),
-                        label: Text(existing != null ? 'Guardar cambios' : 'Guardar movimiento'),
+                        label: Text(
+                          existing != null
+                              ? 'Guardar cambios'
+                              : 'Guardar movimiento',
+                        ),
                       ),
                     ),
                   ],
@@ -883,7 +1004,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         colorSchemeSeed: Colors.green,
         cardTheme: CardThemeData(
           elevation: 1,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
         ),
       ),
       home: Builder(
@@ -940,12 +1063,25 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _currentIndex,
-            onDestinationSelected: (index) => setState(() => _currentIndex = index),
+            onDestinationSelected: (index) =>
+                setState(() => _currentIndex = index),
             destinations: const [
-              NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Resumen'),
-              NavigationDestination(icon: Icon(Icons.swap_horiz), label: 'Movimientos'),
-              NavigationDestination(icon: Icon(Icons.currency_bitcoin), label: 'Monedas'),
-              NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Ajustes'),
+              NavigationDestination(
+                icon: Icon(Icons.dashboard_outlined),
+                label: 'Resumen',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.swap_horiz),
+                label: 'Movimientos',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.currency_bitcoin),
+                label: 'Monedas',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                label: 'Ajustes',
+              ),
             ],
           ),
         ),
@@ -958,14 +1094,30 @@ class SummaryTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final double sellFeePercent;
 
-  const SummaryTab({super.key, required this.stats, required this.sellFeePercent});
+  const SummaryTab({
+    super.key,
+    required this.stats,
+    required this.sellFeePercent,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final totalCostBase = stats.values.fold<double>(0, (sum, s) => sum + s.costBase);
-    final totalCurrentValue = stats.values.fold<double>(0, (sum, s) => sum + s.currentValue);
-    final totalUnrealized = stats.values.fold<double>(0, (sum, s) => sum + s.unrealizedPL);
-    final totalRealized = stats.values.fold<double>(0, (sum, s) => sum + s.realizedPL);
+    final totalCostBase = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.costBase,
+    );
+    final totalCurrentValue = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.currentValue,
+    );
+    final totalUnrealized = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.unrealizedPL,
+    );
+    final totalRealized = stats.values.fold<double>(
+      0,
+      (sum, s) => sum + s.realizedPL,
+    );
     final activeStats = stats.values.where((s) => s.quantity > 0).toList();
 
     return ListView(
@@ -977,35 +1129,60 @@ class SummaryTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Cartera total', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Cartera total',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    MetricTile(title: 'Costo base', value: money(totalCostBase)),
-                    MetricTile(title: 'Valor actual', value: money(totalCurrentValue)),
-                    MetricTile(title: 'P/L no realizado', value: money(totalUnrealized), valueColor: pnlColor(totalUnrealized)),
-                    MetricTile(title: 'P/L realizado', value: money(totalRealized), valueColor: pnlColor(totalRealized)),
+                    MetricTile(
+                      title: 'Costo base',
+                      value: money(totalCostBase),
+                    ),
+                    MetricTile(
+                      title: 'Valor actual',
+                      value: money(totalCurrentValue),
+                    ),
+                    MetricTile(
+                      title: 'P/L no realizado',
+                      value: money(totalUnrealized),
+                      valueColor: pnlColor(totalUnrealized),
+                    ),
+                    MetricTile(
+                      title: 'P/L realizado',
+                      value: money(totalRealized),
+                      valueColor: pnlColor(totalRealized),
+                    ),
                   ],
                 ),
                 const Divider(height: 24),
-                Text('Monedas activas: ${activeStats.length} · Comisión de salida: ${pct(sellFeePercent)}'),
+                Text(
+                  'Monedas activas: ${activeStats.length} · Comisión de salida: ${pct(sellFeePercent)}',
+                ),
               ],
             ),
           ),
         ),
         const SizedBox(height: 20),
-        const Text('Posiciones abiertas', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        const Text(
+          'Posiciones abiertas',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 12),
         if (activeStats.isEmpty)
           const EmptyState(
             icon: Icons.account_balance_wallet_outlined,
             title: 'Sin posiciones abiertas',
-            subtitle: 'Agrega una compra o una transferencia recibida para ver tu cartera aquí.',
+            subtitle:
+                'Agrega una compra o una transferencia recibida para ver tu cartera aquí.',
           )
         else
-          ...activeStats.map((s) => CoinSummaryCard(stats: s, sellFeePercent: sellFeePercent)),
+          ...activeStats.map(
+            (s) => CoinSummaryCard(stats: s, sellFeePercent: sellFeePercent),
+          ),
       ],
     );
   }
@@ -1015,7 +1192,11 @@ class CoinSummaryCard extends StatelessWidget {
   final CoinStats stats;
   final double sellFeePercent;
 
-  const CoinSummaryCard({super.key, required this.stats, required this.sellFeePercent});
+  const CoinSummaryCard({
+    super.key,
+    required this.stats,
+    required this.sellFeePercent,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1028,9 +1209,18 @@ class CoinSummaryCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(s.coin, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(
+                  s.coin,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const Spacer(),
-                StatusPill(label: statusLabel(s, sellFeePercent), color: statusColor(s, sellFeePercent)),
+                StatusPill(
+                  label: statusLabel(s, sellFeePercent),
+                  color: statusColor(s, sellFeePercent),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -1039,13 +1229,32 @@ class CoinSummaryCard extends StatelessWidget {
             InfoLine('Precio actual', money(s.currentPrice)),
             InfoLine('Valor actual', money(s.currentValue), bold: true),
             const Divider(height: 20),
-            InfoLine('BE neto', money(s.netBreakEvenPrice(sellFeePercent)), bold: true),
-            InfoLine('Objetivo +5%', money(s.targetNetExitPrice(sellFeePercent, 5))),
-            InfoLine('Objetivo +10%', money(s.targetNetExitPrice(sellFeePercent, 10))),
+            InfoLine(
+              'BE neto',
+              money(s.netBreakEvenPrice(sellFeePercent)),
+              bold: true,
+            ),
+            InfoLine(
+              'Objetivo +5%',
+              money(s.targetNetExitPrice(sellFeePercent, 5)),
+            ),
+            InfoLine(
+              'Objetivo +10%',
+              money(s.targetNetExitPrice(sellFeePercent, 10)),
+            ),
             InfoLine('Distancia BE', distanceLabel(s, sellFeePercent)),
             const Divider(height: 20),
-            InfoLine('P/L no realizado', money(s.unrealizedPL), bold: true, valueColor: pnlColor(s.unrealizedPL)),
-            InfoLine('P/L realizado', money(s.realizedPL), valueColor: pnlColor(s.realizedPL)),
+            InfoLine(
+              'P/L no realizado',
+              money(s.unrealizedPL),
+              bold: true,
+              valueColor: pnlColor(s.unrealizedPL),
+            ),
+            InfoLine(
+              'P/L realizado',
+              money(s.realizedPL),
+              valueColor: pnlColor(s.realizedPL),
+            ),
           ],
         ),
       ),
@@ -1079,10 +1288,10 @@ class _MovementsTabState extends State<MovementsTab> {
   Widget build(BuildContext context) {
     final filtered = widget.movements.where((m) {
       final coinMatch = _selectedCoin == 'TODAS' || m.coin == _selectedCoin;
-      final typeMatch = _selectedType == 'TODOS' || m.type.name == _selectedType;
+      final typeMatch =
+          _selectedType == 'TODOS' || m.type.name == _selectedType;
       return coinMatch && typeMatch;
-    }).toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
+    }).toList()..sort((a, b) => b.date.compareTo(a.date));
 
     return Column(
       children: [
@@ -1093,10 +1302,19 @@ class _MovementsTabState extends State<MovementsTab> {
               Expanded(
                 child: DropdownButtonFormField<String>(
                   initialValue: _selectedCoin,
-                  decoration: const InputDecoration(labelText: 'Moneda', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: 'Moneda',
+                    border: OutlineInputBorder(),
+                  ),
                   items: [
-                    const DropdownMenuItem(value: 'TODAS', child: Text('Todas')),
-                    ...widget.coins.map((coin) => DropdownMenuItem(value: coin, child: Text(coin))),
+                    const DropdownMenuItem(
+                      value: 'TODAS',
+                      child: Text('Todas'),
+                    ),
+                    ...widget.coins.map(
+                      (coin) =>
+                          DropdownMenuItem(value: coin, child: Text(coin)),
+                    ),
                   ],
                   onChanged: (value) {
                     if (value != null) setState(() => _selectedCoin = value);
@@ -1107,11 +1325,20 @@ class _MovementsTabState extends State<MovementsTab> {
               Expanded(
                 child: DropdownButtonFormField<String>(
                   initialValue: _selectedType,
-                  decoration: const InputDecoration(labelText: 'Tipo', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: 'Tipo',
+                    border: OutlineInputBorder(),
+                  ),
                   items: [
-                    const DropdownMenuItem(value: 'TODOS', child: Text('Todos')),
+                    const DropdownMenuItem(
+                      value: 'TODOS',
+                      child: Text('Todos'),
+                    ),
                     ...MovementType.values.map(
-                      (type) => DropdownMenuItem(value: type.name, child: Text(type.shortLabel)),
+                      (type) => DropdownMenuItem(
+                        value: type.name,
+                        child: Text(type.shortLabel),
+                      ),
                     ),
                   ],
                   onChanged: (value) {
@@ -1148,7 +1375,13 @@ class _MovementsTabState extends State<MovementsTab> {
                                 children: [
                                   MovementChip(type: m.type),
                                   const SizedBox(width: 8),
-                                  Text(m.coin, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                  Text(
+                                    m.coin,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                   const Spacer(),
                                   Text(shortDate(m.date)),
                                 ],
@@ -1177,17 +1410,23 @@ class _MovementsTabState extends State<MovementsTab> {
                                       final confirm = await showDialog<bool>(
                                         context: context,
                                         builder: (dialogContext) => AlertDialog(
-                                          title: const Text('Borrar movimiento'),
+                                          title: const Text(
+                                            'Borrar movimiento',
+                                          ),
                                           content: Text(
                                             '¿Seguro que quieres borrar ${m.type.label.toLowerCase()} de ${m.coin} por ${fmt(m.quantity)}?',
                                           ),
                                           actions: [
                                             TextButton(
-                                              onPressed: () => Navigator.of(dialogContext).pop(false),
+                                              onPressed: () => Navigator.of(
+                                                dialogContext,
+                                              ).pop(false),
                                               child: const Text('Cancelar'),
                                             ),
                                             FilledButton(
-                                              onPressed: () => Navigator.of(dialogContext).pop(true),
+                                              onPressed: () => Navigator.of(
+                                                dialogContext,
+                                              ).pop(true),
                                               child: const Text('Borrar'),
                                             ),
                                           ],
@@ -1239,9 +1478,18 @@ class CoinsTab extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(coin, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    Text(
+                      coin,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const Spacer(),
-                    StatusPill(label: statusLabel(s, sellFeePercent), color: statusColor(s, sellFeePercent)),
+                    StatusPill(
+                      label: statusLabel(s, sellFeePercent),
+                      color: statusColor(s, sellFeePercent),
+                    ),
                     IconButton(
                       onPressed: () => onEditPrice(coin),
                       icon: const Icon(Icons.edit_outlined),
@@ -1250,27 +1498,65 @@ class CoinsTab extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 8),
-                const Text('Posición', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Posición',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 6),
                 InfoLine('Cantidad', fmt(s.quantity)),
                 InfoLine('Costo base', money(s.costBase)),
                 InfoLine('Promedio actual', money(s.avgPrice)),
                 InfoLine('Precio actual', money(s.currentPrice)),
                 const Divider(height: 20),
-                const Text('Estrategia', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Estrategia',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 6),
                 InfoLine('BE bruto', money(s.breakEvenPrice)),
-                InfoLine('BE neto', money(s.netBreakEvenPrice(sellFeePercent)), bold: true),
-                InfoLine('Objetivo +5%', money(s.targetNetExitPrice(sellFeePercent, 5))),
-                InfoLine('Objetivo +10%', money(s.targetNetExitPrice(sellFeePercent, 10))),
-                InfoLine('Subida a +5%', s.quantity <= 0 ? '—' : pct(s.upsideToTargetPercent(sellFeePercent, 5))),
-                InfoLine('Subida a +10%', s.quantity <= 0 ? '—' : pct(s.upsideToTargetPercent(sellFeePercent, 10))),
+                InfoLine(
+                  'BE neto',
+                  money(s.netBreakEvenPrice(sellFeePercent)),
+                  bold: true,
+                ),
+                InfoLine(
+                  'Objetivo +5%',
+                  money(s.targetNetExitPrice(sellFeePercent, 5)),
+                ),
+                InfoLine(
+                  'Objetivo +10%',
+                  money(s.targetNetExitPrice(sellFeePercent, 10)),
+                ),
+                InfoLine(
+                  'Subida a +5%',
+                  s.quantity <= 0
+                      ? '—'
+                      : pct(s.upsideToTargetPercent(sellFeePercent, 5)),
+                ),
+                InfoLine(
+                  'Subida a +10%',
+                  s.quantity <= 0
+                      ? '—'
+                      : pct(s.upsideToTargetPercent(sellFeePercent, 10)),
+                ),
                 const Divider(height: 20),
-                const Text('Resultado', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Resultado',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 6),
                 InfoLine('Valor actual', money(s.currentValue), bold: true),
-                InfoLine('P/L no realizado', money(s.unrealizedPL), bold: true, valueColor: pnlColor(s.unrealizedPL)),
-                InfoLine('P/L realizado', money(s.realizedPL), valueColor: pnlColor(s.realizedPL)),
+                InfoLine(
+                  'P/L no realizado',
+                  money(s.unrealizedPL),
+                  bold: true,
+                  valueColor: pnlColor(s.unrealizedPL),
+                ),
+                InfoLine(
+                  'P/L realizado',
+                  money(s.realizedPL),
+                  valueColor: pnlColor(s.realizedPL),
+                ),
                 InfoLine('Distancia BE', distanceLabel(s, sellFeePercent)),
               ],
             ),
@@ -1313,16 +1599,27 @@ class SettingsTab extends StatelessWidget {
         SettingsCard(
           title: 'Configuración',
           subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
-          children: [FilledButton.tonal(onPressed: onEditSellFee, child: const Text('Editar comisión de salida'))],
+          children: [
+            FilledButton.tonal(
+              onPressed: onEditSellFee,
+              child: const Text('Editar comisión de salida'),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         SettingsCard(
           title: 'Respaldo JSON',
           subtitle: 'Formato interno compatible con CriptoControlMx.',
           children: [
-            FilledButton.tonal(onPressed: onExportBackup, child: const Text('Exportar respaldo JSON')),
+            FilledButton.tonal(
+              onPressed: onExportBackup,
+              child: const Text('Exportar respaldo JSON'),
+            ),
             const SizedBox(height: 10),
-            FilledButton.tonal(onPressed: onImportBackup, child: const Text('Importar respaldo JSON')),
+            FilledButton.tonal(
+              onPressed: onImportBackup,
+              child: const Text('Importar respaldo JSON'),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -1358,8 +1655,14 @@ class SettingsTab extends StatelessWidget {
         const SizedBox(height: 12),
         SettingsCard(
           title: 'Peligro',
-          subtitle: 'Esto borra movimientos, precios actuales y comisión de salida guardados en el dispositivo.',
-          children: [FilledButton.tonal(onPressed: onClearAll, child: const Text('Borrar todo'))],
+          subtitle:
+              'Esto borra movimientos, precios actuales y comisión de salida guardados en el dispositivo.',
+          children: [
+            FilledButton.tonal(
+              onPressed: onClearAll,
+              child: const Text('Borrar todo'),
+            ),
+          ],
         ),
       ],
     );
@@ -1371,7 +1674,12 @@ class SettingsCard extends StatelessWidget {
   final String subtitle;
   final List<Widget> children;
 
-  const SettingsCard({super.key, required this.title, required this.subtitle, required this.children});
+  const SettingsCard({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.children,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1381,7 +1689,10 @@ class SettingsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Text(subtitle),
             const SizedBox(height: 16),
@@ -1469,24 +1780,24 @@ class Movement {
   });
 
   Map<String, dynamic> toJson() => {
-        'type': type.name,
-        'coin': coin,
-        'date': date.toIso8601String(),
-        'quantity': quantity,
-        'unitPrice': unitPrice,
-        'fee': fee,
-        'note': note,
-      };
+    'type': type.name,
+    'coin': coin,
+    'date': date.toIso8601String(),
+    'quantity': quantity,
+    'unitPrice': unitPrice,
+    'fee': fee,
+    'note': note,
+  };
 
   factory Movement.fromJson(Map<String, dynamic> json) => Movement(
-        type: MovementType.values.firstWhere((e) => e.name == json['type']),
-        coin: json['coin'] as String,
-        date: DateTime.parse(json['date'] as String),
-        quantity: (json['quantity'] as num).toDouble(),
-        unitPrice: (json['unitPrice'] as num).toDouble(),
-        fee: (json['fee'] as num).toDouble(),
-        note: json['note']?.toString() ?? '',
-      );
+    type: MovementType.values.firstWhere((e) => e.name == json['type']),
+    coin: json['coin'] as String,
+    date: DateTime.parse(json['date'] as String),
+    quantity: (json['quantity'] as num).toDouble(),
+    unitPrice: (json['unitPrice'] as num).toDouble(),
+    fee: (json['fee'] as num).toDouble(),
+    note: json['note']?.toString() ?? '',
+  );
 }
 
 class CoinStats {
@@ -1524,7 +1835,10 @@ class CoinStats {
     return targetValue / (quantity * multiplier);
   }
 
-  double upsideToTargetPercent(double sellFeePercent, double targetProfitPercent) {
+  double upsideToTargetPercent(
+    double sellFeePercent,
+    double targetProfitPercent,
+  ) {
     if (quantity <= 0 || currentPrice <= 0) return 0;
     final target = targetNetExitPrice(sellFeePercent, targetProfitPercent);
     if (target <= 0) return 0;
@@ -1549,7 +1863,12 @@ class MetricTile extends StatelessWidget {
   final String value;
   final Color? valueColor;
 
-  const MetricTile({super.key, required this.title, required this.value, this.valueColor});
+  const MetricTile({
+    super.key,
+    required this.title,
+    required this.value,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1567,7 +1886,11 @@ class MetricTile extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: valueColor),
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
           ),
         ],
       ),
@@ -1581,7 +1904,13 @@ class InfoLine extends StatelessWidget {
   final bool bold;
   final Color? valueColor;
 
-  const InfoLine(this.label, this.value, {super.key, this.bold = false, this.valueColor});
+  const InfoLine(
+    this.label,
+    this.value, {
+    super.key,
+    this.bold = false,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1590,7 +1919,10 @@ class InfoLine extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(flex: 6, child: Text(label, style: const TextStyle(color: Colors.black87))),
+          Expanded(
+            flex: 6,
+            child: Text(label, style: const TextStyle(color: Colors.black87)),
+          ),
           Expanded(
             flex: 7,
             child: Text(
@@ -1624,7 +1956,11 @@ class StatusPill extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12),
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
       ),
     );
   }
@@ -1648,7 +1984,10 @@ class MovementChip extends StatelessWidget {
         children: [
           Icon(type.icon, size: 16, color: type.color),
           const SizedBox(width: 5),
-          Text(type.shortLabel, style: TextStyle(color: type.color, fontWeight: FontWeight.w700)),
+          Text(
+            type.shortLabel,
+            style: TextStyle(color: type.color, fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );
@@ -1660,7 +1999,12 @@ class EmptyState extends StatelessWidget {
   final String title;
   final String subtitle;
 
-  const EmptyState({super.key, required this.icon, required this.title, required this.subtitle});
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1672,9 +2016,16 @@ class EmptyState extends StatelessWidget {
           children: [
             Icon(icon, size: 46, color: Colors.black45),
             const SizedBox(height: 12),
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 6),
-            Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.black54)),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.black54),
+            ),
           ],
         ),
       ),
@@ -1691,12 +2042,15 @@ String fmtCompact(double value) {
 
 String pct(double value) => '${value.toStringAsFixed(2)}%';
 String fixed(double value, int decimals) => value.toStringAsFixed(decimals);
-String shortDate(DateTime date) => '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-String isoDate(DateTime date) => '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+String shortDate(DateTime date) =>
+    '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+String isoDate(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
 String csvEscape(Object? value) {
   final text = value?.toString() ?? '';
-  final needsEscape = text.contains(',') || text.contains('"') || text.contains('\n');
+  final needsEscape =
+      text.contains(',') || text.contains('"') || text.contains('\n');
   final escaped = text.replaceAll('"', '""');
   return needsEscape ? '"$escaped"' : escaped;
 }

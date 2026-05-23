@@ -1,31 +1,36 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-Future<void> main() async {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp() as Widget);
+import 'package:myapp/main_v2_step3.dart';
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+void main() {
+  test('movement parser keeps stored JSON values compatible', () {
+    final Movement movement = Movement.fromJson(<String, dynamic>{
+      'type': 'transfer_out',
+      'coin': 'link',
+      'date': '2026-05-22T12:00:00.000',
+      'quantity': '2.5',
+      'unit_price': '300',
+      'commission': '4.5',
+      'note': 'cold wallet',
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(movement.type, MovementType.transferOut);
+    expect(movement.coin, 'LINK');
+    expect(movement.quantity, 2.5);
+    expect(movement.unitPrice, 300);
+    expect(movement.fee, 4.5);
+    expect(movement.note, 'cold wallet');
   });
-}
 
-class MyApp {
-  const MyApp();
+  test('coin stats calculate net break-even with exit fee', () {
+    final CoinStats stats = CoinStats(
+      coin: 'BTC',
+      quantity: 2,
+      costBase: 1000,
+      currentPrice: 600,
+    );
+
+    expect(stats.avgPrice, 500);
+    expect(stats.netBreakEvenPrice(1), closeTo(505.0505, 0.0001));
+    expect(stats.isAtOrAboveNetBreakEven(1), isTrue);
+  });
 }

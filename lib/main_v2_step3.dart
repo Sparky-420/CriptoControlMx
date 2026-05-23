@@ -8,6 +8,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'services/price_service.dart';
+
 void main() {
   runApp(const CriptoControlApp());
 }
@@ -23,13 +25,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   static const List<String> _coins = ['BTC', 'ETH', 'LINK', 'LTC', 'UNI'];
 
   static const String _movementsKey = 'movements_json';
-  static const String _pricesKey = 'prices_json';
+  static const String _pricesKey = PriceService.pricesKey;
   static const String _sellFeePercentKey = 'sell_fee_percent';
   static const String _snapshotsKey = 'portfolio_snapshots_v23_json';
   static const String _darkModeKey = 'dark_mode_v24';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
+  final PriceService _priceService = PriceService();
 
   final Map<String, double> _currentPrices = <String, double>{
     'BTC': 0.0,
@@ -69,18 +72,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       } catch (_) {}
     }
 
-    final String? pricesRaw = prefs.getString(_pricesKey);
-    if (pricesRaw != null && pricesRaw.trim().isNotEmpty) {
-      try {
-        final Map<String, dynamic> decoded = Map<String, dynamic>.from(
-          jsonDecode(pricesRaw) as Map,
-        );
-        for (final String coin in _coins) {
-          final dynamic value = decoded[coin];
-          if (value is num) _currentPrices[coin] = value.toDouble();
-        }
-      } catch (_) {}
-    }
+    final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
+    _applyPrices(priceCache.prices);
 
     final String? snapshotsRaw = prefs.getString(_snapshotsKey);
     if (snapshotsRaw != null && snapshotsRaw.trim().isNotEmpty) {
@@ -108,6 +101,21 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     _darkMode = prefs.getBool(_darkModeKey) ?? false;
 
     if (mounted) setState(() {});
+
+    await _refreshPricesIfNeeded(prefs);
+  }
+
+  void _applyPrices(Map<String, double> prices) {
+    for (final String coin in _coins) {
+      _currentPrices[coin] = prices[coin] ?? 0.0;
+    }
+  }
+
+  Future<void> _refreshPricesIfNeeded(SharedPreferences prefs) async {
+    final PriceCache priceCache = await _priceService.refreshIfStale(prefs);
+    if (!mounted) return;
+
+    setState(() => _applyPrices(priceCache.prices));
   }
 
   Future<void> _saveData() async {
@@ -379,12 +387,16 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               final double? value = double.tryParse(controller.text.trim());
               if (value == null || value < 0) return;
 
               setState(() => _currentPrices[coin] = value);
-              _saveData();
+              await _priceService.saveManualPrices(
+                await SharedPreferences.getInstance(),
+                _currentPrices,
+              );
+              if (!dialogContext.mounted) return;
               Navigator.of(dialogContext).pop();
             },
             child: const Text('Guardar'),
@@ -2457,20 +2469,9 @@ class Movement {
       type: movementTypeFromAny(json['type']),
       coin: (json['coin'] ?? json['crypto'] ?? 'BTC').toString().toUpperCase(),
       date: DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now(),
-      quantity:
-          (json['quantity'] as num?)?.toDouble() ??
-          double.tryParse(json['quantity']?.toString() ?? '') ??
-          0.0,
-      unitPrice:
-          (json['unitPrice'] as num?)?.toDouble() ??
-          (json['unit_price'] as num?)?.toDouble() ??
-          double.tryParse(json['unitPrice']?.toString() ?? '') ??
-          0.0,
-      fee:
-          (json['fee'] as num?)?.toDouble() ??
-          (json['commission'] as num?)?.toDouble() ??
-          double.tryParse(json['fee']?.toString() ?? '') ??
-          0.0,
+      quantity: numberFromJson(json['quantity']),
+      unitPrice: numberFromJson(json['unitPrice'] ?? json['unit_price']),
+      fee: numberFromJson(json['fee'] ?? json['commission']),
       note: json['note']?.toString() ?? '',
     );
   }
@@ -2683,6 +2684,11 @@ class PortfolioSnapshot {
     'movementCount': movementCount,
     'coins': coins.map((CoinSnapshot c) => c.toJson()).toList(),
   };
+}
+
+double numberFromJson(dynamic value) {
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '') ?? 0.0;
 }
 
 String money(double value) => '\$${value.toStringAsFixed(2)} MXN';
