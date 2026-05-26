@@ -2059,36 +2059,110 @@ class SimulationTab extends StatefulWidget {
 }
 
 class _SimulationTabState extends State<SimulationTab> {
-  String _coin = 'LINK';
-  ScenarioType _type = ScenarioType.buy;
+  SimulationMode _mode = SimulationMode.buy;
 
-  final TextEditingController _amountController = TextEditingController(
+  String _buyCoin = 'UNI';
+  final TextEditingController _buyGrossAmountController = TextEditingController(
+    text: '3000',
+  );
+  final TextEditingController _buyPriceController = TextEditingController();
+  final TextEditingController _buyFeeController = TextEditingController(
+    text: '1.5',
+  );
+  final TextEditingController _buySellFeeController = TextEditingController(
+    text: '1.5',
+  );
+
+  String _sellCoin = 'LINK';
+  SimulationSellMethod _sellMethod = SimulationSellMethod.percent;
+  final TextEditingController _sellPriceController = TextEditingController();
+  final TextEditingController _sellFeeController = TextEditingController(
+    text: '1.5',
+  );
+  final TextEditingController _sellPercentController = TextEditingController(
+    text: '50',
+  );
+  final TextEditingController _sellQuantityController = TextEditingController();
+  final TextEditingController _sellGrossController = TextEditingController(
     text: '1000',
   );
-  final TextEditingController _priceController = TextEditingController();
-  final TextEditingController _feeController = TextEditingController(
+
+  String _rotationOriginCoin = 'LINK';
+  String _rotationTargetCoin = 'BTC';
+  SimulationRotationMethod _rotationMethod = SimulationRotationMethod.percent;
+  final TextEditingController _rotationOriginPriceController =
+      TextEditingController();
+  final TextEditingController _rotationTargetPriceController =
+      TextEditingController();
+  final TextEditingController _rotationSellFeeController =
+      TextEditingController(text: '1.5');
+  final TextEditingController _rotationBuyFeeController = TextEditingController(
     text: '1.5',
+  );
+  final TextEditingController _rotationPercentController =
+      TextEditingController(text: '100');
+  final TextEditingController _rotationQuantityController =
+      TextEditingController();
+  final TextEditingController _rotationGrossController = TextEditingController(
+    text: '1000',
   );
 
   @override
   void dispose() {
-    _amountController.dispose();
-    _priceController.dispose();
-    _feeController.dispose();
+    _buyGrossAmountController.dispose();
+    _buyPriceController.dispose();
+    _buyFeeController.dispose();
+    _buySellFeeController.dispose();
+    _sellPriceController.dispose();
+    _sellFeeController.dispose();
+    _sellPercentController.dispose();
+    _sellQuantityController.dispose();
+    _sellGrossController.dispose();
+    _rotationOriginPriceController.dispose();
+    _rotationTargetPriceController.dispose();
+    _rotationSellFeeController.dispose();
+    _rotationBuyFeeController.dispose();
+    _rotationPercentController.dispose();
+    _rotationQuantityController.dispose();
+    _rotationGrossController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.coins.contains(_coin)) _coin = widget.coins.first;
-
-    final CoinStats stats = widget.stats[_coin] ?? CoinStats(coin: _coin);
-
-    if (_priceController.text.isEmpty && stats.currentPrice > 0) {
-      _priceController.text = compact(stats.currentPrice);
+    if (widget.coins.isEmpty) {
+      return const Center(
+        child: EmptyState(
+          icon: Icons.tune_outlined,
+          title: 'Sin monedas configuradas',
+          subtitle: 'Agrega monedas para simular escenarios tácticos.',
+        ),
+      );
     }
 
-    final ScenarioResult result = _calculate(stats);
+    _ensureSelectedCoins();
+    final CoinStats buyStats = _statsFor(_buyCoin);
+    final CoinStats sellStats = _statsFor(_sellCoin);
+    final CoinStats rotationOriginStats = _statsFor(_rotationOriginCoin);
+    final CoinStats rotationTargetStats = _statsFor(_rotationTargetCoin);
+
+    _seedPriceIfEmpty(_buyPriceController, buyStats.currentPrice);
+    _seedPriceIfEmpty(_sellPriceController, sellStats.currentPrice);
+    _seedPriceIfEmpty(
+      _rotationOriginPriceController,
+      rotationOriginStats.currentPrice,
+    );
+    _seedPriceIfEmpty(
+      _rotationTargetPriceController,
+      rotationTargetStats.currentPrice,
+    );
+
+    final BuySimulationResult buyResult = _calculateBuy(buyStats);
+    final SellSimulationResult sellResult = _calculateSell(sellStats);
+    final RotationSimulationResult rotationResult = _calculateRotation(
+      rotationOriginStats,
+      rotationTargetStats,
+    );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -2100,66 +2174,291 @@ class _SimulationTabState extends State<SimulationTab> {
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
-        const Text('Prueba compras o ventas sin alterar tu cartera real.'),
+        const Text(
+          'Prueba compra, venta o rotación sin alterar tu cartera real.',
+        ),
         const SizedBox(height: 16),
         CardPanel(
-          title: 'Escenario',
+          title: 'Modo táctico',
           child: Column(
             children: <Widget>[
-              DropdownButtonFormField<String>(
-                initialValue: _coin,
-                decoration: const InputDecoration(
-                  labelText: 'Moneda',
-                  border: OutlineInputBorder(),
-                ),
-                items: widget.coins
-                    .map(
-                      (String coin) => DropdownMenuItem<String>(
-                        value: coin,
-                        child: Text(coin),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (String? value) {
-                  setState(() {
-                    _coin = value ?? _coin;
-                    final double price =
-                        widget.stats[_coin]?.currentPrice ?? 0.0;
-                    _priceController.text = price > 0 ? compact(price) : '';
-                  });
-                },
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<ScenarioType>(
-                segments: const <ButtonSegment<ScenarioType>>[
-                  ButtonSegment<ScenarioType>(
-                    value: ScenarioType.buy,
-                    label: Text('Comprar'),
+              SegmentedButton<SimulationMode>(
+                segments: const <ButtonSegment<SimulationMode>>[
+                  ButtonSegment<SimulationMode>(
+                    value: SimulationMode.buy,
+                    label: Text('Compra'),
                     icon: Icon(Icons.add_circle_outline),
                   ),
-                  ButtonSegment<ScenarioType>(
-                    value: ScenarioType.sell,
-                    label: Text('Vender'),
+                  ButtonSegment<SimulationMode>(
+                    value: SimulationMode.sell,
+                    label: Text('Venta'),
                     icon: Icon(Icons.remove_circle_outline),
                   ),
+                  ButtonSegment<SimulationMode>(
+                    value: SimulationMode.rotation,
+                    label: Text('Rotación'),
+                    icon: Icon(Icons.sync_alt),
+                  ),
                 ],
-                selected: <ScenarioType>{_type},
-                onSelectionChanged: (Set<ScenarioType> value) {
-                  setState(() => _type = value.first);
+                selected: <SimulationMode>{_mode},
+                onSelectionChanged: (Set<SimulationMode> value) {
+                  setState(() => _mode = value.first);
                 },
               ),
-              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...switch (_mode) {
+          SimulationMode.buy => _buildBuyMode(buyStats, buyResult),
+          SimulationMode.sell => _buildSellMode(sellStats, sellResult),
+          SimulationMode.rotation => _buildRotationMode(
+            rotationOriginStats,
+            rotationTargetStats,
+            rotationResult,
+          ),
+        },
+      ],
+    );
+  }
+
+  List<Widget> _buildBuyMode(CoinStats stats, BuySimulationResult result) {
+    return <Widget>[
+      CardPanel(
+        title: 'Compra / Billetazo',
+        subtitle:
+            'Ajusta entradas para simular compra sin mover fondos reales.',
+        child: Column(
+          children: <Widget>[
+            DropdownButtonFormField<String>(
+              initialValue: _buyCoin,
+              decoration: const InputDecoration(
+                labelText: 'Moneda',
+                border: OutlineInputBorder(),
+              ),
+              items: widget.coins
+                  .map(
+                    (String coin) => DropdownMenuItem<String>(
+                      value: coin,
+                      child: Text(coin),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? value) {
+                setState(() {
+                  _buyCoin = value ?? _buyCoin;
+                  _setPriceFromCoin(_buyPriceController, _buyCoin);
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _buyGrossAmountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Monto bruto MXN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                for (final double amount in _quickAmountValues)
+                  ActionChip(
+                    label: Text(moneyShort(amount)),
+                    onPressed: () {
+                      setState(
+                        () => _buyGrossAmountController.text = compact(amount),
+                      );
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _buyPriceController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Precio de compra MXN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _buyFeeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Comisión compra %',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _buySellFeeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Comisión venta %',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            InfoLine('Cantidad actual', crypto(stats.quantity)),
+            InfoLine('Costo base actual', money(stats.costBase)),
+            InfoLine('Precio actual', money(stats.currentPrice)),
+          ],
+        ),
+      ),
+      CardPanel(
+        title: 'Resultado compra',
+        subtitle: result.valid
+            ? 'Proyección de compra, no movimiento real.'
+            : result.invalidReason,
+        child: result.valid
+            ? Column(
+                children: <Widget>[
+                  InfoLine(
+                    'Cantidad estimada comprada',
+                    crypto(result.quantityBought),
+                  ),
+                  InfoLine('Comisión estimada', money(result.buyCommission)),
+                  InfoLine('Capital neto usado', money(result.netBuyCapital)),
+                  InfoLine(
+                    'Cantidad total después',
+                    crypto(result.quantityAfter),
+                    emphasized: true,
+                  ),
+                  InfoLine('Costo base después', money(result.costBaseAfter)),
+                  InfoLine('Promedio actual', money(result.avgCurrent)),
+                  InfoLine(
+                    'Promedio después',
+                    money(result.avgAfter),
+                    emphasized: true,
+                  ),
+                  InfoLine(
+                    'Diferencia de promedio',
+                    _moneyAndPercent(
+                      result.avgDifferenceMxn,
+                      result.avgDifferencePct,
+                    ),
+                  ),
+                  InfoLine(
+                    'Break even neto después',
+                    money(result.breakEvenNetAfter),
+                    emphasized: true,
+                  ),
+                  InfoLine(
+                    'Distancia al break even neto',
+                    _percentOrNa(result.distanceToBreakEvenPct),
+                    valueColor: result.distanceToBreakEvenPct == null
+                        ? null
+                        : pnlColor(-result.distanceToBreakEvenPct!),
+                  ),
+                ],
+              )
+            : const SizedBox.shrink(),
+      ),
+    ];
+  }
+
+  List<Widget> _buildSellMode(CoinStats stats, SellSimulationResult result) {
+    return <Widget>[
+      CardPanel(
+        title: 'Venta',
+        subtitle:
+            'Simula salida parcial o total sin registrar movimiento real.',
+        child: Column(
+          children: <Widget>[
+            DropdownButtonFormField<String>(
+              initialValue: _sellCoin,
+              decoration: const InputDecoration(
+                labelText: 'Moneda',
+                border: OutlineInputBorder(),
+              ),
+              items: widget.coins
+                  .map(
+                    (String coin) => DropdownMenuItem<String>(
+                      value: coin,
+                      child: Text(coin),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? value) {
+                setState(() {
+                  _sellCoin = value ?? _sellCoin;
+                  _setPriceFromCoin(_sellPriceController, _sellCoin);
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sellPriceController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Precio de venta MXN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sellFeeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Comisión venta %',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<SimulationSellMethod>(
+              segments: const <ButtonSegment<SimulationSellMethod>>[
+                ButtonSegment<SimulationSellMethod>(
+                  value: SimulationSellMethod.percent,
+                  label: Text('% posición'),
+                ),
+                ButtonSegment<SimulationSellMethod>(
+                  value: SimulationSellMethod.quantity,
+                  label: Text('Cantidad'),
+                ),
+                ButtonSegment<SimulationSellMethod>(
+                  value: SimulationSellMethod.grossAmount,
+                  label: Text('Monto MXN'),
+                ),
+              ],
+              selected: <SimulationSellMethod>{_sellMethod},
+              onSelectionChanged: (Set<SimulationSellMethod> value) {
+                setState(() => _sellMethod = value.first);
+              },
+            ),
+            const SizedBox(height: 12),
+            if (_sellMethod == SimulationSellMethod.percent) ...<Widget>[
               TextField(
-                controller: _amountController,
+                controller: _sellPercentController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: _type == ScenarioType.buy
-                      ? 'Monto a invertir MXN'
-                      : 'Venta bruta objetivo MXN',
-                  border: const OutlineInputBorder(),
+                decoration: const InputDecoration(
+                  labelText: 'Porcentaje de posición %',
+                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 10),
@@ -2167,158 +2466,983 @@ class _SimulationTabState extends State<SimulationTab> {
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
-                  for (final double value in <double>[
-                    500.0,
-                    1000.0,
-                    3000.0,
-                    5000.0,
-                    8000.0,
-                    15000.0,
-                  ])
+                  for (final double value in _quickPercentValues)
                     ActionChip(
-                      label: Text(moneyShort(value)),
+                      label: Text(pct(value)),
                       onPressed: () {
-                        setState(() => _amountController.text = compact(value));
+                        setState(
+                          () => _sellPercentController.text = compact(value),
+                        );
                       },
-                    ),
-                  if (_type == ScenarioType.sell)
-                    ActionChip(
-                      label: const Text('Todo'),
-                      onPressed: stats.currentPrice <= 0
-                          ? null
-                          : () {
-                              setState(() {
-                                _amountController.text = compact(
-                                  stats.quantity * stats.currentPrice,
-                                );
-                              });
-                            },
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _priceController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Precio unitario MXN',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _feeController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Comisión %',
-                  border: OutlineInputBorder(),
-                ),
-              ),
             ],
-          ),
+            if (_sellMethod == SimulationSellMethod.quantity)
+              TextField(
+                controller: _sellQuantityController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad cripto',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            if (_sellMethod == SimulationSellMethod.grossAmount)
+              TextField(
+                controller: _sellGrossController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Monto bruto MXN',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            const SizedBox(height: 10),
+            InfoLine('Cantidad disponible', crypto(stats.quantity)),
+            InfoLine('Costo base actual', money(stats.costBase)),
+            InfoLine('Promedio actual', money(stats.avgPrice)),
+          ],
         ),
-        CardPanel(
-          title: 'Resultado estimado',
-          subtitle: result.valid
-              ? 'Proyección, no movimiento real.'
-              : 'Completa monto y precio para simular.',
-          child: result.valid
-              ? Column(
-                  children: <Widget>[
-                    InfoLine(
-                      _type == ScenarioType.buy
-                          ? 'Cantidad estimada'
-                          : 'Cantidad a vender',
-                      crypto(result.quantityDelta),
-                    ),
-                    InfoLine('Comisión estimada', money(result.fee)),
-                    InfoLine(
-                      _type == ScenarioType.buy
-                          ? 'Cantidad después'
-                          : 'Cantidad restante',
-                      crypto(result.quantityAfter),
-                      emphasized: true,
-                    ),
-                    InfoLine('Invertido después', money(result.costBaseAfter)),
-                    InfoLine(
-                      'Promedio después',
-                      money(result.avgAfter),
-                      emphasized: true,
-                    ),
-                    if (_type == ScenarioType.sell)
-                      InfoLine(
-                        'Resultado estimado',
-                        money(result.realizedPLEstimate),
-                        valueColor: pnlColor(result.realizedPLEstimate),
-                        emphasized: true,
-                      ),
+      ),
+      CardPanel(
+        title: 'Resultado venta',
+        subtitle: result.valid
+            ? 'Proyección de venta, no movimiento real.'
+            : result.invalidReason,
+        child: result.valid
+            ? Column(
+                children: <Widget>[
+                  InfoLine(
+                    'Cantidad a vender',
+                    crypto(result.quantitySold),
+                    emphasized: true,
+                  ),
+                  InfoLine('Venta bruta', money(result.grossSale)),
+                  InfoLine('Comisión', money(result.sellCommission)),
+                  InfoLine('Neto recibido', money(result.netReceived)),
+                  InfoLine(
+                    'Costo promedio removido',
+                    money(result.removedAverageCost),
+                  ),
+                  InfoLine(
+                    'P&L realizado estimado',
+                    money(result.realizedPLEstimate),
+                    valueColor: pnlColor(result.realizedPLEstimate),
+                    emphasized: true,
+                  ),
+                  InfoLine(
+                    'Cantidad restante',
+                    crypto(result.quantityRemaining),
+                  ),
+                  InfoLine(
+                    'Costo base restante',
+                    money(result.costBaseRemaining),
+                  ),
+                  InfoLine('Promedio restante', money(result.avgRemaining)),
+                  if (result.warnings.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 10),
+                    ...result.warnings.map(_warningLine),
                   ],
-                )
-              : const SizedBox.shrink(),
-        ),
-      ],
-    );
+                ],
+              )
+            : const SizedBox.shrink(),
+      ),
+    ];
   }
 
-  ScenarioResult _calculate(CoinStats stats) {
-    final double amount = double.tryParse(_amountController.text.trim()) ?? 0.0;
-    final double price = double.tryParse(_priceController.text.trim()) ?? 0.0;
-    final double feePercent =
-        double.tryParse(_feeController.text.trim()) ?? 0.0;
+  List<Widget> _buildRotationMode(
+    CoinStats originStats,
+    CoinStats targetStats,
+    RotationSimulationResult result,
+  ) {
+    return <Widget>[
+      CardPanel(
+        title: 'Rotación',
+        subtitle: 'Modela venta de origen y compra de destino.',
+        child: Column(
+          children: <Widget>[
+            DropdownButtonFormField<String>(
+              initialValue: _rotationOriginCoin,
+              decoration: const InputDecoration(
+                labelText: 'Moneda origen',
+                border: OutlineInputBorder(),
+              ),
+              items: widget.coins
+                  .map(
+                    (String coin) => DropdownMenuItem<String>(
+                      value: coin,
+                      child: Text(coin),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? value) {
+                setState(() {
+                  _rotationOriginCoin = value ?? _rotationOriginCoin;
+                  _setPriceFromCoin(
+                    _rotationOriginPriceController,
+                    _rotationOriginCoin,
+                  );
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _rotationTargetCoin,
+              decoration: const InputDecoration(
+                labelText: 'Moneda destino',
+                border: OutlineInputBorder(),
+              ),
+              items: widget.coins
+                  .map(
+                    (String coin) => DropdownMenuItem<String>(
+                      value: coin,
+                      child: Text(coin),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? value) {
+                setState(() {
+                  _rotationTargetCoin = value ?? _rotationTargetCoin;
+                  _setPriceFromCoin(
+                    _rotationTargetPriceController,
+                    _rotationTargetCoin,
+                  );
+                });
+              },
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.tonal(
+                  onPressed: () {
+                    setState(() {
+                      _rotationOriginCoin = 'LINK';
+                      _rotationTargetCoin = 'BTC';
+                      _setPriceFromCoin(
+                        _rotationOriginPriceController,
+                        _rotationOriginCoin,
+                      );
+                      _setPriceFromCoin(
+                        _rotationTargetPriceController,
+                        _rotationTargetCoin,
+                      );
+                    });
+                  },
+                  child: const Text('LINK → BTC'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () {
+                    setState(() {
+                      _rotationOriginCoin = 'UNI';
+                      _rotationTargetCoin = 'BTC';
+                      _setPriceFromCoin(
+                        _rotationOriginPriceController,
+                        _rotationOriginCoin,
+                      );
+                      _setPriceFromCoin(
+                        _rotationTargetPriceController,
+                        _rotationTargetCoin,
+                      );
+                    });
+                  },
+                  child: const Text('UNI → BTC'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _rotationOriginPriceController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Precio origen MXN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _rotationTargetPriceController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Precio destino MXN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _rotationSellFeeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Comisión venta origen %',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _rotationBuyFeeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Comisión compra destino %',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<SimulationRotationMethod>(
+              segments: const <ButtonSegment<SimulationRotationMethod>>[
+                ButtonSegment<SimulationRotationMethod>(
+                  value: SimulationRotationMethod.percent,
+                  label: Text('% origen'),
+                ),
+                ButtonSegment<SimulationRotationMethod>(
+                  value: SimulationRotationMethod.quantity,
+                  label: Text('Cantidad'),
+                ),
+                ButtonSegment<SimulationRotationMethod>(
+                  value: SimulationRotationMethod.grossAmount,
+                  label: Text('Monto MXN'),
+                ),
+              ],
+              selected: <SimulationRotationMethod>{_rotationMethod},
+              onSelectionChanged: (Set<SimulationRotationMethod> value) {
+                setState(() => _rotationMethod = value.first);
+              },
+            ),
+            const SizedBox(height: 12),
+            if (_rotationMethod ==
+                SimulationRotationMethod.percent) ...<Widget>[
+              TextField(
+                controller: _rotationPercentController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Porcentaje origen %',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final double value in _quickPercentValues)
+                    ActionChip(
+                      label: Text(pct(value)),
+                      onPressed: () {
+                        setState(
+                          () =>
+                              _rotationPercentController.text = compact(value),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ],
+            if (_rotationMethod == SimulationRotationMethod.quantity)
+              TextField(
+                controller: _rotationQuantityController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad cripto origen',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            if (_rotationMethod == SimulationRotationMethod.grossAmount)
+              TextField(
+                controller: _rotationGrossController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Monto bruto MXN',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            const SizedBox(height: 10),
+            InfoLine('Origen disponible', crypto(originStats.quantity)),
+            InfoLine('Destino actual', crypto(targetStats.quantity)),
+          ],
+        ),
+      ),
+      CardPanel(
+        title: 'Resultado de rotación',
+        subtitle: result.valid
+            ? 'Proyección de rotación, no movimiento real.'
+            : result.invalidReason,
+        child: result.valid
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const Text(
+                    'Venta simulada de origen',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  InfoLine(
+                    'Cantidad vendida origen',
+                    crypto(result.originQuantitySold),
+                  ),
+                  InfoLine('Venta bruta origen', money(result.originGrossSale)),
+                  InfoLine(
+                    'Comisión venta origen',
+                    money(result.originSellCommission),
+                  ),
+                  InfoLine('Neto disponible', money(result.netAvailable)),
+                  InfoLine(
+                    'Costo promedio removido origen',
+                    money(result.originRemovedAverageCost),
+                  ),
+                  InfoLine(
+                    'P&L realizado estimado',
+                    money(result.originRealizedPLEstimate),
+                    valueColor: pnlColor(result.originRealizedPLEstimate),
+                    emphasized: true,
+                  ),
+                  InfoLine(
+                    'Cantidad restante origen',
+                    crypto(result.originQuantityRemaining),
+                  ),
+                  InfoLine(
+                    'Costo base restante origen',
+                    money(result.originCostBaseRemaining),
+                  ),
+                  InfoLine(
+                    'Promedio restante origen',
+                    money(result.originAvgRemaining),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Compra simulada de destino',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  InfoLine(
+                    'Comisión compra destino',
+                    money(result.targetBuyCommission),
+                  ),
+                  InfoLine(
+                    'Capital convertido destino',
+                    money(result.targetConvertedCapital),
+                  ),
+                  InfoLine(
+                    'Cantidad destino comprada',
+                    crypto(result.targetQuantityBought),
+                  ),
+                  InfoLine(
+                    'Saldo destino después',
+                    crypto(result.targetBalanceAfter),
+                  ),
+                  InfoLine(
+                    'Promedio destino antes',
+                    money(result.targetAvgBefore),
+                  ),
+                  InfoLine(
+                    'Promedio destino después',
+                    money(result.targetAvgAfter),
+                    emphasized: true,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Resultado de rotación',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  InfoLine(
+                    'Costo base destino después',
+                    money(result.targetCostBaseAfter),
+                  ),
+                  InfoLine(
+                    'Comisiones totales',
+                    money(result.totalCommissions),
+                    emphasized: true,
+                  ),
+                  if (result.warnings.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 10),
+                    ...result.warnings.map(_warningLine),
+                  ],
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (result.warnings.isNotEmpty) ...<Widget>[
+                    ...result.warnings.map(_warningLine),
+                  ],
+                ],
+              ),
+      ),
+    ];
+  }
 
-    if (amount <= 0 || price <= 0 || feePercent < 0) {
-      return ScenarioResult.invalid(stats);
-    }
+  BuySimulationResult _calculateBuy(CoinStats stats) {
+    final double grossAmount = _parseInput(_buyGrossAmountController);
+    final double buyPrice = _parseInput(_buyPriceController);
+    final double buyFeePercent = _parseInput(_buyFeeController);
+    final double sellFeePercent = _parseInput(_buySellFeeController);
 
-    if (_type == ScenarioType.buy) {
-      final double fee = amount * feePercent / 100;
-      final double net = amount - fee;
-      final double bought = net > 0 ? net / price : 0.0;
-      final double qtyAfter = stats.quantity + bought;
-      final double costAfter = stats.costBase + amount;
-      final double avgAfter = qtyAfter > 0 ? costAfter / qtyAfter : 0.0;
-
-      return ScenarioResult(
-        valid: true,
-        quantityDelta: bought,
-        quantityAfter: qtyAfter,
-        costBaseAfter: costAfter,
-        avgAfter: avgAfter,
-        fee: fee,
-        realizedPLEstimate: 0.0,
+    if (grossAmount <= 0) {
+      return BuySimulationResult.invalid(
+        'Ingresa un monto bruto MXN mayor a 0.',
       );
     }
 
-    final double wantedQty = amount / price;
-    final double sellQty = wantedQty > stats.quantity
-        ? stats.quantity
-        : wantedQty;
-    final double gross = sellQty * price;
-    final double fee = gross * feePercent / 100;
-    final double net = gross - fee;
-    final double removedCost = stats.avgPrice * sellQty;
-    final double remainingQty = stats.quantity - sellQty;
-    final double remainingCost = stats.costBase - removedCost;
-    final double remainingAvg = remainingQty > 0
-        ? remainingCost / remainingQty
-        : 0.0;
+    if (buyPrice <= 0) {
+      return BuySimulationResult.invalid(
+        'Ingresa un precio de compra MXN mayor a 0.',
+      );
+    }
 
-    return ScenarioResult(
+    if (buyFeePercent < 0 || sellFeePercent < 0 || sellFeePercent >= 100) {
+      return BuySimulationResult.invalid(
+        'Verifica comisiones válidas (0 a 99.99%).',
+      );
+    }
+
+    final double buyCommission = grossAmount * buyFeePercent / 100;
+    final double netBuyCapital = grossAmount - buyCommission;
+    final double quantityBought = netBuyCapital / buyPrice;
+    final double quantityAfter = stats.quantity + quantityBought;
+    final double costBaseAfter = stats.costBase + grossAmount;
+    final double avgCurrent = stats.quantity > 0
+        ? stats.costBase / stats.quantity
+        : 0.0;
+    final double avgAfter = quantityAfter > 0
+        ? costBaseAfter / quantityAfter
+        : 0.0;
+    final double avgDifferenceMxn = avgAfter - avgCurrent;
+    final double? avgDifferencePct = avgCurrent > 0
+        ? ((avgDifferenceMxn / avgCurrent) * 100)
+        : null;
+    final double breakEvenNetAfter = avgAfter / (1 - (sellFeePercent / 100));
+    final double? distanceToBreakEvenPct = stats.currentPrice > 0
+        ? (((breakEvenNetAfter - stats.currentPrice) / stats.currentPrice) *
+              100)
+        : null;
+
+    return BuySimulationResult(
       valid: true,
-      quantityDelta: sellQty,
-      quantityAfter: remainingQty,
-      costBaseAfter: remainingCost < 0.00000001 ? 0.0 : remainingCost,
-      avgAfter: remainingAvg,
-      fee: fee,
-      realizedPLEstimate: net - removedCost,
+      invalidReason: '',
+      quantityBought: quantityBought,
+      buyCommission: buyCommission,
+      netBuyCapital: netBuyCapital,
+      quantityAfter: quantityAfter,
+      costBaseAfter: costBaseAfter,
+      avgCurrent: avgCurrent,
+      avgAfter: avgAfter,
+      avgDifferenceMxn: avgDifferenceMxn,
+      avgDifferencePct: avgDifferencePct,
+      breakEvenNetAfter: breakEvenNetAfter,
+      distanceToBreakEvenPct: distanceToBreakEvenPct,
     );
   }
+
+  SellSimulationResult _calculateSell(CoinStats stats) {
+    final double sellPrice = _parseInput(_sellPriceController);
+    final double sellFeePercent = _parseInput(_sellFeeController);
+
+    if (sellPrice <= 0) {
+      return SellSimulationResult.invalid(
+        'Ingresa un precio de venta MXN mayor a 0.',
+      );
+    }
+
+    if (sellFeePercent < 0 || sellFeePercent >= 100) {
+      return SellSimulationResult.invalid(
+        'Ingresa una comisión de venta válida (0 a 99.99%).',
+      );
+    }
+
+    double requestedQuantity = 0.0;
+    if (_sellMethod == SimulationSellMethod.percent) {
+      final double percent = _parseInput(_sellPercentController);
+      if (percent <= 0) {
+        return SellSimulationResult.invalid(
+          'Ingresa un porcentaje de posición mayor a 0.',
+        );
+      }
+      requestedQuantity = stats.quantity * (percent / 100);
+    } else if (_sellMethod == SimulationSellMethod.quantity) {
+      requestedQuantity = _parseInput(_sellQuantityController);
+      if (requestedQuantity <= 0) {
+        return SellSimulationResult.invalid(
+          'Ingresa una cantidad cripto mayor a 0.',
+        );
+      }
+    } else {
+      final double grossAmount = _parseInput(_sellGrossController);
+      if (grossAmount <= 0) {
+        return SellSimulationResult.invalid(
+          'Ingresa un monto bruto MXN mayor a 0.',
+        );
+      }
+      requestedQuantity = grossAmount / sellPrice;
+    }
+
+    final List<String> warnings = <String>[];
+    if (requestedQuantity > stats.quantity) {
+      warnings.add('Advertencia: intenta vender más de lo disponible.');
+    }
+
+    final double quantitySold = math.min(requestedQuantity, stats.quantity);
+    if (quantitySold <= 0) {
+      return SellSimulationResult.invalid(
+        'No hay cantidad disponible para vender.',
+      );
+    }
+
+    final double grossSale = quantitySold * sellPrice;
+    final double sellCommission = grossSale * sellFeePercent / 100;
+    final double netReceived = grossSale - sellCommission;
+    final double avgCurrent = stats.quantity > 0
+        ? stats.costBase / stats.quantity
+        : 0.0;
+    final double removedAverageCost = avgCurrent * quantitySold;
+    final double realizedPLEstimate = netReceived - removedAverageCost;
+    double quantityRemaining = stats.quantity - quantitySold;
+    double costBaseRemaining = stats.costBase - removedAverageCost;
+
+    if (quantityRemaining.abs() < 0.0000000001) {
+      quantityRemaining = 0.0;
+      costBaseRemaining = 0.0;
+    }
+    if (costBaseRemaining.abs() < 0.00000001) costBaseRemaining = 0.0;
+
+    final double avgRemaining = quantityRemaining > 0
+        ? costBaseRemaining / quantityRemaining
+        : 0.0;
+
+    if (realizedPLEstimate < 0) {
+      warnings.add('Advertencia: esta venta cristaliza pérdida estimada.');
+    }
+
+    return SellSimulationResult(
+      valid: true,
+      invalidReason: '',
+      warnings: warnings,
+      quantitySold: quantitySold,
+      grossSale: grossSale,
+      sellCommission: sellCommission,
+      netReceived: netReceived,
+      removedAverageCost: removedAverageCost,
+      realizedPLEstimate: realizedPLEstimate,
+      quantityRemaining: quantityRemaining,
+      costBaseRemaining: costBaseRemaining,
+      avgRemaining: avgRemaining,
+    );
+  }
+
+  RotationSimulationResult _calculateRotation(
+    CoinStats originStats,
+    CoinStats targetStats,
+  ) {
+    final List<String> warnings = <String>[];
+    final double originPrice = _parseInput(_rotationOriginPriceController);
+    final double targetPrice = _parseInput(_rotationTargetPriceController);
+    final double sellFeePercent = _parseInput(_rotationSellFeeController);
+    final double buyFeePercent = _parseInput(_rotationBuyFeeController);
+
+    if (_rotationOriginCoin == _rotationTargetCoin) {
+      warnings.add('Advertencia: origen y destino son iguales.');
+    }
+    if (originPrice <= 0 || targetPrice <= 0) {
+      warnings.add('Advertencia: falta precio origen/destino.');
+    }
+    if (sellFeePercent < 0 || sellFeePercent >= 100) {
+      return RotationSimulationResult.invalid(
+        'Ingresa una comisión de venta origen válida (0 a 99.99%).',
+        warnings,
+      );
+    }
+    if (buyFeePercent < 0 || buyFeePercent >= 100) {
+      return RotationSimulationResult.invalid(
+        'Ingresa una comisión de compra destino válida (0 a 99.99%).',
+        warnings,
+      );
+    }
+
+    if (_rotationOriginCoin == _rotationTargetCoin) {
+      return RotationSimulationResult.invalid(
+        'Elige monedas distintas para rotación.',
+        warnings,
+      );
+    }
+    if (originPrice <= 0 || targetPrice <= 0) {
+      return RotationSimulationResult.invalid(
+        'Se requiere precio origen y destino mayor a 0.',
+        warnings,
+      );
+    }
+
+    double requestedOriginQuantity = 0.0;
+    if (_rotationMethod == SimulationRotationMethod.percent) {
+      final double percent = _parseInput(_rotationPercentController);
+      if (percent <= 0) {
+        return RotationSimulationResult.invalid(
+          'Ingresa un porcentaje de origen mayor a 0.',
+          warnings,
+        );
+      }
+      requestedOriginQuantity = originStats.quantity * (percent / 100);
+    } else if (_rotationMethod == SimulationRotationMethod.quantity) {
+      requestedOriginQuantity = _parseInput(_rotationQuantityController);
+      if (requestedOriginQuantity <= 0) {
+        return RotationSimulationResult.invalid(
+          'Ingresa una cantidad cripto origen mayor a 0.',
+          warnings,
+        );
+      }
+    } else {
+      final double grossAmount = _parseInput(_rotationGrossController);
+      if (grossAmount <= 0) {
+        return RotationSimulationResult.invalid(
+          'Ingresa un monto bruto MXN mayor a 0.',
+          warnings,
+        );
+      }
+      requestedOriginQuantity = grossAmount / originPrice;
+    }
+
+    if (requestedOriginQuantity > originStats.quantity) {
+      warnings.add('Advertencia: intenta rotar más de lo disponible.');
+    }
+
+    final double originQuantitySold = math.min(
+      requestedOriginQuantity,
+      originStats.quantity,
+    );
+    if (originQuantitySold <= 0) {
+      return RotationSimulationResult.invalid(
+        'No hay cantidad disponible en moneda origen para rotar.',
+        warnings,
+      );
+    }
+
+    final double originGrossSale = originQuantitySold * originPrice;
+    final double originSellCommission = originGrossSale * sellFeePercent / 100;
+    final double netAvailable = originGrossSale - originSellCommission;
+    final double originAvgCurrent = originStats.quantity > 0
+        ? originStats.costBase / originStats.quantity
+        : 0.0;
+    final double originRemovedAverageCost =
+        originAvgCurrent * originQuantitySold;
+    final double originRealizedPLEstimate =
+        netAvailable - originRemovedAverageCost;
+    double originQuantityRemaining = originStats.quantity - originQuantitySold;
+    double originCostBaseRemaining =
+        originStats.costBase - originRemovedAverageCost;
+
+    if (originQuantityRemaining.abs() < 0.0000000001) {
+      originQuantityRemaining = 0.0;
+      originCostBaseRemaining = 0.0;
+    }
+    if (originCostBaseRemaining.abs() < 0.00000001) {
+      originCostBaseRemaining = 0.0;
+    }
+
+    final double originAvgRemaining = originQuantityRemaining > 0
+        ? originCostBaseRemaining / originQuantityRemaining
+        : 0.0;
+
+    final double targetBuyCommission = netAvailable * buyFeePercent / 100;
+    final double targetConvertedCapital = netAvailable - targetBuyCommission;
+    final double targetQuantityBought = targetConvertedCapital / targetPrice;
+    final double targetBalanceAfter =
+        targetStats.quantity + targetQuantityBought;
+    final double targetCostBaseAfter = targetStats.costBase + netAvailable;
+    final double targetAvgBefore = targetStats.quantity > 0
+        ? targetStats.costBase / targetStats.quantity
+        : 0.0;
+    final double targetAvgAfter = targetBalanceAfter > 0
+        ? targetCostBaseAfter / targetBalanceAfter
+        : 0.0;
+    final double totalCommissions = originSellCommission + targetBuyCommission;
+
+    if (originRealizedPLEstimate < 0) {
+      warnings.add('Advertencia: esta rotación cristaliza pérdida estimada.');
+    }
+
+    return RotationSimulationResult(
+      valid: true,
+      invalidReason: '',
+      warnings: warnings,
+      originQuantitySold: originQuantitySold,
+      originGrossSale: originGrossSale,
+      originSellCommission: originSellCommission,
+      netAvailable: netAvailable,
+      originRemovedAverageCost: originRemovedAverageCost,
+      originRealizedPLEstimate: originRealizedPLEstimate,
+      originQuantityRemaining: originQuantityRemaining,
+      originCostBaseRemaining: originCostBaseRemaining,
+      originAvgRemaining: originAvgRemaining,
+      targetBuyCommission: targetBuyCommission,
+      targetConvertedCapital: targetConvertedCapital,
+      targetQuantityBought: targetQuantityBought,
+      targetBalanceAfter: targetBalanceAfter,
+      targetCostBaseAfter: targetCostBaseAfter,
+      targetAvgBefore: targetAvgBefore,
+      targetAvgAfter: targetAvgAfter,
+      totalCommissions: totalCommissions,
+    );
+  }
+
+  CoinStats _statsFor(String coin) =>
+      widget.stats[coin] ?? CoinStats(coin: coin);
+
+  double _parseInput(TextEditingController controller) {
+    final String raw = controller.text.trim().replaceAll(',', '');
+    return double.tryParse(raw) ?? 0.0;
+  }
+
+  void _seedPriceIfEmpty(TextEditingController controller, double price) {
+    if (controller.text.trim().isNotEmpty || price <= 0) return;
+    controller.text = compact(price);
+  }
+
+  void _setPriceFromCoin(TextEditingController controller, String coin) {
+    final double price = _statsFor(coin).currentPrice;
+    controller.text = price > 0 ? compact(price) : '';
+  }
+
+  void _ensureSelectedCoins() {
+    if (widget.coins.isEmpty) return;
+    if (!widget.coins.contains(_buyCoin)) _buyCoin = widget.coins.first;
+    if (!widget.coins.contains(_sellCoin)) _sellCoin = widget.coins.first;
+    if (!widget.coins.contains(_rotationOriginCoin)) {
+      _rotationOriginCoin = widget.coins.first;
+    }
+    if (!widget.coins.contains(_rotationTargetCoin)) {
+      _rotationTargetCoin = widget.coins.first;
+    }
+  }
+
+  String _percentOrNa(double? value) {
+    if (value == null) return 'N/A';
+    return pct(value);
+  }
+
+  String _moneyAndPercent(double value, double? percentValue) {
+    if (percentValue == null) return '${money(value)} (N/A)';
+    return '${money(value)} (${pct(percentValue)})';
+  }
+
+  Widget _warningLine(String text) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.5)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: Colors.amber.shade900,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  static const List<double> _quickAmountValues = <double>[
+    500,
+    1000,
+    3000,
+    5000,
+    8000,
+    15000,
+  ];
+
+  static const List<double> _quickPercentValues = <double>[25, 50, 75, 100];
+}
+
+class BuySimulationResult {
+  final bool valid;
+  final String invalidReason;
+  final double quantityBought;
+  final double buyCommission;
+  final double netBuyCapital;
+  final double quantityAfter;
+  final double costBaseAfter;
+  final double avgCurrent;
+  final double avgAfter;
+  final double avgDifferenceMxn;
+  final double? avgDifferencePct;
+  final double breakEvenNetAfter;
+  final double? distanceToBreakEvenPct;
+
+  BuySimulationResult({
+    required this.valid,
+    required this.invalidReason,
+    required this.quantityBought,
+    required this.buyCommission,
+    required this.netBuyCapital,
+    required this.quantityAfter,
+    required this.costBaseAfter,
+    required this.avgCurrent,
+    required this.avgAfter,
+    required this.avgDifferenceMxn,
+    required this.avgDifferencePct,
+    required this.breakEvenNetAfter,
+    required this.distanceToBreakEvenPct,
+  });
+
+  factory BuySimulationResult.invalid(String reason) => BuySimulationResult(
+    valid: false,
+    invalidReason: reason,
+    quantityBought: 0.0,
+    buyCommission: 0.0,
+    netBuyCapital: 0.0,
+    quantityAfter: 0.0,
+    costBaseAfter: 0.0,
+    avgCurrent: 0.0,
+    avgAfter: 0.0,
+    avgDifferenceMxn: 0.0,
+    avgDifferencePct: null,
+    breakEvenNetAfter: 0.0,
+    distanceToBreakEvenPct: null,
+  );
+}
+
+class SellSimulationResult {
+  final bool valid;
+  final String invalidReason;
+  final List<String> warnings;
+  final double quantitySold;
+  final double grossSale;
+  final double sellCommission;
+  final double netReceived;
+  final double removedAverageCost;
+  final double realizedPLEstimate;
+  final double quantityRemaining;
+  final double costBaseRemaining;
+  final double avgRemaining;
+
+  SellSimulationResult({
+    required this.valid,
+    required this.invalidReason,
+    required this.warnings,
+    required this.quantitySold,
+    required this.grossSale,
+    required this.sellCommission,
+    required this.netReceived,
+    required this.removedAverageCost,
+    required this.realizedPLEstimate,
+    required this.quantityRemaining,
+    required this.costBaseRemaining,
+    required this.avgRemaining,
+  });
+
+  factory SellSimulationResult.invalid(String reason) => SellSimulationResult(
+    valid: false,
+    invalidReason: reason,
+    warnings: const <String>[],
+    quantitySold: 0.0,
+    grossSale: 0.0,
+    sellCommission: 0.0,
+    netReceived: 0.0,
+    removedAverageCost: 0.0,
+    realizedPLEstimate: 0.0,
+    quantityRemaining: 0.0,
+    costBaseRemaining: 0.0,
+    avgRemaining: 0.0,
+  );
+}
+
+class RotationSimulationResult {
+  final bool valid;
+  final String invalidReason;
+  final List<String> warnings;
+  final double originQuantitySold;
+  final double originGrossSale;
+  final double originSellCommission;
+  final double netAvailable;
+  final double originRemovedAverageCost;
+  final double originRealizedPLEstimate;
+  final double originQuantityRemaining;
+  final double originCostBaseRemaining;
+  final double originAvgRemaining;
+  final double targetBuyCommission;
+  final double targetConvertedCapital;
+  final double targetQuantityBought;
+  final double targetBalanceAfter;
+  final double targetCostBaseAfter;
+  final double targetAvgBefore;
+  final double targetAvgAfter;
+  final double totalCommissions;
+
+  RotationSimulationResult({
+    required this.valid,
+    required this.invalidReason,
+    required this.warnings,
+    required this.originQuantitySold,
+    required this.originGrossSale,
+    required this.originSellCommission,
+    required this.netAvailable,
+    required this.originRemovedAverageCost,
+    required this.originRealizedPLEstimate,
+    required this.originQuantityRemaining,
+    required this.originCostBaseRemaining,
+    required this.originAvgRemaining,
+    required this.targetBuyCommission,
+    required this.targetConvertedCapital,
+    required this.targetQuantityBought,
+    required this.targetBalanceAfter,
+    required this.targetCostBaseAfter,
+    required this.targetAvgBefore,
+    required this.targetAvgAfter,
+    required this.totalCommissions,
+  });
+
+  factory RotationSimulationResult.invalid(
+    String reason,
+    List<String> warnings,
+  ) => RotationSimulationResult(
+    valid: false,
+    invalidReason: reason,
+    warnings: warnings,
+    originQuantitySold: 0.0,
+    originGrossSale: 0.0,
+    originSellCommission: 0.0,
+    netAvailable: 0.0,
+    originRemovedAverageCost: 0.0,
+    originRealizedPLEstimate: 0.0,
+    originQuantityRemaining: 0.0,
+    originCostBaseRemaining: 0.0,
+    originAvgRemaining: 0.0,
+    targetBuyCommission: 0.0,
+    targetConvertedCapital: 0.0,
+    targetQuantityBought: 0.0,
+    targetBalanceAfter: 0.0,
+    targetCostBaseAfter: 0.0,
+    targetAvgBefore: 0.0,
+    targetAvgAfter: 0.0,
+    totalCommissions: 0.0,
+  );
 }
 
 class CoinsTab extends StatelessWidget {
@@ -3097,7 +4221,11 @@ class EmptyState extends StatelessWidget {
 
 enum MovementType { buy, sell, transferIn, transferOut }
 
-enum ScenarioType { buy, sell }
+enum SimulationMode { buy, sell, rotation }
+
+enum SimulationSellMethod { percent, quantity, grossAmount }
+
+enum SimulationRotationMethod { percent, quantity, grossAmount }
 
 extension MovementLabel on MovementType {
   String get label {
@@ -3291,36 +4419,6 @@ class PortfolioTotals {
     required this.unrealizedPL,
     required this.realizedPL,
   });
-}
-
-class ScenarioResult {
-  final bool valid;
-  final double quantityDelta;
-  final double quantityAfter;
-  final double costBaseAfter;
-  final double avgAfter;
-  final double fee;
-  final double realizedPLEstimate;
-
-  ScenarioResult({
-    required this.valid,
-    required this.quantityDelta,
-    required this.quantityAfter,
-    required this.costBaseAfter,
-    required this.avgAfter,
-    required this.fee,
-    required this.realizedPLEstimate,
-  });
-
-  factory ScenarioResult.invalid(CoinStats stats) => ScenarioResult(
-    valid: false,
-    quantityDelta: 0.0,
-    quantityAfter: stats.quantity,
-    costBaseAfter: stats.costBase,
-    avgAfter: stats.avgPrice,
-    fee: 0.0,
-    realizedPLEstimate: 0.0,
-  );
 }
 
 class CoinSnapshot {
