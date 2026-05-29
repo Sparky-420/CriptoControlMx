@@ -11,6 +11,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 
 void main() {
@@ -36,6 +37,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
   final PriceService _priceService = PriceService();
+  final PriceAlertService _priceAlertService = PriceAlertService();
 
   final Map<String, double> _currentPrices = <String, double>{
     'BTC': 0.0,
@@ -50,10 +52,16 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   bool _darkMode = false;
   DateTime? _pricesUpdatedAt;
   bool _isRefreshingPrices = false;
+  bool _priceAlertsEnabled = false;
+  bool _notificationsAllowed = true;
+  double _priceAlertThresholdPercent =
+      PriceAlertService.defaultThresholdPercent;
+  Map<String, double> _priceAlertReferences = <String, double>{};
 
   @override
   void initState() {
     super.initState();
+    _priceAlertService.initialize();
     _loadData();
   }
 
@@ -104,6 +112,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
     _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ?? 0.0;
     _darkMode = prefs.getBool(_darkModeKey) ?? false;
+    await _loadPriceAlertSettings(prefs);
 
     if (mounted) setState(() {});
 
@@ -117,11 +126,134 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     _pricesUpdatedAt = cache.updatedAt;
   }
 
+  Future<void> _loadPriceAlertSettings(SharedPreferences prefs) async {
+    final PriceAlertSettings settings = await _priceAlertService.loadSettings(
+      prefs,
+    );
+    final bool notificationsAllowed = await _priceAlertService
+        .areNotificationsAllowed();
+
+    _priceAlertsEnabled = settings.enabled;
+    _priceAlertThresholdPercent = settings.thresholdPercent;
+    _priceAlertReferences = settings.referencePrices;
+    _notificationsAllowed = notificationsAllowed;
+  }
+
+  Future<void> _evaluatePriceAlerts(SharedPreferences prefs) async {
+    final PriceAlertEvaluation evaluation = await _priceAlertService
+        .evaluatePrices(
+          prefs: prefs,
+          currentPrices: _currentPrices,
+          coins: _coins,
+        );
+    final bool notificationsAllowed = await _priceAlertService
+        .areNotificationsAllowed();
+
+    if (!mounted) return;
+    setState(() {
+      _priceAlertsEnabled = evaluation.settings.enabled;
+      _priceAlertThresholdPercent = evaluation.settings.thresholdPercent;
+      _priceAlertReferences = evaluation.settings.referencePrices;
+      _notificationsAllowed = notificationsAllowed;
+    });
+  }
+
+  Future<void> _togglePriceAlerts(
+    BuildContext pageContext,
+    bool enabled,
+  ) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    var notificationsAllowed = await _priceAlertService
+        .areNotificationsAllowed();
+
+    if (enabled && !notificationsAllowed) {
+      notificationsAllowed = await _priceAlertService
+          .requestNotificationPermission();
+    }
+
+    await _priceAlertService.setEnabled(prefs, enabled);
+    await _loadPriceAlertSettings(prefs);
+    if (mounted) setState(() {});
+
+    if (enabled && !notificationsAllowed && pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Activa el permiso de notificaciones para recibir alertas.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _showPriceAlertThresholdDialog(BuildContext pageContext) async {
+    final TextEditingController controller = TextEditingController(
+      text: compact(_priceAlertThresholdPercent),
+    );
+
+    await showDialog<void>(
+      context: pageContext,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Umbral'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Umbral %',
+            helperText: 'Default: 2.0',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final double? value = double.tryParse(controller.text.trim());
+              if (value == null || value <= 0 || value > 100) return;
+
+              final SharedPreferences prefs =
+                  await SharedPreferences.getInstance();
+              await _priceAlertService.setThresholdPercent(prefs, value);
+              await _loadPriceAlertSettings(prefs);
+              if (mounted) setState(() {});
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _resetPriceAlertReferences(BuildContext pageContext) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final PriceAlertSettings settings = await _priceAlertService
+        .resetReferences(prefs, _currentPrices, _coins);
+
+    if (!mounted) return;
+    setState(() {
+      _priceAlertReferences = settings.referencePrices;
+      _priceAlertThresholdPercent = settings.thresholdPercent;
+      _priceAlertsEnabled = settings.enabled;
+    });
+
+    if (pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(content: Text('Referencias reiniciadas')),
+      );
+    }
+  }
+
   Future<void> _refreshPricesIfNeeded(SharedPreferences prefs) async {
     final PriceCache priceCache = await _priceService.refreshIfStale(prefs);
+    _applyPriceCache(priceCache);
+    await _evaluatePriceAlerts(prefs);
     if (!mounted) return;
 
-    setState(() => _applyPriceCache(priceCache));
+    setState(() {});
   }
 
   Future<void> _refreshPricesNow(BuildContext pageContext) async {
@@ -136,7 +268,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       );
       if (!mounted) return;
 
-      setState(() => _applyPriceCache(priceCache));
+      _applyPriceCache(priceCache);
+      await _evaluatePriceAlerts(prefs);
+      setState(() {});
       messenger.showSnackBar(
         const SnackBar(content: Text('Precios actualizados')),
       );
@@ -435,6 +569,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                     _currentPrices,
                   );
               if (!dialogContext.mounted) return;
+              await _evaluatePriceAlerts(
+                await SharedPreferences.getInstance(),
+              );
               if (mounted) {
                 setState(() => _applyPriceCache(priceCache));
               }
@@ -1579,9 +1716,19 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               snapshotCount: _snapshots.length,
               pricesUpdatedAt: _pricesUpdatedAt,
               isRefreshingPrices: _isRefreshingPrices,
+              priceAlertsEnabled: _priceAlertsEnabled,
+              priceAlertThresholdPercent: _priceAlertThresholdPercent,
+              priceAlertReferences: _priceAlertReferences,
+              notificationsAllowed: _notificationsAllowed,
               onDarkModeChanged: _toggleDarkMode,
               onRefreshPrices: () => _refreshPricesNow(pageContext),
               onEditSellFee: () => _showSellFeeDialog(pageContext),
+              onPriceAlertsChanged: (bool enabled) =>
+                  _togglePriceAlerts(pageContext, enabled),
+              onEditPriceAlertThreshold: () =>
+                  _showPriceAlertThresholdDialog(pageContext),
+              onResetPriceAlertReferences: () =>
+                  _resetPriceAlertReferences(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
@@ -3527,9 +3674,16 @@ class SettingsTab extends StatelessWidget {
   final int snapshotCount;
   final DateTime? pricesUpdatedAt;
   final bool isRefreshingPrices;
+  final bool priceAlertsEnabled;
+  final double priceAlertThresholdPercent;
+  final Map<String, double> priceAlertReferences;
+  final bool notificationsAllowed;
   final ValueChanged<bool> onDarkModeChanged;
   final VoidCallback onRefreshPrices;
   final VoidCallback onEditSellFee;
+  final ValueChanged<bool> onPriceAlertsChanged;
+  final VoidCallback onEditPriceAlertThreshold;
+  final VoidCallback onResetPriceAlertReferences;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final VoidCallback onExportMovementsCsv;
@@ -3548,9 +3702,16 @@ class SettingsTab extends StatelessWidget {
     required this.snapshotCount,
     required this.pricesUpdatedAt,
     required this.isRefreshingPrices,
+    required this.priceAlertsEnabled,
+    required this.priceAlertThresholdPercent,
+    required this.priceAlertReferences,
+    required this.notificationsAllowed,
     required this.onDarkModeChanged,
     required this.onRefreshPrices,
     required this.onEditSellFee,
+    required this.onPriceAlertsChanged,
+    required this.onEditPriceAlertThreshold,
+    required this.onResetPriceAlertReferences,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onExportMovementsCsv,
@@ -3607,6 +3768,55 @@ class SettingsTab extends StatelessWidget {
                 isRefreshingPrices ? 'Actualizando' : 'Actualizar ahora',
               ),
             ),
+          ),
+        ),
+        CardPanel(
+          title: 'Alertas de precio',
+          subtitle:
+              'Notificar subidas y bajadas desde una referencia guardada.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              SwitchListTile(
+                value: priceAlertsEnabled,
+                onChanged: onPriceAlertsChanged,
+                title: const Text('Notificar subidas y bajadas'),
+                contentPadding: EdgeInsets.zero,
+              ),
+              if (priceAlertsEnabled && !notificationsAllowed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Permiso de notificaciones no concedido. La app no crasheará, pero no podrá avisar.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              InfoLine('Umbral', pct(priceAlertThresholdPercent)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton.tonal(
+                    onPressed: onEditPriceAlertThreshold,
+                    child: const Text('Editar umbral'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onResetPriceAlertReferences,
+                    child: const Text('Reiniciar referencias'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...<String>['BTC', 'ETH', 'LINK', 'LTC', 'UNI'].map(
+                (String coin) => InfoLine(
+                  'Referencia $coin',
+                  money(priceAlertReferences[coin] ?? 0.0),
+                ),
+              ),
+            ],
           ),
         ),
         CardPanel(
