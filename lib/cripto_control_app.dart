@@ -1681,11 +1681,48 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       home: Builder(
         builder: (BuildContext pageContext) {
           final List<Widget> pages = <Widget>[
+            SimulationTab(
+              coins: _coins,
+              stats: stats,
+              defaultFeePercent: _sellFeePercent == 0 ? 1.5 : _sellFeePercent,
+            ),
             SummaryTab(
               stats: stats,
               totals: totals,
               sellFeePercent: _sellFeePercent,
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
+            ),
+            CoinsTab(
+              coins: _coins,
+              stats: stats,
+              sellFeePercent: _sellFeePercent,
+              onEditPrice: (String coin) =>
+                  _showEditPriceDialog(pageContext, coin),
+              onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
+            ),
+            AlertsTab(
+              coins: _coins,
+              stats: stats,
+              priceAlertsEnabled: _priceAlertsEnabled,
+              priceAlertThresholdPercent: _priceAlertThresholdPercent,
+              priceAlertReferences: _priceAlertReferences,
+              notificationsAllowed: _notificationsAllowed,
+              pricesUpdatedAt: _pricesUpdatedAt,
+              isRefreshingPrices: _isRefreshingPrices,
+              onRefreshPrices: () => _refreshPricesNow(pageContext),
+              onPriceAlertsChanged: (bool enabled) =>
+                  _togglePriceAlerts(pageContext, enabled),
+              onEditPriceAlertThreshold: () =>
+                  _showPriceAlertThresholdDialog(pageContext),
+              onResetPriceAlertReferences: () =>
+                  _resetPriceAlertReferences(pageContext),
+            ),
+            ChartsTab(
+              stats: stats,
+              totals: totals,
+              snapshots: _snapshots,
+              onSaveSnapshot: () => _saveSnapshot(pageContext),
+              onViewSnapshots: () => _showSnapshots(pageContext),
             ),
             MovementsTab(
               movements: _movements,
@@ -1700,15 +1737,6 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 setState(() => _movements.remove(movement));
                 _saveData();
               },
-            ),
-            SimulationTab(coins: _coins, stats: stats, defaultFeePercent: 1.5),
-            CoinsTab(
-              coins: _coins,
-              stats: stats,
-              sellFeePercent: _sellFeePercent,
-              onEditPrice: (String coin) =>
-                  _showEditPriceDialog(pageContext, coin),
-              onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
             ),
             SettingsTab(
               darkMode: _darkMode,
@@ -1773,18 +1801,26 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 setState(() => _currentIndex = index);
               },
               destinations: const <NavigationDestination>[
+                NavigationDestination(icon: Icon(Icons.tune), label: 'Simular'),
                 NavigationDestination(
                   icon: Icon(Icons.dashboard_outlined),
                   label: 'Resumen',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.swap_horiz),
-                  label: 'Movimientos',
-                ),
-                NavigationDestination(icon: Icon(Icons.tune), label: 'Simular'),
-                NavigationDestination(
                   icon: Icon(Icons.currency_bitcoin),
                   label: 'Monedas',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.notifications_active_outlined),
+                  label: 'Alertas',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.show_chart),
+                  label: 'Gráficas',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.receipt_long_outlined),
+                  label: 'Historial',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.settings_outlined),
@@ -1817,14 +1853,27 @@ class SummaryTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final List<CoinStats> active = stats.values
         .where((CoinStats s) => s.quantity > 0)
-        .toList();
+        .toList()
+      ..sort(
+        (CoinStats a, CoinStats b) =>
+            b.currentValue.compareTo(a.currentValue),
+      );
+    final CoinStats? leader = active.isEmpty ? null : active.first;
+    final CoinStats? weakest = active.isEmpty
+        ? null
+        : active.reduce(
+            (CoinStats a, CoinStats b) =>
+                a.unrealizedPL <= b.unrealizedPL ? a : b,
+          );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: <Widget>[
         CardPanel(
-          title: 'Vista rápida',
-          subtitle: 'Lo esencial de tu cartera, sin tecnicismos.',
+          title: 'Resumen ejecutivo',
+          subtitle: leader == null
+              ? 'Agrega movimientos para activar métricas accionables.'
+              : '${leader.coin} concentra ${pct(totals.currentValue <= 0 ? 0 : leader.currentValue / totals.currentValue * 100)} del valor actual.',
           child: Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -1843,6 +1892,30 @@ class SummaryTab extends StatelessWidget {
               ),
             ],
           ),
+        ),
+        CardPanel(
+          title: 'Foco inmediato',
+          subtitle: 'La UI ahora abre por Simular y deja el resumen como tablero de decisión.',
+          child: active.isEmpty
+              ? const Text('Sin posiciones abiertas para priorizar.')
+              : Column(
+                  children: <Widget>[
+                    InfoLine(
+                      'Mayor posición',
+                      '${leader!.coin} · ${money(leader.currentValue)}',
+                      emphasized: true,
+                    ),
+                    InfoLine(
+                      'Resultado a vigilar',
+                      '${weakest!.coin} · ${money(weakest.unrealizedPL)}',
+                      valueColor: pnlColor(weakest.unrealizedPL),
+                    ),
+                    InfoLine(
+                      'Monedas activas',
+                      '${active.length} de ${stats.length}',
+                    ),
+                  ],
+                ),
         ),
         const SizedBox(height: 18),
         Text(
@@ -3664,6 +3737,393 @@ class CoinsTab extends StatelessWidget {
           );
         }),
       ],
+    );
+  }
+}
+
+
+class AlertsTab extends StatelessWidget {
+  final List<String> coins;
+  final Map<String, CoinStats> stats;
+  final bool priceAlertsEnabled;
+  final double priceAlertThresholdPercent;
+  final Map<String, double> priceAlertReferences;
+  final bool notificationsAllowed;
+  final DateTime? pricesUpdatedAt;
+  final bool isRefreshingPrices;
+  final VoidCallback onRefreshPrices;
+  final ValueChanged<bool> onPriceAlertsChanged;
+  final VoidCallback onEditPriceAlertThreshold;
+  final VoidCallback onResetPriceAlertReferences;
+
+  const AlertsTab({
+    super.key,
+    required this.coins,
+    required this.stats,
+    required this.priceAlertsEnabled,
+    required this.priceAlertThresholdPercent,
+    required this.priceAlertReferences,
+    required this.notificationsAllowed,
+    required this.pricesUpdatedAt,
+    required this.isRefreshingPrices,
+    required this.onRefreshPrices,
+    required this.onPriceAlertsChanged,
+    required this.onEditPriceAlertThreshold,
+    required this.onResetPriceAlertReferences,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String> watchedCoins = coins
+        .where((String coin) => (stats[coin]?.currentPrice ?? 0) > 0)
+        .toList();
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: <Widget>[
+        Text(
+          'Alertas',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 6),
+        const Text('Control directo para precios, umbrales y referencias.'),
+        const SizedBox(height: 12),
+        CardPanel(
+          title: priceAlertsEnabled ? 'Alertas activas' : 'Alertas pausadas',
+          subtitle: 'Umbral actual: ${pct(priceAlertThresholdPercent)} · ${priceUpdatedLabel(pricesUpdatedAt)}',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              SwitchListTile(
+                value: priceAlertsEnabled,
+                onChanged: onPriceAlertsChanged,
+                title: const Text('Notificar subidas y bajadas'),
+                subtitle: const Text('Compara precio actual contra referencia guardada.'),
+                contentPadding: EdgeInsets.zero,
+              ),
+              if (priceAlertsEnabled && !notificationsAllowed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Falta permiso de notificaciones del sistema.',
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton.tonalIcon(
+                    onPressed: isRefreshingPrices ? null : onRefreshPrices,
+                    icon: isRefreshingPrices
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync),
+                    label: Text(isRefreshingPrices ? 'Actualizando' : 'Actualizar precios'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onEditPriceAlertThreshold,
+                    child: const Text('Editar umbral'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onResetPriceAlertReferences,
+                    child: const Text('Reiniciar referencias'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        CardPanel(
+          title: 'Monitor por moneda',
+          subtitle: watchedCoins.isEmpty
+              ? 'Sin precios cargados todavía.'
+              : '${watchedCoins.length} monedas con precio actual.',
+          child: Column(
+            children: coins.map((String coin) {
+              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+              final double reference = priceAlertReferences[coin] ?? 0.0;
+              final double variation = reference <= 0
+                  ? 0.0
+                  : ((stat.currentPrice - reference) / reference) * 100;
+              final bool triggered = reference > 0 && variation.abs() >= priceAlertThresholdPercent;
+
+              return AlertCoinRow(
+                coin: coin,
+                currentPrice: stat.currentPrice,
+                referencePrice: reference,
+                variationPercent: variation,
+                triggered: triggered,
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class AlertCoinRow extends StatelessWidget {
+  final String coin;
+  final double currentPrice;
+  final double referencePrice;
+  final double variationPercent;
+  final bool triggered;
+
+  const AlertCoinRow({
+    super.key,
+    required this.coin,
+    required this.currentPrice,
+    required this.referencePrice,
+    required this.variationPercent,
+    required this.triggered,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = triggered
+        ? Theme.of(context).colorScheme.error
+        : Theme.of(context).colorScheme.primary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  coin,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ),
+              StatusPill(
+                label: triggered ? 'Revisar' : 'Normal',
+                positive: !triggered,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: (variationPercent.abs() / 20).clamp(0.0, 1.0),
+            minHeight: 8,
+            color: color,
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+          ),
+          const SizedBox(height: 6),
+          InfoLine('Actual', money(currentPrice)),
+          InfoLine('Referencia', money(referencePrice)),
+          InfoLine(
+            'Variación',
+            referencePrice <= 0 ? 'Sin referencia' : pct(variationPercent),
+            valueColor: referencePrice <= 0 ? null : pnlColor(variationPercent),
+          ),
+          const Divider(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class ChartsTab extends StatelessWidget {
+  final Map<String, CoinStats> stats;
+  final PortfolioTotals totals;
+  final List<PortfolioSnapshot> snapshots;
+  final VoidCallback onSaveSnapshot;
+  final VoidCallback onViewSnapshots;
+
+  const ChartsTab({
+    super.key,
+    required this.stats,
+    required this.totals,
+    required this.snapshots,
+    required this.onSaveSnapshot,
+    required this.onViewSnapshots,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<CoinStats> active = stats.values
+        .where((CoinStats s) => s.currentValue > 0)
+        .toList()
+      ..sort((CoinStats a, CoinStats b) => b.currentValue.compareTo(a.currentValue));
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: <Widget>[
+        Text(
+          'Gráficas',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 6),
+        const Text('Distribución, resultado y snapshots en una vista visual.'),
+        const SizedBox(height: 12),
+        CardPanel(
+          title: 'Distribución actual',
+          subtitle: totals.currentValue <= 0
+              ? 'Sin valor cargado para graficar.'
+              : 'Valor total: ${money(totals.currentValue)}',
+          child: active.isEmpty
+              ? const EmptyState(
+                  icon: Icons.pie_chart_outline,
+                  title: 'Sin datos para graficar',
+                  subtitle: 'Carga precios y movimientos para ver barras por moneda.',
+                )
+              : Column(
+                  children: active.map((CoinStats stat) {
+                    final double share = totals.currentValue <= 0
+                        ? 0.0
+                        : stat.currentValue / totals.currentValue;
+                    return AllocationBar(
+                      label: stat.coin,
+                      value: money(stat.currentValue),
+                      share: share,
+                      result: stat.unrealizedPL,
+                    );
+                  }).toList(),
+                ),
+        ),
+        CardPanel(
+          title: 'Resultado por moneda',
+          subtitle: 'Barras rápidas de ganancia o pérdida no realizada.',
+          child: active.isEmpty
+              ? const Text('Sin posiciones abiertas.')
+              : Column(
+                  children: active.map((CoinStats stat) {
+                    final double maxAbs = active.fold<double>(
+                      1,
+                      (double maxValue, CoinStats item) =>
+                          math.max(maxValue, item.unrealizedPL.abs()),
+                    );
+                    return ResultBar(
+                      label: stat.coin,
+                      amount: stat.unrealizedPL,
+                      intensity: stat.unrealizedPL.abs() / maxAbs,
+                    );
+                  }).toList(),
+                ),
+        ),
+        if (snapshots.isEmpty)
+          CardPanel(
+            title: 'Histórico',
+            subtitle: 'Guarda snapshots para activar líneas de tendencia.',
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.tonalIcon(
+                  onPressed: onSaveSnapshot,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: const Text('Guardar snapshot'),
+                ),
+                FilledButton.tonal(
+                  onPressed: onViewSnapshots,
+                  child: const Text('Ver snapshots'),
+                ),
+              ],
+            ),
+          )
+        else ...<Widget>[
+          SnapshotTrendPanel(snapshots: snapshots),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.tonal(
+              onPressed: onViewSnapshots,
+              child: const Text('Administrar snapshots'),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class AllocationBar extends StatelessWidget {
+  final String label;
+  final String value;
+  final double share;
+  final double result;
+
+  const AllocationBar({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.share,
+    required this.result,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
+              Text('${pct(share * 100)} · $value'),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: share.clamp(0.0, 1.0),
+            minHeight: 10,
+            color: pnlColor(result),
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ResultBar extends StatelessWidget {
+  final String label;
+  final double amount;
+  final double intensity;
+
+  const ResultBar({
+    super.key,
+    required this.label,
+    required this.amount,
+    required this.intensity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: <Widget>[
+          SizedBox(width: 48, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(
+            child: LinearProgressIndicator(
+              value: intensity.clamp(0.0, 1.0),
+              minHeight: 10,
+              color: pnlColor(amount),
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 104,
+            child: Text(
+              money(amount),
+              textAlign: TextAlign.right,
+              style: TextStyle(color: pnlColor(amount), fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
