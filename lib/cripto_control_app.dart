@@ -1915,11 +1915,34 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   _resetRecoveryAlertReferences(pageContext),
             ),
             MoreTab(
+              totals: totals,
+              pricesUpdatedAt: _pricesUpdatedAt,
+              isRefreshingPrices: _isRefreshingPrices,
+              movementCount: _movements.length,
+              snapshotCount: _snapshots.length,
+              chartDataCount: stats.values
+                  .where((CoinStats stat) => stat.currentValue > 0)
+                  .length,
+              onAddMovement: () => _showAddMovementSheet(pageContext),
+              onRefreshPrices: () => _refreshPricesNow(pageContext),
+              onOpenSimulation: () => setState(() => _currentIndex = 0),
               onOpenCharts: () => openMorePage('Gráficas', buildChartsTab()),
-              onOpenMovements: () => openMorePage('Historial', buildMovementsTab()),
+              onOpenMovements: () =>
+                  openMorePage('Historial', buildMovementsTab()),
               onOpenSettings: () => openMorePage('Ajustes', buildSettingsTab()),
+              onOpenAlerts: openAlertsTab,
+              onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
+              onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
+              onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
+              onExportXlsx: () => _exportXlsx(pageContext),
+              onExportPdf: () => _exportPdf(pageContext),
               onExportBackup: () => _exportBackup(pageContext),
+              onImportBackup: () => _importBackup(pageContext),
+              onImportBackupFile: () => _importBackupFile(pageContext),
+              onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
+              onResetPriceAlertReferences: () =>
+                  _resetPriceAlertReferences(pageContext),
             ),
           ];
 
@@ -4472,75 +4495,805 @@ class ResultBar extends StatelessWidget {
 }
 
 class MoreTab extends StatelessWidget {
+  final PortfolioTotals totals;
+  final DateTime? pricesUpdatedAt;
+  final bool isRefreshingPrices;
+  final int movementCount;
+  final int snapshotCount;
+  final int chartDataCount;
+  final VoidCallback onAddMovement;
+  final VoidCallback onRefreshPrices;
+  final VoidCallback onOpenSimulation;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
   final VoidCallback onOpenSettings;
+  final VoidCallback onOpenAlerts;
+  final VoidCallback onExportMovementsCsv;
+  final VoidCallback onExportSummaryCsv;
+  final VoidCallback onExportSnapshotsCsv;
+  final VoidCallback onExportXlsx;
+  final VoidCallback onExportPdf;
   final VoidCallback onExportBackup;
+  final VoidCallback onImportBackup;
+  final VoidCallback onImportBackupFile;
+  final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
+  final VoidCallback onResetPriceAlertReferences;
 
   const MoreTab({
     super.key,
+    required this.totals,
+    required this.pricesUpdatedAt,
+    required this.isRefreshingPrices,
+    required this.movementCount,
+    required this.snapshotCount,
+    required this.chartDataCount,
+    required this.onAddMovement,
+    required this.onRefreshPrices,
+    required this.onOpenSimulation,
     required this.onOpenCharts,
     required this.onOpenMovements,
     required this.onOpenSettings,
+    required this.onOpenAlerts,
+    required this.onExportMovementsCsv,
+    required this.onExportSummaryCsv,
+    required this.onExportSnapshotsCsv,
+    required this.onExportXlsx,
+    required this.onExportPdf,
     required this.onExportBackup,
+    required this.onImportBackup,
+    required this.onImportBackupFile,
+    required this.onSaveSnapshot,
     required this.onViewSnapshots,
+    required this.onResetPriceAlertReferences,
+  });
+
+  static const String _priceSource = 'CoinGecko';
+
+  @override
+  Widget build(BuildContext context) {
+    final Color pnlColor = totals.unrealizedPL >= 0 ? Colors.green : Colors.red;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+      children: <Widget>[
+        _CommandCenterHeader(
+          totals: totals,
+          pnlColor: pnlColor,
+          pricesUpdatedAt: pricesUpdatedAt,
+          priceSource: _priceSource,
+        ),
+        const SizedBox(height: 14),
+        FilledButton.icon(
+          onPressed: () => _showQuickActions(context),
+          icon: const Icon(Icons.bolt_outlined),
+          label: const Text('Acción rápida'),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        _CommandSection(
+          title: 'Operación',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.add_circle_outline,
+              title: 'Agregar movimiento',
+              subtitle: 'Compra, venta o transferencia',
+              onTap: onAddMovement,
+            ),
+            _CommandCard(
+              icon: Icons.sync,
+              title: 'Actualizar precios',
+              subtitle: priceUpdatedLabel(pricesUpdatedAt),
+              loading: isRefreshingPrices,
+              onTap: isRefreshingPrices ? null : onRefreshPrices,
+            ),
+            _CommandCard(
+              icon: Icons.calculate_outlined,
+              title: 'Simular operación',
+              subtitle: 'Compra o venta estimada',
+              onTap: onOpenSimulation,
+            ),
+            _CommandCard(
+              icon: Icons.swap_horiz_outlined,
+              title: 'Simular rotación',
+              subtitle: 'Cambiar capital entre monedas',
+              onTap: onOpenSimulation,
+            ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Análisis',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.show_chart,
+              title: 'Gráficas',
+              subtitle: chartDataCount == 0
+                  ? 'Sin datos para graficar'
+                  : 'Distribución y evolución',
+              badge: chartDataCount == 0 ? null : '$chartDataCount activos',
+              emptyTitle: chartDataCount == 0 ? 'No hay datos para gráficas' : null,
+              emptySubtitle: chartDataCount == 0
+                  ? 'Agrega movimientos y precios para visualizar.'
+                  : null,
+              onTap: onOpenCharts,
+            ),
+            _CommandCard(
+              icon: Icons.receipt_long_outlined,
+              title: 'Historial',
+              subtitle: movementCount == 0
+                  ? 'Sin movimientos guardados'
+                  : 'Movimientos registrados',
+              badge: movementCount == 0 ? null : '$movementCount',
+              emptyTitle: movementCount == 0 ? 'No hay historial' : null,
+              emptySubtitle: movementCount == 0
+                  ? 'Agrega un movimiento para iniciar el registro.'
+                  : null,
+              emptyActionLabel: movementCount == 0 ? 'Agregar' : null,
+              onEmptyAction: movementCount == 0 ? onAddMovement : null,
+              onTap: onOpenMovements,
+            ),
+            _CommandCard(
+              icon: Icons.photo_library_outlined,
+              title: 'Snapshots',
+              subtitle: snapshotCount == 0
+                  ? 'Sin fotos de cartera'
+                  : 'Evolución guardada',
+              badge: snapshotCount == 0 ? null : '$snapshotCount',
+              emptyTitle: snapshotCount == 0 ? 'No hay snapshots' : null,
+              emptySubtitle: snapshotCount == 0
+                  ? 'Guarda un snapshot para ver evolución.'
+                  : null,
+              emptyActionLabel: snapshotCount == 0 ? 'Guardar' : null,
+              onEmptyAction: snapshotCount == 0 ? onSaveSnapshot : null,
+              onTap: onViewSnapshots,
+            ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Datos',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.file_download_outlined,
+              title: 'Exportar datos',
+              subtitle: 'CSV de historial y resumen',
+              badge: 'CSV',
+              onTap: onExportMovementsCsv,
+            ),
+            _CommandCard(
+              icon: Icons.upload_file_outlined,
+              title: 'Importar respaldo',
+              subtitle: 'Pegar o cargar JSON',
+              onTap: onImportBackupFile,
+            ),
+            _CommandCard(
+              icon: Icons.data_object_outlined,
+              title: 'Backup JSON',
+              subtitle: 'Respaldo completo rápido',
+              onTap: onExportBackup,
+            ),
+            _CommandCard(
+              icon: Icons.table_chart_outlined,
+              title: 'CSV/PDF/XLSX',
+              subtitle: 'Formatos disponibles',
+              badge: 'PDF · XLSX',
+              onTap: () => _showDataActions(context),
+            ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Sistema',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.settings_outlined,
+              title: 'Ajustes',
+              subtitle: 'Apariencia, comisión y respaldos',
+              onTap: onOpenSettings,
+            ),
+            _CommandCard(
+              icon: Icons.notifications_active_outlined,
+              title: 'Alertas',
+              subtitle: 'Mercado y recuperación',
+              onTap: onOpenAlerts,
+            ),
+            _CommandCard(
+              icon: Icons.health_and_safety_outlined,
+              title: 'Diagnóstico de app',
+              subtitle: 'Datos locales y precios',
+              badge: pricesUpdatedAt == null ? 'Pendiente' : 'OK',
+              onTap: () => _showDiagnostics(context),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showQuickActions(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (BuildContext sheetContext) => _CommandActionSheet(
+        title: 'Acción rápida',
+        actions: <_SheetAction>[
+          _SheetAction(
+            icon: Icons.add_circle_outline,
+            title: 'Agregar movimiento',
+            subtitle: 'Registrar una operación',
+            onTap: onAddMovement,
+          ),
+          _SheetAction(
+            icon: Icons.sync,
+            title: 'Actualizar precios',
+            subtitle: priceUpdatedLabel(pricesUpdatedAt),
+            onTap: isRefreshingPrices ? null : onRefreshPrices,
+          ),
+          _SheetAction(
+            icon: Icons.calculate_outlined,
+            title: 'Simular compra',
+            subtitle: 'Abrir simulador existente',
+            onTap: onOpenSimulation,
+          ),
+          _SheetAction(
+            icon: Icons.swap_horiz_outlined,
+            title: 'Simular rotación',
+            subtitle: 'Abrir simulador existente',
+            onTap: onOpenSimulation,
+          ),
+          _SheetAction(
+            icon: Icons.file_download_outlined,
+            title: 'Exportar datos',
+            subtitle: 'Crear respaldo JSON',
+            onTap: onExportBackup,
+          ),
+          _SheetAction(
+            icon: Icons.restart_alt_outlined,
+            title: 'Reiniciar referencias de alertas',
+            subtitle: 'Usar referencias actuales de mercado',
+            onTap: onResetPriceAlertReferences,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDataActions(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => _CommandActionSheet(
+        title: 'Exportar / Importar',
+        actions: <_SheetAction>[
+          _SheetAction(
+            icon: Icons.receipt_long_outlined,
+            title: 'CSV historial',
+            subtitle: 'Movimientos registrados',
+            onTap: onExportMovementsCsv,
+          ),
+          _SheetAction(
+            icon: Icons.summarize_outlined,
+            title: 'CSV resumen',
+            subtitle: 'Cartera actual',
+            onTap: onExportSummaryCsv,
+          ),
+          _SheetAction(
+            icon: Icons.photo_library_outlined,
+            title: 'CSV snapshots',
+            subtitle: 'Evolución guardada',
+            onTap: onExportSnapshotsCsv,
+          ),
+          _SheetAction(
+            icon: Icons.picture_as_pdf_outlined,
+            title: 'PDF reporte',
+            subtitle: 'Reporte existente',
+            onTap: onExportPdf,
+          ),
+          _SheetAction(
+            icon: Icons.table_chart_outlined,
+            title: 'XLSX reporte',
+            subtitle: 'Libro de cálculo',
+            onTap: onExportXlsx,
+          ),
+          _SheetAction(
+            icon: Icons.data_object_outlined,
+            title: 'Backup JSON',
+            subtitle: 'Exportar respaldo',
+            onTap: onExportBackup,
+          ),
+          _SheetAction(
+            icon: Icons.content_paste_go_outlined,
+            title: 'Importar respaldo',
+            subtitle: 'Pegar JSON',
+            onTap: onImportBackup,
+          ),
+          _SheetAction(
+            icon: Icons.upload_file_outlined,
+            title: 'Importar archivo JSON',
+            subtitle: 'Cargar respaldo',
+            onTap: onImportBackupFile,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDiagnostics(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Diagnóstico de app',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              InfoLine('Movimientos', '$movementCount'),
+              InfoLine('Snapshots', '$snapshotCount'),
+              InfoLine('Valor cartera', money(totals.currentValue)),
+              InfoLine('Fuente precios', _priceSource),
+              InfoLine('Precios', priceUpdatedLabel(pricesUpdatedAt)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CommandCenterHeader extends StatelessWidget {
+  final PortfolioTotals totals;
+  final Color pnlColor;
+  final DateTime? pricesUpdatedAt;
+  final String priceSource;
+
+  const _CommandCenterHeader({
+    required this.totals,
+    required this.pnlColor,
+    required this.pricesUpdatedAt,
+    required this.priceSource,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
-      children: <Widget>[
-        Text(
-          'Más',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[
+            colors.primaryContainer.withValues(alpha: 0.92),
+            colors.surfaceContainerHighest.withValues(alpha: 0.88),
+          ],
         ),
-        const SizedBox(height: 8),
-        Card(
-          child: Column(
+        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.show_chart),
-                title: const Text('Gráficas'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onOpenCharts,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Centro de control',
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Herramientas, datos y configuración',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.receipt_long_outlined),
-                title: const Text('Historial'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onOpenMovements,
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.settings_outlined),
-                title: const Text('Ajustes'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onOpenSettings,
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.file_download_outlined),
-                title: const Text('Exportar / Backup'),
-                subtitle: const Text('Copia JSON rápida'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onExportBackup,
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Snapshots'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: onViewSnapshots,
+              Icon(
+                Icons.dashboard_customize_outlined,
+                color: colors.primary,
+                size: 30,
               ),
             ],
           ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              _HeaderMetric(
+                label: 'Cartera',
+                value: moneyShort(totals.currentValue),
+                icon: Icons.account_balance_wallet_outlined,
+              ),
+              _HeaderMetric(
+                label: 'P&L no realizado',
+                value: moneyShort(totals.unrealizedPL),
+                color: pnlColor,
+                icon: totals.unrealizedPL >= 0
+                    ? Icons.trending_up
+                    : Icons.trending_down,
+              ),
+              _HeaderMetric(
+                label: 'Precios',
+                value: priceUpdatedLabel(pricesUpdatedAt),
+                icon: Icons.schedule_outlined,
+              ),
+              _HeaderMetric(
+                label: 'Fuente',
+                value: priceSource,
+                icon: Icons.cloud_outlined,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color? color;
+
+  const _HeaderMetric({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 142, maxWidth: 190),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: colors.surface.withValues(alpha: 0.62),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icon, size: 18, color: color ?? colors.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(label, style: Theme.of(context).textTheme.labelSmall),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w800, color: color),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommandSection extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const _CommandSection({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 8),
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final bool twoColumns = constraints.maxWidth >= 560;
+              final double spacing = twoColumns ? 12 : 0;
+              final double itemWidth = twoColumns
+                  ? (constraints.maxWidth - spacing) / 2
+                  : constraints.maxWidth;
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: 12,
+                children: children
+                    .map(
+                      (Widget child) => SizedBox(
+                        width: itemWidth,
+                        child: child,
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommandCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final bool loading;
+  final String? emptyTitle;
+  final String? emptySubtitle;
+  final String? emptyActionLabel;
+  final VoidCallback? onEmptyAction;
+  final VoidCallback? onTap;
+
+  const _CommandCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    this.loading = false,
+    this.emptyTitle,
+    this.emptySubtitle,
+    this.emptyActionLabel,
+    this.onEmptyAction,
+    this.onTap,
+  });
+
+  bool get _hasEmptyState => emptyTitle != null && emptySubtitle != null;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      color: colors.primary.withValues(alpha: 0.12),
+                    ),
+                    child: loading
+                        ? const Padding(
+                            padding: EdgeInsets.all(10),
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(icon, color: colors.primary),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            if (badge != null) ...<Widget>[
+                              const SizedBox(width: 6),
+                              _MiniBadge(label: badge!),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.chevron_right,
+                    color: colors.onSurfaceVariant.withValues(alpha: 0.72),
+                  ),
+                ],
+              ),
+              if (_hasEmptyState) ...<Widget>[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      Icon(icon, size: 22, color: colors.onSurfaceVariant),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              emptyTitle!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              emptySubtitle!,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (emptyActionLabel != null && onEmptyAction != null)
+                        TextButton(
+                          onPressed: onEmptyAction,
+                          child: Text(emptyActionLabel!),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _MiniBadge extends StatelessWidget {
+  final String label;
+
+  const _MiniBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: colors.primary.withValues(alpha: 0.12),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: colors.primary,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetAction {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  const _SheetAction({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+}
+
+class _CommandActionSheet extends StatelessWidget {
+  final String title;
+  final List<_SheetAction> actions;
+
+  const _CommandActionSheet({required this.title, required this.actions});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: actions.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (BuildContext context, int index) {
+                  final _SheetAction action = actions[index];
+                  return Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: Icon(action.icon),
+                      title: Text(action.title),
+                      subtitle: Text(action.subtitle),
+                      trailing: const Icon(Icons.chevron_right),
+                      enabled: action.onTap != null,
+                      onTap: action.onTap == null
+                          ? null
+                          : () {
+                              Navigator.of(context).pop();
+                              action.onTap!();
+                            },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
