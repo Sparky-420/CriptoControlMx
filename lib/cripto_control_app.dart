@@ -1806,6 +1806,67 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       ),
       home: Builder(
         builder: (BuildContext pageContext) {
+          void openMorePage(String title, Widget child) {
+            Navigator.of(pageContext).push(
+              MaterialPageRoute<void>(
+                builder: (_) => Scaffold(
+                  appBar: AppBar(title: Text(title)),
+                  body: child,
+                ),
+              ),
+            );
+          }
+
+          void openAlertsTab() {
+            Navigator.of(pageContext).maybePop();
+            setState(() => _currentIndex = 3);
+          }
+
+          Widget buildChartsTab() => ChartsTab(
+            stats: stats,
+            totals: totals,
+            snapshots: _snapshots,
+            onSaveSnapshot: () => _saveSnapshot(pageContext),
+            onViewSnapshots: () => _showSnapshots(pageContext),
+          );
+
+          Widget buildMovementsTab() => MovementsTab(
+            movements: _movements,
+            coins: _coins,
+            onAdd: () => _showAddMovementSheet(pageContext),
+            onEdit: (Movement movement) => _showAddMovementSheet(
+              pageContext,
+              existing: movement,
+              index: _movements.indexOf(movement),
+            ),
+            onDelete: (Movement movement) {
+              setState(() => _movements.remove(movement));
+              _saveData();
+            },
+          );
+
+          Widget buildSettingsTab() => SettingsTab(
+            darkMode: _darkMode,
+            sellFeePercent: _sellFeePercent,
+            snapshotCount: _snapshots.length,
+            pricesUpdatedAt: _pricesUpdatedAt,
+            isRefreshingPrices: _isRefreshingPrices,
+            onDarkModeChanged: _toggleDarkMode,
+            onRefreshPrices: () => _refreshPricesNow(pageContext),
+            onEditSellFee: () => _showSellFeeDialog(pageContext),
+            onOpenAlerts: openAlertsTab,
+            onSaveSnapshot: () => _saveSnapshot(pageContext),
+            onViewSnapshots: () => _showSnapshots(pageContext),
+            onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
+            onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
+            onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
+            onExportXlsx: () => _exportXlsx(pageContext),
+            onExportPdf: () => _exportPdf(pageContext),
+            onExportBackup: () => _exportBackup(pageContext),
+            onImportBackup: () => _importBackup(pageContext),
+            onImportBackupFile: () => _importBackupFile(pageContext),
+          );
+
           final List<Widget> pages = <Widget>[
             SimulationTab(
               coins: _coins,
@@ -1853,56 +1914,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onResetRecoveryAlertReferences: () =>
                   _resetRecoveryAlertReferences(pageContext),
             ),
-            ChartsTab(
-              stats: stats,
-              totals: totals,
-              snapshots: _snapshots,
-              onSaveSnapshot: () => _saveSnapshot(pageContext),
-              onViewSnapshots: () => _showSnapshots(pageContext),
-            ),
-            MovementsTab(
-              movements: _movements,
-              coins: _coins,
-              onAdd: () => _showAddMovementSheet(pageContext),
-              onEdit: (Movement movement) => _showAddMovementSheet(
-                pageContext,
-                existing: movement,
-                index: _movements.indexOf(movement),
-              ),
-              onDelete: (Movement movement) {
-                setState(() => _movements.remove(movement));
-                _saveData();
-              },
-            ),
-            SettingsTab(
-              darkMode: _darkMode,
-              sellFeePercent: _sellFeePercent,
-              snapshotCount: _snapshots.length,
-              pricesUpdatedAt: _pricesUpdatedAt,
-              isRefreshingPrices: _isRefreshingPrices,
-              priceAlertsEnabled: _priceAlertsEnabled,
-              priceAlertThresholdPercent: _priceAlertThresholdPercent,
-              priceAlertReferences: _priceAlertReferences,
-              notificationsAllowed: _notificationsAllowed,
-              onDarkModeChanged: _toggleDarkMode,
-              onRefreshPrices: () => _refreshPricesNow(pageContext),
-              onEditSellFee: () => _showSellFeeDialog(pageContext),
-              onPriceAlertsChanged: (bool enabled) =>
-                  _togglePriceAlerts(pageContext, enabled),
-              onEditPriceAlertThreshold: () =>
-                  _showPriceAlertThresholdDialog(pageContext),
-              onResetPriceAlertReferences: () =>
-                  _resetPriceAlertReferences(pageContext),
-              onSaveSnapshot: () => _saveSnapshot(pageContext),
-              onViewSnapshots: () => _showSnapshots(pageContext),
-              onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
-              onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
-              onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
-              onExportXlsx: () => _exportXlsx(pageContext),
-              onExportPdf: () => _exportPdf(pageContext),
+            MoreTab(
+              onOpenCharts: () => openMorePage('Gráficas', buildChartsTab()),
+              onOpenMovements: () => openMorePage('Historial', buildMovementsTab()),
+              onOpenSettings: () => openMorePage('Ajustes', buildSettingsTab()),
               onExportBackup: () => _exportBackup(pageContext),
-              onImportBackup: () => _importBackup(pageContext),
-              onImportBackupFile: () => _importBackupFile(pageContext),
+              onViewSnapshots: () => _showSnapshots(pageContext),
             ),
           ];
 
@@ -1951,16 +1968,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   label: 'Alertas',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.show_chart),
-                  label: 'Gráficas',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.receipt_long_outlined),
-                  label: 'Historial',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.settings_outlined),
-                  label: 'Ajustes',
+                  icon: Icon(Icons.more_horiz),
+                  label: 'Más',
                 ),
               ],
             ),
@@ -3878,7 +3887,7 @@ class CoinsTab extends StatelessWidget {
 }
 
 
-class AlertsTab extends StatelessWidget {
+class AlertsTab extends StatefulWidget {
   final List<String> coins;
   final Map<String, CoinStats> stats;
   final bool priceAlertsEnabled;
@@ -3923,13 +3932,17 @@ class AlertsTab extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final List<String> watchedCoins = coins
-        .where((String coin) => (stats[coin]?.currentPrice ?? 0) > 0)
-        .toList();
+  State<AlertsTab> createState() => _AlertsTabState();
+}
 
+class _AlertsTabState extends State<AlertsTab> {
+  int _segment = 0;
+  bool _showCoinsWithoutPosition = false;
+
+  @override
+  Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
       children: <Widget>[
         Text(
           'Alertas',
@@ -3937,52 +3950,84 @@ class AlertsTab extends StatelessWidget {
             context,
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
-        const SizedBox(height: 6),
-        const Text('Control directo para precios, umbrales y referencias.'),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
+        SegmentedButton<int>(
+          segments: const <ButtonSegment<int>>[
+            ButtonSegment<int>(
+              value: 0,
+              label: Text('Mercado'),
+              icon: Icon(Icons.show_chart),
+            ),
+            ButtonSegment<int>(
+              value: 1,
+              label: Text('Recuperación'),
+              icon: Icon(Icons.trending_up),
+            ),
+          ],
+          selected: <int>{_segment},
+          onSelectionChanged: (Set<int> selected) {
+            setState(() => _segment = selected.first);
+          },
+        ),
+        const SizedBox(height: 10),
+        if (_segment == 0) _buildMarketSection(context) else _buildRecoverySection(context),
+      ],
+    );
+  }
+
+  Widget _buildMarketSection(BuildContext context) {
+    final List<String> watchedCoins = widget.coins
+        .where((String coin) => (widget.stats[coin]?.currentPrice ?? 0) > 0)
+        .toList();
+
+    return Column(
+      children: <Widget>[
         CardPanel(
           title: 'Alertas de mercado',
-          subtitle: 'Precio de moneda · Umbral: ${pct(priceAlertThresholdPercent)} · ${priceUpdatedLabel(pricesUpdatedAt)}',
+          subtitle: '${pct(widget.priceAlertThresholdPercent)} · ${priceUpdatedLabel(widget.pricesUpdatedAt)}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               SwitchListTile(
-                value: priceAlertsEnabled,
-                onChanged: onPriceAlertsChanged,
-                title: const Text('Notificar subidas y bajadas'),
-                subtitle: const Text('Mercado = variación del precio de la moneda.'),
+                dense: true,
+                value: widget.priceAlertsEnabled,
+                onChanged: widget.onPriceAlertsChanged,
+                title: const Text('Activar mercado'),
                 contentPadding: EdgeInsets.zero,
               ),
-              if (priceAlertsEnabled && !notificationsAllowed)
+              if (widget.priceAlertsEnabled && !widget.notificationsAllowed)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    'Falta permiso de notificaciones del sistema.',
+                    'Falta permiso de notificaciones.',
                     style: TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ),
+              InfoLine('Umbral actual', pct(widget.priceAlertThresholdPercent)),
+              InfoLine('Monitoreo', '${watchedCoins.length} monedas monitoreadas'),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonalIcon(
-                    onPressed: isRefreshingPrices ? null : onRefreshPrices,
-                    icon: isRefreshingPrices
+                    onPressed: widget.isRefreshingPrices ? null : widget.onRefreshPrices,
+                    icon: widget.isRefreshingPrices
                         ? const SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.sync),
-                    label: Text(isRefreshingPrices ? 'Actualizando' : 'Actualizar precios'),
+                    label: Text(widget.isRefreshingPrices ? 'Actualizando' : 'Precios'),
                   ),
                   FilledButton.tonal(
-                    onPressed: onEditPriceAlertThreshold,
+                    onPressed: widget.onEditPriceAlertThreshold,
                     child: const Text('Editar umbral'),
                   ),
                   FilledButton.tonal(
-                    onPressed: onResetPriceAlertReferences,
-                    child: const Text('Reiniciar referencias de mercado'),
+                    onPressed: widget.onResetPriceAlertReferences,
+                    child: const Text('Reiniciar referencias'),
                   ),
                 ],
               ),
@@ -3990,19 +4035,17 @@ class AlertsTab extends StatelessWidget {
           ),
         ),
         CardPanel(
-          title: 'Referencias de precio de mercado',
-          subtitle: watchedCoins.isEmpty
-              ? 'Sin precios cargados todavía.'
-              : '${watchedCoins.length} monedas con precio actual.',
+          title: 'Monedas',
+          subtitle: watchedCoins.isEmpty ? 'Sin precios cargados.' : '${watchedCoins.length} monedas monitoreadas',
           child: Column(
-            children: coins.map((String coin) {
-              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
-              final double reference = priceAlertReferences[coin] ?? 0.0;
+            children: widget.coins.map((String coin) {
+              final CoinStats stat = widget.stats[coin] ?? CoinStats(coin: coin);
+              final double reference = widget.priceAlertReferences[coin] ?? 0.0;
               final double variation = reference <= 0
                   ? 0.0
                   : ((stat.currentPrice - reference) / reference) * 100;
               final bool triggered = reference > 0 &&
-                  variation.abs() >= priceAlertThresholdPercent;
+                  variation.abs() >= widget.priceAlertThresholdPercent;
 
               return AlertCoinRow(
                 coin: coin,
@@ -4014,42 +4057,52 @@ class AlertsTab extends StatelessWidget {
             }).toList(),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildRecoverySection(BuildContext context) {
+    final List<String> coinsToShow = widget.coins.where((String coin) {
+      if (_showCoinsWithoutPosition) {
+        return true;
+      }
+      final CoinStats stat = widget.stats[coin] ?? CoinStats(coin: coin);
+      return stat.quantity > 0;
+    }).toList();
+
+    return Column(
+      children: <Widget>[
         CardPanel(
           title: 'Alertas de recuperación',
-          subtitle:
-              'Recuperación = mi avance hacia break even por P&L no realizado.',
+          subtitle: 'Avance hacia break even.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               SwitchListTile(
-                value: recoveryAlertsEnabled,
-                onChanged: onRecoveryAlertsChanged,
-                title: const Text(
-                  'Notificar cuando mi resultado mejore o empeore',
-                ),
-                subtitle: const Text(
-                  'Usa cantidad, inversión neta, precio actual y comisión de venta.',
-                ),
+                dense: true,
+                value: widget.recoveryAlertsEnabled,
+                onChanged: widget.onRecoveryAlertsChanged,
+                title: const Text('Activar recuperación'),
+                subtitle: const Text('Basado en tu posición neta.'),
                 contentPadding: EdgeInsets.zero,
               ),
               InfoLine(
-                'Umbral',
-                '${recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
+                'Umbral actual',
+                '${widget.recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
               ),
+              const Text('Avance hacia break even por P&L no realizado.'),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonal(
-                    onPressed: onEditRecoveryAlertThreshold,
+                    onPressed: widget.onEditRecoveryAlertThreshold,
                     child: const Text('Editar umbral'),
                   ),
                   FilledButton.tonal(
-                    onPressed: onResetRecoveryAlertReferences,
-                    child: const Text(
-                      'Reiniciar referencias de recuperación',
-                    ),
+                    onPressed: widget.onResetRecoveryAlertReferences,
+                    child: const Text('Reiniciar referencias'),
                   ),
                 ],
               ),
@@ -4057,32 +4110,50 @@ class AlertsTab extends StatelessWidget {
           ),
         ),
         CardPanel(
-          title: 'P&L no realizado por moneda',
-          subtitle: 'Referencia de recuperación y cambio desde referencia.',
+          title: 'P&L por moneda',
+          subtitle: '${coinsToShow.length} monedas visibles',
           child: Column(
-            children: coins.map((String coin) {
-              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
-              final RecoveryAlertPosition position = RecoveryAlertPosition(
-                quantity: stat.quantity,
-                investmentNet: stat.costBase,
-                currentPrice: stat.currentPrice,
-                sellFeePercent: sellFeePercent,
-              );
-              final double? reference = recoveryAlertReferences[coin];
-              final double delta = reference == null
-                  ? 0.0
-                  : position.pnlPercent - reference;
-              final bool triggered = reference != null &&
-                  delta.abs() >= recoveryAlertThresholdPoints;
+            children: <Widget>[
+              SwitchListTile(
+                dense: true,
+                value: _showCoinsWithoutPosition,
+                onChanged: (bool value) {
+                  setState(() => _showCoinsWithoutPosition = value);
+                },
+                title: const Text('Mostrar monedas sin posición'),
+                contentPadding: EdgeInsets.zero,
+              ),
+              if (coinsToShow.isEmpty)
+                const EmptyState(
+                  icon: Icons.account_balance_wallet_outlined,
+                  title: 'Sin posiciones abiertas',
+                  subtitle: 'Activa el switch para ver monedas sin posición.',
+                )
+              else
+                ...coinsToShow.map((String coin) {
+                  final CoinStats stat = widget.stats[coin] ?? CoinStats(coin: coin);
+                  final RecoveryAlertPosition position = RecoveryAlertPosition(
+                    quantity: stat.quantity,
+                    investmentNet: stat.costBase,
+                    currentPrice: stat.currentPrice,
+                    sellFeePercent: widget.sellFeePercent,
+                  );
+                  final double? reference = widget.recoveryAlertReferences[coin];
+                  final double delta = reference == null
+                      ? 0.0
+                      : position.pnlPercent - reference;
+                  final bool triggered = reference != null &&
+                      delta.abs() >= widget.recoveryAlertThresholdPoints;
 
-              return RecoveryAlertCoinRow(
-                coin: coin,
-                position: position,
-                referencePnlPercent: reference,
-                deltaPoints: delta,
-                triggered: triggered,
-              );
-            }).toList(),
+                  return RecoveryAlertCoinRow(
+                    coin: coin,
+                    position: position,
+                    referencePnlPercent: reference,
+                    deltaPoints: delta,
+                    triggered: triggered,
+                  );
+                }),
+            ],
           ),
         ),
       ],
@@ -4108,12 +4179,12 @@ class AlertCoinRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = triggered
-        ? Theme.of(context).colorScheme.error
-        : Theme.of(context).colorScheme.primary;
+    final String variationText = referencePrice <= 0
+        ? 'Sin ref'
+        : '${variationPercent >= 0 ? '+' : ''}${variationPercent.toStringAsFixed(2)}%';
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -4121,38 +4192,23 @@ class AlertCoinRow extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  coin,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  '$coin | ${triggered ? 'Revisar' : 'Normal'} | $variationText',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
-              ),
-              StatusPill(
-                label: triggered ? 'Revisar' : 'Normal',
-                positive: !triggered,
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          LinearProgressIndicator(
-            value: (variationPercent.abs() / 20).clamp(0.0, 1.0),
-            minHeight: 8,
-            color: color,
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-          ),
-          const SizedBox(height: 6),
-          InfoLine('Actual', money(currentPrice)),
-          InfoLine('Referencia', money(referencePrice)),
-          InfoLine(
-            'Variación',
-            referencePrice <= 0 ? 'Sin referencia' : pct(variationPercent),
-            valueColor: referencePrice <= 0 ? null : pnlColor(variationPercent),
-          ),
-          const Divider(height: 8),
+          const SizedBox(height: 2),
+          Text('Actual: ${money(currentPrice)}'),
+          Text('Ref: ${money(referencePrice)}'),
+          const Divider(height: 12),
         ],
       ),
     );
   }
 }
-
 
 class RecoveryAlertCoinRow extends StatelessWidget {
   final String coin;
@@ -4173,18 +4229,16 @@ class RecoveryAlertCoinRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool hasPosition = position.hasPosition;
-    final Color color = triggered
-        ? Theme.of(context).colorScheme.error
-        : pnlColor(deltaPoints);
+    final String pnlText = hasPosition ? pct(position.pnlPercent) : 'Sin posición';
     final String referenceText = referencePnlPercent == null
-        ? 'Sin referencia'
+        ? 'Sin ref'
         : pct(referencePnlPercent!);
     final String deltaText = referencePnlPercent == null
-        ? 'Sin referencia'
+        ? 'Sin ref'
         : '${deltaPoints >= 0 ? '+' : ''}${deltaPoints.toStringAsFixed(2)} pts';
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -4192,10 +4246,12 @@ class RecoveryAlertCoinRow extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  coin,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+                  '$coin | $pnlText | Δ $deltaText',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
                   ),
                 ),
               ),
@@ -4205,41 +4261,13 @@ class RecoveryAlertCoinRow extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          LinearProgressIndicator(
-            value: referencePnlPercent == null
-                ? 0.0
-                : (deltaPoints.abs() / 20).clamp(0.0, 1.0),
-            minHeight: 8,
-            color: color,
-            backgroundColor: Theme.of(
-              context,
-            ).colorScheme.surfaceContainerHighest,
-          ),
-          const SizedBox(height: 6),
-          InfoLine('Cantidad', hasPosition ? crypto(position.quantity) : 'Sin posición'),
-          InfoLine('Inversión neta', money(position.investmentNet)),
-          InfoLine('Valor neto actual', money(position.netCurrentValue)),
-          InfoLine(
-            'P&L no realizado',
-            hasPosition ? pct(position.pnlPercent) : 'Sin posición',
-            valueColor: hasPosition ? pnlColor(position.unrealizedPnl) : null,
-          ),
-          InfoLine(
-            'Referencia de recuperación',
-            referenceText,
-            valueColor: referencePnlPercent == null
-                ? null
-                : pnlColor(referencePnlPercent!),
-          ),
-          InfoLine(
-            'Cambio desde referencia',
-            deltaText,
-            valueColor: referencePnlPercent == null ? null : pnlColor(deltaPoints),
-          ),
+          const SizedBox(height: 2),
+          Text('P&L no realizado: ${hasPosition ? money(position.unrealizedPnl) : 'Sin posición'}'),
+          Text('Ref: $referenceText'),
+          Text('Cambio desde referencia: $deltaText'),
           if (position.missingToBreakEven > 0)
-            InfoLine('Faltante break even', money(position.missingToBreakEven)),
-          const Divider(height: 8),
+            Text('Faltan: ${money(position.missingToBreakEven)} MXN'),
+          const Divider(height: 12),
         ],
       ),
     );
@@ -4443,22 +4471,90 @@ class ResultBar extends StatelessWidget {
   }
 }
 
+class MoreTab extends StatelessWidget {
+  final VoidCallback onOpenCharts;
+  final VoidCallback onOpenMovements;
+  final VoidCallback onOpenSettings;
+  final VoidCallback onExportBackup;
+  final VoidCallback onViewSnapshots;
+
+  const MoreTab({
+    super.key,
+    required this.onOpenCharts,
+    required this.onOpenMovements,
+    required this.onOpenSettings,
+    required this.onExportBackup,
+    required this.onViewSnapshots,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
+      children: <Widget>[
+        Text(
+          'Más',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: Column(
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.show_chart),
+                title: const Text('Gráficas'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onOpenCharts,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Historial'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onOpenMovements,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Ajustes'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onOpenSettings,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.file_download_outlined),
+                title: const Text('Exportar / Backup'),
+                subtitle: const Text('Copia JSON rápida'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onExportBackup,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Snapshots'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onViewSnapshots,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class SettingsTab extends StatelessWidget {
   final bool darkMode;
   final double sellFeePercent;
   final int snapshotCount;
   final DateTime? pricesUpdatedAt;
   final bool isRefreshingPrices;
-  final bool priceAlertsEnabled;
-  final double priceAlertThresholdPercent;
-  final Map<String, double> priceAlertReferences;
-  final bool notificationsAllowed;
   final ValueChanged<bool> onDarkModeChanged;
   final VoidCallback onRefreshPrices;
   final VoidCallback onEditSellFee;
-  final ValueChanged<bool> onPriceAlertsChanged;
-  final VoidCallback onEditPriceAlertThreshold;
-  final VoidCallback onResetPriceAlertReferences;
+  final VoidCallback onOpenAlerts;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final VoidCallback onExportMovementsCsv;
@@ -4477,16 +4573,10 @@ class SettingsTab extends StatelessWidget {
     required this.snapshotCount,
     required this.pricesUpdatedAt,
     required this.isRefreshingPrices,
-    required this.priceAlertsEnabled,
-    required this.priceAlertThresholdPercent,
-    required this.priceAlertReferences,
-    required this.notificationsAllowed,
     required this.onDarkModeChanged,
     required this.onRefreshPrices,
     required this.onEditSellFee,
-    required this.onPriceAlertsChanged,
-    required this.onEditPriceAlertThreshold,
-    required this.onResetPriceAlertReferences,
+    required this.onOpenAlerts,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onExportMovementsCsv,
@@ -4546,52 +4636,15 @@ class SettingsTab extends StatelessWidget {
           ),
         ),
         CardPanel(
-          title: 'Alertas de mercado',
-          subtitle:
-              'Notificar subidas y bajadas de precio desde una referencia guardada.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              SwitchListTile(
-                value: priceAlertsEnabled,
-                onChanged: onPriceAlertsChanged,
-                title: const Text('Notificar subidas y bajadas'),
-                contentPadding: EdgeInsets.zero,
-              ),
-              if (priceAlertsEnabled && !notificationsAllowed)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'Permiso de notificaciones no concedido. La app no crasheará, pero no podrá avisar.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              InfoLine('Umbral', pct(priceAlertThresholdPercent)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  FilledButton.tonal(
-                    onPressed: onEditPriceAlertThreshold,
-                    child: const Text('Editar umbral'),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: onResetPriceAlertReferences,
-                    child: const Text('Reiniciar referencias de mercado'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              ...<String>['BTC', 'ETH', 'LINK', 'LTC', 'UNI'].map(
-                (String coin) => InfoLine(
-                  'Referencia $coin',
-                  money(priceAlertReferences[coin] ?? 0.0),
-                ),
-              ),
-            ],
+          title: 'Alertas',
+          subtitle: 'Configura mercado y recuperación desde su pestaña.',
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: onOpenAlerts,
+              icon: const Icon(Icons.notifications_active_outlined),
+              label: const Text('Configurar alertas'),
+            ),
           ),
         ),
         CardPanel(
