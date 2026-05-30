@@ -14,8 +14,16 @@ class PriceAlertService {
   static const String lastNotifiedAtKey = 'price_alert_last_notified_at_json';
   static const String lastNotifiedPricesKey =
       'price_alert_last_notified_prices_json';
+  static const String recoveryEnabledKey = 'recovery_alerts_enabled';
+  static const String recoveryThresholdPointsKey =
+      'recovery_alert_threshold_points';
+  static const String recoveryReferencePnlKey =
+      'recovery_alert_reference_pnl_json';
+  static const String recoveryLastNotifiedAtKey =
+      'recovery_alert_last_notified_at_json';
 
   static const double defaultThresholdPercent = 2.0;
+  static const double defaultRecoveryThresholdPoints = 2.0;
   static const String _channelName = 'mx.criptocontrolmx.app/price_alerts';
 
   final MethodChannel _channel;
@@ -64,6 +72,16 @@ class PriceAlertService {
         prefs.getString(lastNotifiedPricesKey),
       ),
       lastNotifiedAt: _readDateMap(prefs.getString(lastNotifiedAtKey)),
+      recoveryEnabled: prefs.getBool(recoveryEnabledKey) ?? false,
+      recoveryThresholdPoints:
+          prefs.getDouble(recoveryThresholdPointsKey) ??
+          defaultRecoveryThresholdPoints,
+      recoveryReferencePnl: _readDoubleMap(
+        prefs.getString(recoveryReferencePnlKey),
+      ),
+      recoveryLastNotifiedAt: _readDateMap(
+        prefs.getString(recoveryLastNotifiedAtKey),
+      ),
     );
   }
 
@@ -76,6 +94,20 @@ class PriceAlertService {
     double thresholdPercent,
   ) async {
     await prefs.setDouble(thresholdPercentKey, thresholdPercent);
+  }
+
+  Future<void> setRecoveryEnabled(
+    SharedPreferences prefs,
+    bool enabled,
+  ) async {
+    await prefs.setBool(recoveryEnabledKey, enabled);
+  }
+
+  Future<void> setRecoveryThresholdPoints(
+    SharedPreferences prefs,
+    double thresholdPoints,
+  ) async {
+    await prefs.setDouble(recoveryThresholdPointsKey, thresholdPoints);
   }
 
   Future<PriceAlertSettings> resetReferences(
@@ -93,13 +125,32 @@ class PriceAlertService {
     return loadSettings(prefs);
   }
 
+  Future<PriceAlertSettings> resetRecoveryReferences(
+    SharedPreferences prefs,
+    Map<String, RecoveryAlertPosition> positions,
+    Iterable<String> coins,
+  ) async {
+    final Map<String, double> references = <String, double>{};
+    for (final String coin in coins) {
+      final RecoveryAlertPosition? position = positions[coin];
+      if (position != null && position.hasPosition) {
+        references[coin] = position.pnlPercent;
+      }
+    }
+
+    await prefs.setString(recoveryReferencePnlKey, jsonEncode(references));
+    return loadSettings(prefs);
+  }
+
   Future<PriceAlertEvaluation> evaluatePrices({
     required SharedPreferences prefs,
     required Map<String, double> currentPrices,
     required Iterable<String> coins,
+    Map<String, RecoveryAlertPosition> recoveryPositions =
+        const <String, RecoveryAlertPosition>{},
   }) async {
     final PriceAlertSettings settings = await loadSettings(prefs);
-    if (!settings.enabled) {
+    if (!settings.enabled && !settings.recoveryEnabled) {
       return PriceAlertEvaluation(settings: settings, notificationCount: 0);
     }
 
@@ -113,35 +164,81 @@ class PriceAlertService {
     final Map<String, DateTime> notifiedAt = Map<String, DateTime>.from(
       settings.lastNotifiedAt,
     );
+    final Map<String, double> recoveryReferences = Map<String, double>.from(
+      settings.recoveryReferencePnl,
+    );
+    final Map<String, DateTime> recoveryNotifiedAt = Map<String, DateTime>.from(
+      settings.recoveryLastNotifiedAt,
+    );
 
     var notificationCount = 0;
 
-    for (final String coin in coins) {
-      final double currentPrice = currentPrices[coin] ?? 0.0;
-      if (currentPrice <= 0) continue;
+    if (settings.enabled) {
+      for (final String coin in coins) {
+        final double currentPrice = currentPrices[coin] ?? 0.0;
+        if (currentPrice <= 0) continue;
 
-      final double referencePrice = references[coin] ?? 0.0;
-      if (referencePrice <= 0) {
-        references[coin] = currentPrice;
-        continue;
-      }
-
-      final double changePct =
-          (currentPrice - referencePrice) / referencePrice * 100;
-      if (changePct >= threshold || changePct <= -threshold) {
-        final bool isUp = changePct > 0;
-        final bool wasSent = await notifyPriceAlert(
-          coin: coin,
-          changePct: changePct,
-          currentPrice: currentPrice,
-          isUp: isUp,
-        );
-
-        if (wasSent) {
-          notificationCount += 1;
+        final double referencePrice = references[coin] ?? 0.0;
+        if (referencePrice <= 0) {
           references[coin] = currentPrice;
-          notifiedPrices[coin] = currentPrice;
-          notifiedAt[coin] = DateTime.now();
+          continue;
+        }
+
+        final double changePct =
+            (currentPrice - referencePrice) / referencePrice * 100;
+        if (changePct >= threshold || changePct <= -threshold) {
+          final bool isUp = changePct > 0;
+          final bool wasSent = await notifyPriceAlert(
+            coin: coin,
+            changePct: changePct,
+            currentPrice: currentPrice,
+            isUp: isUp,
+          );
+
+          if (wasSent) {
+            notificationCount += 1;
+            references[coin] = currentPrice;
+            notifiedPrices[coin] = currentPrice;
+            notifiedAt[coin] = DateTime.now();
+          }
+        }
+      }
+    }
+
+    if (settings.recoveryEnabled) {
+      final double recoveryThreshold = math.max(
+        0.01,
+        settings.recoveryThresholdPoints,
+      );
+      for (final String coin in coins) {
+        final RecoveryAlertPosition? position = recoveryPositions[coin];
+        if (position == null || !position.hasPosition) continue;
+
+        final double currentPnlPct = position.pnlPercent;
+        final double? referencePnlPct = recoveryReferences[coin];
+        if (referencePnlPct == null) {
+          recoveryReferences[coin] = currentPnlPct;
+          continue;
+        }
+
+        final double deltaPoints = currentPnlPct - referencePnlPct;
+        if (deltaPoints >= recoveryThreshold ||
+            deltaPoints <= -recoveryThreshold) {
+          final bool improved = deltaPoints > 0;
+          final bool wasSent = await notifyRecoveryAlert(
+            coin: coin,
+            previousPnlPct: referencePnlPct,
+            currentPnlPct: currentPnlPct,
+            deltaPoints: deltaPoints,
+            missingToBreakEven: position.missingToBreakEven,
+            improved: improved,
+          );
+
+          if (wasSent) {
+            notificationCount += 1;
+            recoveryReferences[coin] = currentPnlPct;
+            recoveryNotifiedAt[coin] = DateTime.now();
+          }
         }
       }
     }
@@ -152,6 +249,14 @@ class PriceAlertService {
       lastNotifiedAtKey,
       jsonEncode(_encodeDateMap(notifiedAt)),
     );
+    await prefs.setString(
+      recoveryReferencePnlKey,
+      jsonEncode(recoveryReferences),
+    );
+    await prefs.setString(
+      recoveryLastNotifiedAtKey,
+      jsonEncode(_encodeDateMap(recoveryNotifiedAt)),
+    );
 
     return PriceAlertEvaluation(
       settings: PriceAlertSettings(
@@ -160,9 +265,46 @@ class PriceAlertService {
         referencePrices: references,
         lastNotifiedPrices: notifiedPrices,
         lastNotifiedAt: notifiedAt,
+        recoveryEnabled: settings.recoveryEnabled,
+        recoveryThresholdPoints: settings.recoveryThresholdPoints,
+        recoveryReferencePnl: recoveryReferences,
+        recoveryLastNotifiedAt: recoveryNotifiedAt,
       ),
       notificationCount: notificationCount,
     );
+  }
+
+  Future<bool> notifyRecoveryAlert({
+    required String coin,
+    required double previousPnlPct,
+    required double currentPnlPct,
+    required double deltaPoints,
+    required double missingToBreakEven,
+    required bool improved,
+  }) async {
+    final String status = improved ? 'mejoró' : 'empeoró';
+    final String signedPoints =
+        '${deltaPoints >= 0 ? '+' : ''}${deltaPoints.toStringAsFixed(2)} pts';
+    final String title = '$coin $status $signedPoints';
+    final String previous = previousPnlPct.toStringAsFixed(2);
+    final String current = currentPnlPct.toStringAsFixed(2);
+    final String breakEvenText = missingToBreakEven > 0
+        ? ' Faltan ${formatMxn(missingToBreakEven)} para break even.'
+        : '';
+    final String body =
+        'Tu P&L pasó de $previous% a $current%.$breakEvenText';
+
+    try {
+      return await _channel.invokeMethod<bool>(
+            'showPriceAlert',
+            <String, Object>{'coin': coin, 'title': title, 'body': body},
+          ) ??
+          false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
   }
 
   Future<bool> notifyPriceAlert({
@@ -264,6 +406,10 @@ class PriceAlertSettings {
     required this.referencePrices,
     required this.lastNotifiedPrices,
     required this.lastNotifiedAt,
+    required this.recoveryEnabled,
+    required this.recoveryThresholdPoints,
+    required this.recoveryReferencePnl,
+    required this.recoveryLastNotifiedAt,
   });
 
   final bool enabled;
@@ -271,6 +417,10 @@ class PriceAlertSettings {
   final Map<String, double> referencePrices;
   final Map<String, double> lastNotifiedPrices;
   final Map<String, DateTime> lastNotifiedAt;
+  final bool recoveryEnabled;
+  final double recoveryThresholdPoints;
+  final Map<String, double> recoveryReferencePnl;
+  final Map<String, DateTime> recoveryLastNotifiedAt;
 }
 
 class PriceAlertEvaluation {
@@ -281,4 +431,29 @@ class PriceAlertEvaluation {
 
   final PriceAlertSettings settings;
   final int notificationCount;
+}
+
+class RecoveryAlertPosition {
+  const RecoveryAlertPosition({
+    required this.quantity,
+    required this.investmentNet,
+    required this.currentPrice,
+    required this.sellFeePercent,
+  });
+
+  final double quantity;
+  final double investmentNet;
+  final double currentPrice;
+  final double sellFeePercent;
+
+  bool get hasPosition => quantity > 0 && investmentNet > 0 && currentPrice > 0;
+  double get grossCurrentValue => quantity * currentPrice;
+  double get netCurrentValue {
+    final double multiplier = (1 - sellFeePercent / 100).clamp(0.0, 1.0);
+    return grossCurrentValue * multiplier;
+  }
+  double get unrealizedPnl => netCurrentValue - investmentNet;
+  double get pnlPercent =>
+      investmentNet > 0 ? (unrealizedPnl / investmentNet) * 100 : 0.0;
+  double get missingToBreakEven => unrealizedPnl < 0 ? -unrealizedPnl : 0.0;
 }
