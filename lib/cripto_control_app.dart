@@ -57,6 +57,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   double _priceAlertThresholdPercent =
       PriceAlertService.defaultThresholdPercent;
   Map<String, double> _priceAlertReferences = <String, double>{};
+  bool _recoveryAlertsEnabled = false;
+  double _recoveryAlertThresholdPoints =
+      PriceAlertService.defaultRecoveryThresholdPoints;
+  Map<String, double> _recoveryAlertReferences = <String, double>{};
 
   @override
   void initState() {
@@ -136,6 +140,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     _priceAlertsEnabled = settings.enabled;
     _priceAlertThresholdPercent = settings.thresholdPercent;
     _priceAlertReferences = settings.referencePrices;
+    _recoveryAlertsEnabled = settings.recoveryEnabled;
+    _recoveryAlertThresholdPoints = settings.recoveryThresholdPoints;
+    _recoveryAlertReferences = settings.recoveryReferencePnl;
     _notificationsAllowed = notificationsAllowed;
   }
 
@@ -145,6 +152,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           prefs: prefs,
           currentPrices: _currentPrices,
           coins: _coins,
+          recoveryPositions: _recoveryAlertPositions(_computeStats()),
         );
     final bool notificationsAllowed = await _priceAlertService
         .areNotificationsAllowed();
@@ -154,8 +162,26 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       _priceAlertsEnabled = evaluation.settings.enabled;
       _priceAlertThresholdPercent = evaluation.settings.thresholdPercent;
       _priceAlertReferences = evaluation.settings.referencePrices;
+      _recoveryAlertsEnabled = evaluation.settings.recoveryEnabled;
+      _recoveryAlertThresholdPoints =
+          evaluation.settings.recoveryThresholdPoints;
+      _recoveryAlertReferences = evaluation.settings.recoveryReferencePnl;
       _notificationsAllowed = notificationsAllowed;
     });
+  }
+
+  Map<String, RecoveryAlertPosition> _recoveryAlertPositions(
+    Map<String, CoinStats> stats,
+  ) {
+    return <String, RecoveryAlertPosition>{
+      for (final String coin in _coins)
+        coin: RecoveryAlertPosition(
+          quantity: stats[coin]?.quantity ?? 0.0,
+          investmentNet: stats[coin]?.costBase ?? 0.0,
+          currentPrice: stats[coin]?.currentPrice ?? 0.0,
+          sellFeePercent: _sellFeePercent,
+        ),
+    };
   }
 
   Future<void> _togglePriceAlerts(
@@ -184,6 +210,81 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         ),
       );
     }
+  }
+
+  Future<void> _toggleRecoveryAlerts(
+    BuildContext pageContext,
+    bool enabled,
+  ) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    var notificationsAllowed = await _priceAlertService
+        .areNotificationsAllowed();
+
+    if (enabled && !notificationsAllowed) {
+      notificationsAllowed = await _priceAlertService
+          .requestNotificationPermission();
+    }
+
+    await _priceAlertService.setRecoveryEnabled(prefs, enabled);
+    await _loadPriceAlertSettings(prefs);
+    if (mounted) setState(() {});
+
+    if (enabled && !notificationsAllowed && pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Activa el permiso de notificaciones para recibir alertas.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _showRecoveryAlertThresholdDialog(
+    BuildContext pageContext,
+  ) async {
+    final TextEditingController controller = TextEditingController(
+      text: compact(_recoveryAlertThresholdPoints),
+    );
+
+    await showDialog<void>(
+      context: pageContext,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Umbral de recuperación'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Puntos porcentuales',
+            helperText: 'Default: 2.0',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final double? value = double.tryParse(controller.text.trim());
+              if (value == null || value <= 0 || value > 100) return;
+
+              final SharedPreferences prefs =
+                  await SharedPreferences.getInstance();
+              await _priceAlertService.setRecoveryThresholdPoints(
+                prefs,
+                value,
+              );
+              await _loadPriceAlertSettings(prefs);
+              if (mounted) setState(() {});
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showPriceAlertThresholdDialog(BuildContext pageContext) async {
@@ -243,6 +344,31 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     if (pageContext.mounted) {
       ScaffoldMessenger.of(pageContext).showSnackBar(
         const SnackBar(content: Text('Referencias reiniciadas')),
+      );
+    }
+  }
+
+  Future<void> _resetRecoveryAlertReferences(BuildContext pageContext) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final PriceAlertSettings settings = await _priceAlertService
+        .resetRecoveryReferences(
+          prefs,
+          _recoveryAlertPositions(_computeStats()),
+          _coins,
+        );
+
+    if (!mounted) return;
+    setState(() {
+      _recoveryAlertReferences = settings.recoveryReferencePnl;
+      _recoveryAlertThresholdPoints = settings.recoveryThresholdPoints;
+      _recoveryAlertsEnabled = settings.recoveryEnabled;
+    });
+
+    if (pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text('Referencias de recuperación reiniciadas'),
+        ),
       );
     }
   }
@@ -1706,6 +1832,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               priceAlertsEnabled: _priceAlertsEnabled,
               priceAlertThresholdPercent: _priceAlertThresholdPercent,
               priceAlertReferences: _priceAlertReferences,
+              recoveryAlertsEnabled: _recoveryAlertsEnabled,
+              recoveryAlertThresholdPoints: _recoveryAlertThresholdPoints,
+              recoveryAlertReferences: _recoveryAlertReferences,
+              sellFeePercent: _sellFeePercent,
               notificationsAllowed: _notificationsAllowed,
               pricesUpdatedAt: _pricesUpdatedAt,
               isRefreshingPrices: _isRefreshingPrices,
@@ -1716,6 +1846,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   _showPriceAlertThresholdDialog(pageContext),
               onResetPriceAlertReferences: () =>
                   _resetPriceAlertReferences(pageContext),
+              onRecoveryAlertsChanged: (bool enabled) =>
+                  _toggleRecoveryAlerts(pageContext, enabled),
+              onEditRecoveryAlertThreshold: () =>
+                  _showRecoveryAlertThresholdDialog(pageContext),
+              onResetRecoveryAlertReferences: () =>
+                  _resetRecoveryAlertReferences(pageContext),
             ),
             ChartsTab(
               stats: stats,
@@ -3748,6 +3884,10 @@ class AlertsTab extends StatelessWidget {
   final bool priceAlertsEnabled;
   final double priceAlertThresholdPercent;
   final Map<String, double> priceAlertReferences;
+  final bool recoveryAlertsEnabled;
+  final double recoveryAlertThresholdPoints;
+  final Map<String, double> recoveryAlertReferences;
+  final double sellFeePercent;
   final bool notificationsAllowed;
   final DateTime? pricesUpdatedAt;
   final bool isRefreshingPrices;
@@ -3755,6 +3895,9 @@ class AlertsTab extends StatelessWidget {
   final ValueChanged<bool> onPriceAlertsChanged;
   final VoidCallback onEditPriceAlertThreshold;
   final VoidCallback onResetPriceAlertReferences;
+  final ValueChanged<bool> onRecoveryAlertsChanged;
+  final VoidCallback onEditRecoveryAlertThreshold;
+  final VoidCallback onResetRecoveryAlertReferences;
 
   const AlertsTab({
     super.key,
@@ -3763,6 +3906,10 @@ class AlertsTab extends StatelessWidget {
     required this.priceAlertsEnabled,
     required this.priceAlertThresholdPercent,
     required this.priceAlertReferences,
+    required this.recoveryAlertsEnabled,
+    required this.recoveryAlertThresholdPoints,
+    required this.recoveryAlertReferences,
+    required this.sellFeePercent,
     required this.notificationsAllowed,
     required this.pricesUpdatedAt,
     required this.isRefreshingPrices,
@@ -3770,6 +3917,9 @@ class AlertsTab extends StatelessWidget {
     required this.onPriceAlertsChanged,
     required this.onEditPriceAlertThreshold,
     required this.onResetPriceAlertReferences,
+    required this.onRecoveryAlertsChanged,
+    required this.onEditRecoveryAlertThreshold,
+    required this.onResetRecoveryAlertReferences,
   });
 
   @override
@@ -3791,8 +3941,8 @@ class AlertsTab extends StatelessWidget {
         const Text('Control directo para precios, umbrales y referencias.'),
         const SizedBox(height: 12),
         CardPanel(
-          title: priceAlertsEnabled ? 'Alertas activas' : 'Alertas pausadas',
-          subtitle: 'Umbral actual: ${pct(priceAlertThresholdPercent)} · ${priceUpdatedLabel(pricesUpdatedAt)}',
+          title: 'Alertas de mercado',
+          subtitle: 'Precio de moneda · Umbral: ${pct(priceAlertThresholdPercent)} · ${priceUpdatedLabel(pricesUpdatedAt)}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -3800,7 +3950,7 @@ class AlertsTab extends StatelessWidget {
                 value: priceAlertsEnabled,
                 onChanged: onPriceAlertsChanged,
                 title: const Text('Notificar subidas y bajadas'),
-                subtitle: const Text('Compara precio actual contra referencia guardada.'),
+                subtitle: const Text('Mercado = variación del precio de la moneda.'),
                 contentPadding: EdgeInsets.zero,
               ),
               if (priceAlertsEnabled && !notificationsAllowed)
@@ -3832,7 +3982,7 @@ class AlertsTab extends StatelessWidget {
                   ),
                   FilledButton.tonal(
                     onPressed: onResetPriceAlertReferences,
-                    child: const Text('Reiniciar referencias'),
+                    child: const Text('Reiniciar referencias de mercado'),
                   ),
                 ],
               ),
@@ -3840,7 +3990,7 @@ class AlertsTab extends StatelessWidget {
           ),
         ),
         CardPanel(
-          title: 'Monitor por moneda',
+          title: 'Referencias de precio de mercado',
           subtitle: watchedCoins.isEmpty
               ? 'Sin precios cargados todavía.'
               : '${watchedCoins.length} monedas con precio actual.',
@@ -3851,13 +4001,85 @@ class AlertsTab extends StatelessWidget {
               final double variation = reference <= 0
                   ? 0.0
                   : ((stat.currentPrice - reference) / reference) * 100;
-              final bool triggered = reference > 0 && variation.abs() >= priceAlertThresholdPercent;
+              final bool triggered = reference > 0 &&
+                  variation.abs() >= priceAlertThresholdPercent;
 
               return AlertCoinRow(
                 coin: coin,
                 currentPrice: stat.currentPrice,
                 referencePrice: reference,
                 variationPercent: variation,
+                triggered: triggered,
+              );
+            }).toList(),
+          ),
+        ),
+        CardPanel(
+          title: 'Alertas de recuperación',
+          subtitle:
+              'Recuperación = mi avance hacia break even por P&L no realizado.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              SwitchListTile(
+                value: recoveryAlertsEnabled,
+                onChanged: onRecoveryAlertsChanged,
+                title: const Text(
+                  'Notificar cuando mi resultado mejore o empeore',
+                ),
+                subtitle: const Text(
+                  'Usa cantidad, inversión neta, precio actual y comisión de venta.',
+                ),
+                contentPadding: EdgeInsets.zero,
+              ),
+              InfoLine(
+                'Umbral',
+                '${recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton.tonal(
+                    onPressed: onEditRecoveryAlertThreshold,
+                    child: const Text('Editar umbral'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onResetRecoveryAlertReferences,
+                    child: const Text(
+                      'Reiniciar referencias de recuperación',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        CardPanel(
+          title: 'P&L no realizado por moneda',
+          subtitle: 'Referencia de recuperación y cambio desde referencia.',
+          child: Column(
+            children: coins.map((String coin) {
+              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+              final RecoveryAlertPosition position = RecoveryAlertPosition(
+                quantity: stat.quantity,
+                investmentNet: stat.costBase,
+                currentPrice: stat.currentPrice,
+                sellFeePercent: sellFeePercent,
+              );
+              final double? reference = recoveryAlertReferences[coin];
+              final double delta = reference == null
+                  ? 0.0
+                  : position.pnlPercent - reference;
+              final bool triggered = reference != null &&
+                  delta.abs() >= recoveryAlertThresholdPoints;
+
+              return RecoveryAlertCoinRow(
+                coin: coin,
+                position: position,
+                referencePnlPercent: reference,
+                deltaPoints: delta,
                 triggered: triggered,
               );
             }).toList(),
@@ -3924,6 +4146,99 @@ class AlertCoinRow extends StatelessWidget {
             referencePrice <= 0 ? 'Sin referencia' : pct(variationPercent),
             valueColor: referencePrice <= 0 ? null : pnlColor(variationPercent),
           ),
+          const Divider(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+
+class RecoveryAlertCoinRow extends StatelessWidget {
+  final String coin;
+  final RecoveryAlertPosition position;
+  final double? referencePnlPercent;
+  final double deltaPoints;
+  final bool triggered;
+
+  const RecoveryAlertCoinRow({
+    super.key,
+    required this.coin,
+    required this.position,
+    required this.referencePnlPercent,
+    required this.deltaPoints,
+    required this.triggered,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool hasPosition = position.hasPosition;
+    final Color color = triggered
+        ? Theme.of(context).colorScheme.error
+        : pnlColor(deltaPoints);
+    final String referenceText = referencePnlPercent == null
+        ? 'Sin referencia'
+        : pct(referencePnlPercent!);
+    final String deltaText = referencePnlPercent == null
+        ? 'Sin referencia'
+        : '${deltaPoints >= 0 ? '+' : ''}${deltaPoints.toStringAsFixed(2)} pts';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  coin,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              StatusPill(
+                label: triggered ? 'Revisar' : 'Normal',
+                positive: !triggered,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: referencePnlPercent == null
+                ? 0.0
+                : (deltaPoints.abs() / 20).clamp(0.0, 1.0),
+            minHeight: 8,
+            color: color,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
+          ),
+          const SizedBox(height: 6),
+          InfoLine('Cantidad', hasPosition ? crypto(position.quantity) : 'Sin posición'),
+          InfoLine('Inversión neta', money(position.investmentNet)),
+          InfoLine('Valor neto actual', money(position.netCurrentValue)),
+          InfoLine(
+            'P&L no realizado',
+            hasPosition ? pct(position.pnlPercent) : 'Sin posición',
+            valueColor: hasPosition ? pnlColor(position.unrealizedPnl) : null,
+          ),
+          InfoLine(
+            'Referencia de recuperación',
+            referenceText,
+            valueColor: referencePnlPercent == null
+                ? null
+                : pnlColor(referencePnlPercent!),
+          ),
+          InfoLine(
+            'Cambio desde referencia',
+            deltaText,
+            valueColor: referencePnlPercent == null ? null : pnlColor(deltaPoints),
+          ),
+          if (position.missingToBreakEven > 0)
+            InfoLine('Faltante break even', money(position.missingToBreakEven)),
           const Divider(height: 8),
         ],
       ),
@@ -4231,9 +4546,9 @@ class SettingsTab extends StatelessWidget {
           ),
         ),
         CardPanel(
-          title: 'Alertas de precio',
+          title: 'Alertas de mercado',
           subtitle:
-              'Notificar subidas y bajadas desde una referencia guardada.',
+              'Notificar subidas y bajadas de precio desde una referencia guardada.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -4265,7 +4580,7 @@ class SettingsTab extends StatelessWidget {
                   ),
                   FilledButton.tonal(
                     onPressed: onResetPriceAlertReferences,
-                    child: const Text('Reiniciar referencias'),
+                    child: const Text('Reiniciar referencias de mercado'),
                   ),
                 ],
               ),
