@@ -18,6 +18,9 @@ app_*.apk
 app_*.aab
 app_*.ipa
 
+# Android signing
+android/key.properties
+
 # Local/private crypto backups
 assets/import/backup_v2.json
 

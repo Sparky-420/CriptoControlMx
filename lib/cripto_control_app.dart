@@ -14,10 +14,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 
-void main() {
-  runApp(const CriptoControlApp());
-}
-
 class CriptoControlApp extends StatefulWidget {
   const CriptoControlApp({super.key});
 

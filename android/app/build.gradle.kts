@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,9 +7,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
 android {
     namespace = "mx.criptocontrolmx.app"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35
     // Pin a stable NDK version instead of using flutter.ndkVersion. This avoids builds
     // failing when a locally cached Flutter-selected NDK folder is malformed/corrupt.
     ndkVersion = "27.0.12077973"
@@ -23,18 +31,27 @@ android {
 
     defaultConfig {
         applicationId = "mx.criptocontrolmx.app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 23
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            val storeFilePath = keystoreProperties["storeFile"]?.toString().orEmpty()
+            if (storeFilePath.isNotBlank()) {
+                storeFile = file(storeFilePath)
+            }
+            storePassword = keystoreProperties["storePassword"]?.toString().orEmpty()
+            keyAlias = keystoreProperties["keyAlias"]?.toString().orEmpty()
+            keyPassword = keystoreProperties["keyPassword"]?.toString().orEmpty()
+        }
+    }
+
     buildTypes {
         release {
-            // Uses debug signing until a private production keystore is configured.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
