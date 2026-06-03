@@ -29,6 +29,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   static const String _sellFeePercentKey = 'sell_fee_percent';
   static const String _snapshotsKey = 'portfolio_snapshots_v23_json';
   static const String _darkModeKey = 'dark_mode_v24';
+  static const String _themeModeKey = 'theme_mode_v25';
+  static const String _accentColorKey = 'accent_color_v25';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -45,7 +47,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
   int _currentIndex = 0;
   double _sellFeePercent = 0.0;
-  bool _darkMode = false;
+  AppVisualMode _visualMode = AppVisualMode.system;
+  AppAccentColor _accentColor = AppAccentColor.blue;
+  SimulationMode _requestedSimulationMode = SimulationMode.operation;
+  int _simulationOpenNonce = 0;
   DateTime? _pricesUpdatedAt;
   bool _isRefreshingPrices = false;
   bool _priceAlertsEnabled = false;
@@ -111,7 +116,15 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     }
 
     _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ?? 0.0;
-    _darkMode = prefs.getBool(_darkModeKey) ?? false;
+    final String? savedVisualMode = prefs.getString(_themeModeKey);
+    if (savedVisualMode != null) {
+      _visualMode = appVisualModeFromName(savedVisualMode);
+    } else {
+      _visualMode = (prefs.getBool(_darkModeKey) ?? false)
+          ? AppVisualMode.dark
+          : AppVisualMode.system;
+    }
+    _accentColor = appAccentColorFromName(prefs.getString(_accentColorKey));
     await _loadPriceAlertSettings(prefs);
 
     if (mounted) setState(() {});
@@ -252,7 +265,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
             labelText: 'Puntos porcentuales',
-            helperText: 'Default: 2.0',
+            helperText: 'Predeterminado: 2.0',
             border: OutlineInputBorder(),
           ),
         ),
@@ -297,7 +310,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
             labelText: 'Umbral %',
-            helperText: 'Default: 2.0',
+            helperText: 'Predeterminado: 2.0',
             border: OutlineInputBorder(),
           ),
         ),
@@ -421,7 +434,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
     await prefs.setDouble(_sellFeePercentKey, _sellFeePercent);
-    await prefs.setBool(_darkModeKey, _darkMode);
+    await prefs.setString(_themeModeKey, _visualMode.name);
+    await prefs.setString(_accentColorKey, _accentColor.name);
+    await prefs.setBool(_darkModeKey, _visualMode == AppVisualMode.dark);
   }
 
   Future<void> _saveSnapshots() async {
@@ -613,9 +628,22 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     return false;
   }
 
-  void _toggleDarkMode(bool value) {
-    setState(() => _darkMode = value);
+  void _changeVisualMode(AppVisualMode value) {
+    setState(() => _visualMode = value);
     _saveData();
+  }
+
+  void _changeAccentColor(AppAccentColor value) {
+    setState(() => _accentColor = value);
+    _saveData();
+  }
+
+  void _openSimulationMode(SimulationMode mode) {
+    setState(() {
+      _requestedSimulationMode = mode;
+      _simulationOpenNonce++;
+      _currentIndex = 0;
+    });
   }
 
   Future<void> _showSellFeeDialog(BuildContext pageContext) async {
@@ -1158,16 +1186,13 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                               ),
                               child: Column(
                                 children: <Widget>[
+                                  InfoLine('Fecha', longDate(snapshot.createdAt)),
                                   InfoLine(
-                                    'Invertido',
-                                    money(snapshot.totalCostBase),
-                                  ),
-                                  InfoLine(
-                                    'Vale hoy',
+                                    'Valor cartera',
                                     money(snapshot.totalCurrentValue),
                                   ),
                                   InfoLine(
-                                    'Resultado actual',
+                                    'P&L no realizado',
                                     money(snapshot.totalUnrealizedPL),
                                     valueColor: pnlColor(
                                       snapshot.totalUnrealizedPL,
@@ -1180,6 +1205,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                     valueColor: pnlColor(
                                       snapshot.totalRealizedPL,
                                     ),
+                                  ),
+                                  InfoLine(
+                                    'Inversión total',
+                                    money(snapshot.totalCostBase),
+                                  ),
+                                  InfoLine(
+                                    'Moneda dominante',
+                                    snapshot.dominantCoinLabel,
                                   ),
                                   InfoLine(
                                     'Movimientos',
@@ -1776,10 +1809,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'CriptoControlMx',
-      themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: _visualMode.themeMode,
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: Colors.green,
+        colorSchemeSeed: _accentColor.color,
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF7FAF2),
         cardTheme: CardThemeData(
@@ -1791,7 +1824,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: Colors.green,
+        colorSchemeSeed: _accentColor.color,
         brightness: Brightness.dark,
         cardTheme: CardThemeData(
           elevation: 0,
@@ -1842,12 +1875,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           );
 
           Widget buildSettingsTab() => SettingsTab(
-            darkMode: _darkMode,
+            visualMode: _visualMode,
+            accentColor: _accentColor,
             sellFeePercent: _sellFeePercent,
             snapshotCount: _snapshots.length,
             pricesUpdatedAt: _pricesUpdatedAt,
             isRefreshingPrices: _isRefreshingPrices,
-            onDarkModeChanged: _toggleDarkMode,
+            onVisualModeChanged: _changeVisualMode,
+            onAccentColorChanged: _changeAccentColor,
             onRefreshPrices: () => _refreshPricesNow(pageContext),
             onEditSellFee: () => _showSellFeeDialog(pageContext),
             onOpenAlerts: openAlertsTab,
@@ -1865,15 +1900,24 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
           final List<Widget> pages = <Widget>[
             SimulationTab(
+              key: ValueKey<String>(
+                '${_requestedSimulationMode.name}-$_simulationOpenNonce',
+              ),
               coins: _coins,
               stats: stats,
               defaultFeePercent: _sellFeePercent == 0 ? 1.5 : _sellFeePercent,
+              initialMode: _requestedSimulationMode,
             ),
             SummaryTab(
               stats: stats,
               totals: totals,
               sellFeePercent: _sellFeePercent,
+              latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first,
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
+              onSaveSnapshot: () => _saveSnapshot(pageContext),
+              onViewSnapshots: () => _showSnapshots(pageContext),
+              onViewSnapshotEvolution: () =>
+                  openMorePage('Gráficas', buildChartsTab()),
             ),
             CoinsTab(
               coins: _coins,
@@ -1921,7 +1965,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   .length,
               onAddMovement: () => _showAddMovementSheet(pageContext),
               onRefreshPrices: () => _refreshPricesNow(pageContext),
-              onOpenSimulation: () => setState(() => _currentIndex = 0),
+              onOpenSimulation: () =>
+                  _openSimulationMode(SimulationMode.operation),
+              onOpenRotationSimulation: () =>
+                  _openSimulationMode(SimulationMode.rotation),
               onOpenCharts: () => openMorePage('Gráficas', buildChartsTab()),
               onOpenMovements: () =>
                   openMorePage('Historial', buildMovementsTab()),
@@ -2003,14 +2050,22 @@ class SummaryTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
   final double sellFeePercent;
+  final PortfolioSnapshot? latestSnapshot;
   final void Function(CoinStats stats) onDetails;
+  final VoidCallback onSaveSnapshot;
+  final VoidCallback onViewSnapshots;
+  final VoidCallback onViewSnapshotEvolution;
 
   const SummaryTab({
     super.key,
     required this.stats,
     required this.totals,
     required this.sellFeePercent,
+    required this.latestSnapshot,
     required this.onDetails,
+    required this.onSaveSnapshot,
+    required this.onViewSnapshots,
+    required this.onViewSnapshotEvolution,
   });
 
   @override
@@ -2070,6 +2125,13 @@ class SummaryTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 18),
+        LatestSnapshotCard(
+          snapshot: latestSnapshot,
+          onSaveSnapshot: onSaveSnapshot,
+          onViewSnapshots: onViewSnapshots,
+          onViewEvolution: onViewSnapshotEvolution,
+        ),
+        const SizedBox(height: 10),
         _CommandSection(
           title: 'Panorama',
           children: <Widget>[
@@ -2133,6 +2195,89 @@ class SummaryTab extends StatelessWidget {
                     .toList(),
         ),
       ],
+    );
+  }
+}
+
+class LatestSnapshotCard extends StatelessWidget {
+  final PortfolioSnapshot? snapshot;
+  final VoidCallback onSaveSnapshot;
+  final VoidCallback onViewSnapshots;
+  final VoidCallback onViewEvolution;
+
+  const LatestSnapshotCard({
+    super.key,
+    required this.snapshot,
+    required this.onSaveSnapshot,
+    required this.onViewSnapshots,
+    required this.onViewEvolution,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final PortfolioSnapshot? current = snapshot;
+    return CardPanel(
+      title: 'Último snapshot',
+      subtitle: current == null
+          ? 'Guarda una foto de cartera para seguir tu evolución.'
+          : 'Guardado el ${longDate(current.createdAt)}.',
+      child: current == null
+          ? Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.tonalIcon(
+                  onPressed: onSaveSnapshot,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: const Text('Guardar snapshot'),
+                ),
+                FilledButton.tonal(
+                  onPressed: onViewSnapshots,
+                  child: const Text('Ver snapshots'),
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                InfoLine('Fecha', longDate(current.createdAt)),
+                InfoLine('Valor cartera', money(current.totalCurrentValue)),
+                InfoLine(
+                  'P&L no realizado',
+                  money(current.totalUnrealizedPL),
+                  valueColor: pnlColor(current.totalUnrealizedPL),
+                  emphasized: true,
+                ),
+                InfoLine(
+                  'Resultado vendido',
+                  money(current.totalRealizedPL),
+                  valueColor: pnlColor(current.totalRealizedPL),
+                ),
+                InfoLine('Inversión total', money(current.totalCostBase)),
+                InfoLine('Moneda dominante', current.dominantCoinLabel),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    FilledButton.tonalIcon(
+                      onPressed: onSaveSnapshot,
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      label: const Text('Guardar snapshot'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: onViewEvolution,
+                      icon: const Icon(Icons.show_chart),
+                      label: const Text('Ver evolución'),
+                    ),
+                    FilledButton.tonal(
+                      onPressed: onViewSnapshots,
+                      child: const Text('Administrar'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
     );
   }
 }
@@ -2474,12 +2619,14 @@ class SimulationTab extends StatefulWidget {
   final List<String> coins;
   final Map<String, CoinStats> stats;
   final double defaultFeePercent;
+  final SimulationMode initialMode;
 
   const SimulationTab({
     super.key,
     required this.coins,
     required this.stats,
     required this.defaultFeePercent,
+    this.initialMode = SimulationMode.operation,
   });
 
   @override
@@ -2487,7 +2634,8 @@ class SimulationTab extends StatefulWidget {
 }
 
 class _SimulationTabState extends State<SimulationTab> {
-  SimulationMode _mode = SimulationMode.buy;
+  SimulationMode _mode = SimulationMode.operation;
+  OperationSimulationMode _operationMode = OperationSimulationMode.buy;
 
   String _buyCoin = 'UNI';
   final TextEditingController _buyGrossAmountController = TextEditingController(
@@ -2536,6 +2684,20 @@ class _SimulationTabState extends State<SimulationTab> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    _mode = widget.initialMode;
+  }
+
+  @override
+  void didUpdateWidget(covariant SimulationTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialMode != oldWidget.initialMode) {
+      _mode = widget.initialMode;
+    }
+  }
+
+  @override
   void dispose() {
     _buyGrossAmountController.dispose();
     _buyPriceController.dispose();
@@ -2558,30 +2720,34 @@ class _SimulationTabState extends State<SimulationTab> {
 
 
   String get _modeLabel => switch (_mode) {
-    SimulationMode.buy => 'Compra',
-    SimulationMode.sell => 'Venta',
+    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
+        ? 'Operación · Compra'
+        : 'Operación · Venta',
     SimulationMode.rotation => 'Rotación',
   };
 
   String get _simulationPairLabel => switch (_mode) {
-    SimulationMode.buy => _buyCoin,
-    SimulationMode.sell => _sellCoin,
+    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
+        ? _buyCoin
+        : _sellCoin,
     SimulationMode.rotation => '$_rotationOriginCoin → $_rotationTargetCoin',
   };
 
   String get _activeFeeLabel => switch (_mode) {
-    SimulationMode.buy => '${_buyFeeController.text.trim()}% / ${_buySellFeeController.text.trim()}%',
-    SimulationMode.sell => '${_sellFeeController.text.trim()}%',
+    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
+        ? '${_buyFeeController.text.trim()}% / ${_buySellFeeController.text.trim()}%'
+        : '${_sellFeeController.text.trim()}%',
     SimulationMode.rotation => '${_rotationSellFeeController.text.trim()}% / ${_rotationBuyFeeController.text.trim()}%',
   };
 
   String get _simulationScenarioLabel => switch (_mode) {
-    SimulationMode.buy => moneyShort(_parseInput(_buyGrossAmountController)),
-    SimulationMode.sell => _sellMethod == SimulationSellMethod.percent
-        ? '${_sellPercentController.text.trim()}% posición'
-        : _sellMethod == SimulationSellMethod.quantity
-            ? '${_sellQuantityController.text.trim()} cripto'
-            : moneyShort(_parseInput(_sellGrossController)),
+    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
+        ? moneyShort(_parseInput(_buyGrossAmountController))
+        : _sellMethod == SimulationSellMethod.percent
+            ? '${_sellPercentController.text.trim()}% posición'
+            : _sellMethod == SimulationSellMethod.quantity
+                ? '${_sellQuantityController.text.trim()} cripto'
+                : moneyShort(_parseInput(_sellGrossController)),
     SimulationMode.rotation => _rotationMethod == SimulationRotationMethod.percent
         ? '${_rotationPercentController.text.trim()}% origen'
         : _rotationMethod == SimulationRotationMethod.quantity
@@ -2658,33 +2824,52 @@ class _SimulationTabState extends State<SimulationTab> {
         const SizedBox(height: 14),
         PremiumSegmentShell(
           child: SegmentedButton<SimulationMode>(
-                segments: const <ButtonSegment<SimulationMode>>[
-                  ButtonSegment<SimulationMode>(
-                    value: SimulationMode.buy,
-                    label: Text('Compra'),
-                    icon: Icon(Icons.add_circle_outline),
-                  ),
-                  ButtonSegment<SimulationMode>(
-                    value: SimulationMode.sell,
-                    label: Text('Venta'),
-                    icon: Icon(Icons.remove_circle_outline),
-                  ),
-                  ButtonSegment<SimulationMode>(
-                    value: SimulationMode.rotation,
-                    label: Text('Rotación'),
-                    icon: Icon(Icons.sync_alt),
-                  ),
-                ],
-                selected: <SimulationMode>{_mode},
-                onSelectionChanged: (Set<SimulationMode> value) {
-                  setState(() => _mode = value.first);
-                },
+            segments: const <ButtonSegment<SimulationMode>>[
+              ButtonSegment<SimulationMode>(
+                value: SimulationMode.operation,
+                label: Text('Operación'),
+                icon: Icon(Icons.calculate_outlined),
+              ),
+              ButtonSegment<SimulationMode>(
+                value: SimulationMode.rotation,
+                label: Text('Rotar'),
+                icon: Icon(Icons.sync_alt),
+              ),
+            ],
+            selected: <SimulationMode>{_mode},
+            onSelectionChanged: (Set<SimulationMode> value) {
+              setState(() => _mode = value.first);
+            },
           ),
         ),
+        if (_mode == SimulationMode.operation) ...<Widget>[
+          const SizedBox(height: 10),
+          PremiumSegmentShell(
+            child: SegmentedButton<OperationSimulationMode>(
+              segments: const <ButtonSegment<OperationSimulationMode>>[
+                ButtonSegment<OperationSimulationMode>(
+                  value: OperationSimulationMode.buy,
+                  label: Text('Compra'),
+                  icon: Icon(Icons.add_circle_outline),
+                ),
+                ButtonSegment<OperationSimulationMode>(
+                  value: OperationSimulationMode.sell,
+                  label: Text('Venta'),
+                  icon: Icon(Icons.remove_circle_outline),
+                ),
+              ],
+              selected: <OperationSimulationMode>{_operationMode},
+              onSelectionChanged: (Set<OperationSimulationMode> value) {
+                setState(() => _operationMode = value.first);
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 14),
         ...switch (_mode) {
-          SimulationMode.buy => _buildBuyMode(buyStats, buyResult),
-          SimulationMode.sell => _buildSellMode(sellStats, sellResult),
+          SimulationMode.operation => _operationMode == OperationSimulationMode.buy
+              ? _buildBuyMode(buyStats, buyResult)
+              : _buildSellMode(sellStats, sellResult),
           SimulationMode.rotation => _buildRotationMode(
             rotationOriginStats,
             rotationTargetStats,
@@ -2698,7 +2883,7 @@ class _SimulationTabState extends State<SimulationTab> {
   List<Widget> _buildBuyMode(CoinStats stats, BuySimulationResult result) {
     return <Widget>[
       CardPanel(
-        title: 'Inputs',
+        title: 'Datos de entrada',
         subtitle:
             'Ajusta entradas para simular compra sin mover fondos reales.',
         child: Column(
@@ -2868,7 +3053,7 @@ class _SimulationTabState extends State<SimulationTab> {
   List<Widget> _buildSellMode(CoinStats stats, SellSimulationResult result) {
     return <Widget>[
       CardPanel(
-        title: 'Inputs',
+        title: 'Datos de entrada',
         subtitle:
             'Simula salida parcial o total sin registrar movimiento real.',
         child: Column(
@@ -3075,7 +3260,7 @@ class _SimulationTabState extends State<SimulationTab> {
   ) {
     return <Widget>[
       CardPanel(
-        title: 'Inputs',
+        title: 'Datos de entrada',
         subtitle: 'Modela venta de origen y compra de destino.',
         child: Column(
           children: <Widget>[
@@ -3176,9 +3361,9 @@ class _SimulationTabState extends State<SimulationTab> {
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Precio origen MXN',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: 'Precio $_rotationOriginCoin MXN',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
@@ -3188,9 +3373,9 @@ class _SimulationTabState extends State<SimulationTab> {
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Precio destino MXN',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: 'Precio $_rotationTargetCoin MXN',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
@@ -3200,9 +3385,9 @@ class _SimulationTabState extends State<SimulationTab> {
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Comisión venta origen %',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: 'Comisión venta $_rotationOriginCoin %',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
@@ -3212,9 +3397,9 @@ class _SimulationTabState extends State<SimulationTab> {
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Comisión compra destino %',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: 'Comisión compra $_rotationTargetCoin %',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
@@ -3247,9 +3432,9 @@ class _SimulationTabState extends State<SimulationTab> {
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Porcentaje origen %',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: 'Porcentaje $_rotationOriginCoin %',
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 10),
@@ -3277,9 +3462,9 @@ class _SimulationTabState extends State<SimulationTab> {
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Cantidad cripto origen',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: 'Cantidad $_rotationOriginCoin',
+                  border: const OutlineInputBorder(),
                 ),
               ),
             if (_rotationMethod == SimulationRotationMethod.grossAmount)
@@ -3295,10 +3480,77 @@ class _SimulationTabState extends State<SimulationTab> {
                 ),
               ),
             const SizedBox(height: 10),
-            InfoLine('Origen disponible', crypto(originStats.quantity)),
-            InfoLine('Destino actual', crypto(targetStats.quantity)),
+            InfoLine(
+              '$_rotationOriginCoin disponible',
+              crypto(originStats.quantity),
+            ),
+            InfoLine(
+              '$_rotationTargetCoin actual',
+              crypto(targetStats.quantity),
+            ),
           ],
         ),
+      ),
+      CardPanel(
+        title: 'Resumen de rotación',
+        subtitle: result.valid
+            ? 'Ruta: $_rotationOriginCoin → $_rotationTargetCoin'
+            : result.invalidReason,
+        child: result.valid
+            ? Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: <Widget>[
+                  MiniMetric(
+                    label: 'Ruta',
+                    value: '$_rotationOriginCoin → $_rotationTargetCoin',
+                  ),
+                  MiniMetric(
+                    label: 'Pérdida realizada estimada',
+                    value: money(result.originRealizedPLEstimate),
+                    color: pnlColor(result.originRealizedPLEstimate),
+                  ),
+                  MiniMetric(
+                    label: 'Comisiones totales',
+                    value: money(result.totalCommissions),
+                  ),
+                  MiniMetric(
+                    label: '$_rotationTargetCoin comprado',
+                    value: crypto(result.targetQuantityBought),
+                  ),
+                  MiniMetric(
+                    label: '$_rotationTargetCoin después',
+                    value: crypto(result.targetBalanceAfter),
+                  ),
+                  MiniMetric(
+                    label: 'Promedio $_rotationTargetCoin antes',
+                    value: money(result.targetAvgBefore),
+                  ),
+                  MiniMetric(
+                    label: 'Promedio $_rotationTargetCoin después',
+                    value: money(result.targetAvgAfter),
+                  ),
+                  MiniMetric(
+                    label: 'Break even $_rotationTargetCoin después',
+                    value: money(result.targetBreakEvenAfter),
+                  ),
+                  MiniMetric(
+                    label: 'Faltante a break even',
+                    value: _percentOrNa(result.targetDistanceToBreakEvenPct),
+                    color: result.targetDistanceToBreakEvenPct == null
+                        ? null
+                        : pnlColor(-result.targetDistanceToBreakEvenPct!),
+                  ),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (result.warnings.isNotEmpty) ...<Widget>[
+                    ...result.warnings.map(_warningLine),
+                  ],
+                ],
+              ),
       ),
       CardPanel(
         title: 'Impacto táctico',
@@ -3309,24 +3561,32 @@ class _SimulationTabState extends State<SimulationTab> {
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  const Text(
-                    'Venta simulada de origen',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  Text(
+                    'Venta simulada de $_rotationOriginCoin',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
                   InfoLine(
-                    'Cantidad vendida origen',
+                    '$_rotationOriginCoin vendido',
                     crypto(result.originQuantitySold),
                   ),
-                  InfoLine('Venta bruta origen', money(result.originGrossSale)),
                   InfoLine(
-                    'Comisión venta origen',
+                    'Venta bruta $_rotationOriginCoin',
+                    money(result.originGrossSale),
+                  ),
+                  InfoLine(
+                    'Comisión venta $_rotationOriginCoin',
                     money(result.originSellCommission),
                   ),
                   InfoLine('Neto disponible', money(result.netAvailable)),
                   InfoLine(
-                    'Costo promedio removido origen',
+                    'Costo base removido $_rotationOriginCoin',
                     money(result.originRemovedAverageCost),
+                  ),
+                  InfoLine(
+                    'Promedio $_rotationOriginCoin removido',
+                    '\$${result.originRemovedAveragePrice.toStringAsFixed(2)}'
+                    '/$_rotationOriginCoin',
                   ),
                   InfoLine(
                     'P&L realizado estimado',
@@ -3335,45 +3595,45 @@ class _SimulationTabState extends State<SimulationTab> {
                     emphasized: true,
                   ),
                   InfoLine(
-                    'Cantidad restante origen',
+                    '$_rotationOriginCoin restante',
                     crypto(result.originQuantityRemaining),
                   ),
                   InfoLine(
-                    'Costo base restante origen',
+                    'Costo base restante $_rotationOriginCoin',
                     money(result.originCostBaseRemaining),
                   ),
                   InfoLine(
-                    'Promedio restante origen',
+                    'Promedio restante $_rotationOriginCoin',
                     money(result.originAvgRemaining),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Compra simulada de destino',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  Text(
+                    'Compra simulada de $_rotationTargetCoin',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
                   InfoLine(
-                    'Comisión compra destino',
+                    'Comisión compra $_rotationTargetCoin',
                     money(result.targetBuyCommission),
                   ),
                   InfoLine(
-                    'Capital convertido destino',
+                    'Capital convertido $_rotationTargetCoin',
                     money(result.targetConvertedCapital),
                   ),
                   InfoLine(
-                    'Cantidad destino comprada',
+                    '$_rotationTargetCoin comprado',
                     crypto(result.targetQuantityBought),
                   ),
                   InfoLine(
-                    'Saldo destino después',
+                    '$_rotationTargetCoin después',
                     crypto(result.targetBalanceAfter),
                   ),
                   InfoLine(
-                    'Promedio destino antes',
+                    'Promedio $_rotationTargetCoin antes',
                     money(result.targetAvgBefore),
                   ),
                   InfoLine(
-                    'Promedio destino después',
+                    'Promedio $_rotationTargetCoin después',
                     money(result.targetAvgAfter),
                     emphasized: true,
                   ),
@@ -3384,8 +3644,19 @@ class _SimulationTabState extends State<SimulationTab> {
                   ),
                   const SizedBox(height: 8),
                   InfoLine(
-                    'Costo base destino después',
+                    'Costo base $_rotationTargetCoin después',
                     money(result.targetCostBaseAfter),
+                  ),
+                  InfoLine(
+                    'Break even $_rotationTargetCoin después',
+                    money(result.targetBreakEvenAfter),
+                  ),
+                  InfoLine(
+                    'Faltante a break even',
+                    _percentOrNa(result.targetDistanceToBreakEvenPct),
+                    valueColor: result.targetDistanceToBreakEvenPct == null
+                        ? null
+                        : pnlColor(-result.targetDistanceToBreakEvenPct!),
                   ),
                   InfoLine(
                     'Comisiones totales',
@@ -3661,6 +3932,9 @@ class _SimulationTabState extends State<SimulationTab> {
         : 0.0;
     final double originRemovedAverageCost =
         originAvgCurrent * originQuantitySold;
+    final double originRemovedAveragePrice = originQuantitySold > 0
+        ? originRemovedAverageCost / originQuantitySold
+        : 0.0;
     final double originRealizedPLEstimate =
         netAvailable - originRemovedAverageCost;
     double originQuantityRemaining = originStats.quantity - originQuantitySold;
@@ -3691,6 +3965,11 @@ class _SimulationTabState extends State<SimulationTab> {
     final double targetAvgAfter = targetBalanceAfter > 0
         ? targetCostBaseAfter / targetBalanceAfter
         : 0.0;
+    final double targetBreakEvenAfter =
+        targetAvgAfter / (1 - (sellFeePercent / 100));
+    final double? targetDistanceToBreakEvenPct = targetPrice > 0
+        ? ((targetBreakEvenAfter - targetPrice) / targetPrice) * 100
+        : null;
     final double totalCommissions = originSellCommission + targetBuyCommission;
 
     if (originRealizedPLEstimate < 0) {
@@ -3706,6 +3985,7 @@ class _SimulationTabState extends State<SimulationTab> {
       originSellCommission: originSellCommission,
       netAvailable: netAvailable,
       originRemovedAverageCost: originRemovedAverageCost,
+      originRemovedAveragePrice: originRemovedAveragePrice,
       originRealizedPLEstimate: originRealizedPLEstimate,
       originQuantityRemaining: originQuantityRemaining,
       originCostBaseRemaining: originCostBaseRemaining,
@@ -3717,6 +3997,8 @@ class _SimulationTabState extends State<SimulationTab> {
       targetCostBaseAfter: targetCostBaseAfter,
       targetAvgBefore: targetAvgBefore,
       targetAvgAfter: targetAvgAfter,
+      targetBreakEvenAfter: targetBreakEvenAfter,
+      targetDistanceToBreakEvenPct: targetDistanceToBreakEvenPct,
       totalCommissions: totalCommissions,
     );
   }
@@ -3895,6 +4177,7 @@ class RotationSimulationResult {
   final double originSellCommission;
   final double netAvailable;
   final double originRemovedAverageCost;
+  final double originRemovedAveragePrice;
   final double originRealizedPLEstimate;
   final double originQuantityRemaining;
   final double originCostBaseRemaining;
@@ -3906,6 +4189,8 @@ class RotationSimulationResult {
   final double targetCostBaseAfter;
   final double targetAvgBefore;
   final double targetAvgAfter;
+  final double targetBreakEvenAfter;
+  final double? targetDistanceToBreakEvenPct;
   final double totalCommissions;
 
   RotationSimulationResult({
@@ -3917,6 +4202,7 @@ class RotationSimulationResult {
     required this.originSellCommission,
     required this.netAvailable,
     required this.originRemovedAverageCost,
+    required this.originRemovedAveragePrice,
     required this.originRealizedPLEstimate,
     required this.originQuantityRemaining,
     required this.originCostBaseRemaining,
@@ -3928,6 +4214,8 @@ class RotationSimulationResult {
     required this.targetCostBaseAfter,
     required this.targetAvgBefore,
     required this.targetAvgAfter,
+    required this.targetBreakEvenAfter,
+    required this.targetDistanceToBreakEvenPct,
     required this.totalCommissions,
   });
 
@@ -3943,6 +4231,7 @@ class RotationSimulationResult {
     originSellCommission: 0.0,
     netAvailable: 0.0,
     originRemovedAverageCost: 0.0,
+    originRemovedAveragePrice: 0.0,
     originRealizedPLEstimate: 0.0,
     originQuantityRemaining: 0.0,
     originCostBaseRemaining: 0.0,
@@ -3954,6 +4243,8 @@ class RotationSimulationResult {
     targetCostBaseAfter: 0.0,
     targetAvgBefore: 0.0,
     targetAvgAfter: 0.0,
+    targetBreakEvenAfter: 0.0,
+    targetDistanceToBreakEvenPct: null,
     totalCommissions: 0.0,
   );
 }
@@ -4792,6 +5083,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onAddMovement;
   final VoidCallback onRefreshPrices;
   final VoidCallback onOpenSimulation;
+  final VoidCallback onOpenRotationSimulation;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
   final VoidCallback onOpenSettings;
@@ -4819,6 +5111,7 @@ class MoreTab extends StatelessWidget {
     required this.onAddMovement,
     required this.onRefreshPrices,
     required this.onOpenSimulation,
+    required this.onOpenRotationSimulation,
     required this.onOpenCharts,
     required this.onOpenMovements,
     required this.onOpenSettings,
@@ -4865,7 +5158,7 @@ class MoreTab extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         _CommandSection(
-          title: 'Operación',
+          title: 'Herramientas',
           children: <Widget>[
             _CommandCard(
               icon: Icons.add_circle_outline,
@@ -4874,57 +5167,29 @@ class MoreTab extends StatelessWidget {
               onTap: onAddMovement,
             ),
             _CommandCard(
+              icon: Icons.calculate_outlined,
+              title: 'Simular operación',
+              subtitle: 'Abrir modo operación',
+              onTap: onOpenSimulation,
+            ),
+            _CommandCard(
+              icon: Icons.swap_horiz_outlined,
+              title: 'Simular rotación',
+              subtitle: 'Abrir modo rotación',
+              onTap: onOpenRotationSimulation,
+            ),
+            _CommandCard(
               icon: Icons.sync,
               title: 'Actualizar precios',
               subtitle: priceUpdatedLabel(pricesUpdatedAt),
               loading: isRefreshingPrices,
               onTap: isRefreshingPrices ? null : onRefreshPrices,
             ),
-            _CommandCard(
-              icon: Icons.calculate_outlined,
-              title: 'Simular operación',
-              subtitle: 'Compra o venta estimada',
-              onTap: onOpenSimulation,
-            ),
-            _CommandCard(
-              icon: Icons.swap_horiz_outlined,
-              title: 'Simular rotación',
-              subtitle: 'Cambiar capital entre monedas',
-              onTap: onOpenSimulation,
-            ),
           ],
         ),
         _CommandSection(
-          title: 'Análisis',
+          title: 'Datos y respaldo',
           children: <Widget>[
-            _CommandCard(
-              icon: Icons.show_chart,
-              title: 'Gráficas',
-              subtitle: chartDataCount == 0
-                  ? 'Sin datos para graficar'
-                  : 'Distribución y evolución',
-              badge: chartDataCount == 0 ? null : '$chartDataCount activos',
-              emptyTitle: chartDataCount == 0 ? 'No hay datos para gráficas' : null,
-              emptySubtitle: chartDataCount == 0
-                  ? 'Agrega movimientos y precios para visualizar.'
-                  : null,
-              onTap: onOpenCharts,
-            ),
-            _CommandCard(
-              icon: Icons.receipt_long_outlined,
-              title: 'Historial',
-              subtitle: movementCount == 0
-                  ? 'Sin movimientos guardados'
-                  : 'Movimientos registrados',
-              badge: movementCount == 0 ? null : '$movementCount',
-              emptyTitle: movementCount == 0 ? 'No hay historial' : null,
-              emptySubtitle: movementCount == 0
-                  ? 'Agrega un movimiento para iniciar el registro.'
-                  : null,
-              emptyActionLabel: movementCount == 0 ? 'Agregar' : null,
-              onEmptyAction: movementCount == 0 ? onAddMovement : null,
-              onTap: onOpenMovements,
-            ),
             _CommandCard(
               icon: Icons.photo_library_outlined,
               title: 'Snapshots',
@@ -4940,17 +5205,18 @@ class MoreTab extends StatelessWidget {
               onEmptyAction: snapshotCount == 0 ? onSaveSnapshot : null,
               onTap: onViewSnapshots,
             ),
-          ],
-        ),
-        _CommandSection(
-          title: 'Datos',
-          children: <Widget>[
             _CommandCard(
-              icon: Icons.file_download_outlined,
-              title: 'Exportar datos',
-              subtitle: 'CSV de historial y resumen',
-              badge: 'CSV',
-              onTap: onExportMovementsCsv,
+              icon: Icons.table_chart_outlined,
+              title: 'Exportaciones',
+              subtitle: 'CSV, PDF y XLSX disponibles',
+              badge: 'CSV · PDF · XLSX',
+              onTap: () => _showDataActions(context),
+            ),
+            _CommandCard(
+              icon: Icons.data_object_outlined,
+              title: 'Respaldo JSON',
+              subtitle: 'Copiar respaldo completo',
+              onTap: onExportBackup,
             ),
             _CommandCard(
               icon: Icons.upload_file_outlined,
@@ -4958,28 +5224,21 @@ class MoreTab extends StatelessWidget {
               subtitle: 'Pegar o cargar JSON',
               onTap: onImportBackupFile,
             ),
-            _CommandCard(
-              icon: Icons.data_object_outlined,
-              title: 'Backup JSON',
-              subtitle: 'Respaldo completo rápido',
-              onTap: onExportBackup,
-            ),
-            _CommandCard(
-              icon: Icons.table_chart_outlined,
-              title: 'CSV/PDF/XLSX',
-              subtitle: 'Formatos disponibles',
-              badge: 'PDF · XLSX',
-              onTap: () => _showDataActions(context),
-            ),
           ],
         ),
         _CommandSection(
           title: 'Sistema',
           children: <Widget>[
             _CommandCard(
-              icon: Icons.settings_outlined,
-              title: 'Ajustes',
-              subtitle: 'Apariencia, comisión y respaldos',
+              icon: Icons.palette_outlined,
+              title: 'Tema',
+              subtitle: 'Modo visual y color de acento',
+              onTap: onOpenSettings,
+            ),
+            _CommandCard(
+              icon: Icons.percent_outlined,
+              title: 'Ajustes de cálculo',
+              subtitle: 'Comisión de salida y parámetros',
               onTap: onOpenSettings,
             ),
             _CommandCard(
@@ -5023,21 +5282,15 @@ class MoreTab extends StatelessWidget {
           ),
           _SheetAction(
             icon: Icons.calculate_outlined,
-            title: 'Simular compra',
-            subtitle: 'Abrir simulador existente',
+            title: 'Simular operación',
+            subtitle: 'Abrir modo operación',
             onTap: onOpenSimulation,
           ),
           _SheetAction(
             icon: Icons.swap_horiz_outlined,
             title: 'Simular rotación',
-            subtitle: 'Abrir simulador existente',
-            onTap: onOpenSimulation,
-          ),
-          _SheetAction(
-            icon: Icons.file_download_outlined,
-            title: 'Exportar datos',
-            subtitle: 'Crear respaldo JSON',
-            onTap: onExportBackup,
+            subtitle: 'Abrir modo rotación',
+            onTap: onOpenRotationSimulation,
           ),
           _SheetAction(
             icon: Icons.restart_alt_outlined,
@@ -5055,7 +5308,7 @@ class MoreTab extends StatelessWidget {
       context: context,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => _CommandActionSheet(
-        title: 'Exportar / Importar',
+        title: 'Exportaciones',
         actions: <_SheetAction>[
           _SheetAction(
             icon: Icons.receipt_long_outlined,
@@ -5086,24 +5339,6 @@ class MoreTab extends StatelessWidget {
             title: 'XLSX reporte',
             subtitle: 'Libro de cálculo',
             onTap: onExportXlsx,
-          ),
-          _SheetAction(
-            icon: Icons.data_object_outlined,
-            title: 'Backup JSON',
-            subtitle: 'Exportar respaldo',
-            onTap: onExportBackup,
-          ),
-          _SheetAction(
-            icon: Icons.content_paste_go_outlined,
-            title: 'Importar respaldo',
-            subtitle: 'Pegar JSON',
-            onTap: onImportBackup,
-          ),
-          _SheetAction(
-            icon: Icons.upload_file_outlined,
-            title: 'Importar archivo JSON',
-            subtitle: 'Cargar respaldo',
-            onTap: onImportBackupFile,
           ),
         ],
       ),
@@ -5587,12 +5822,14 @@ class _CommandActionSheet extends StatelessWidget {
 }
 
 class SettingsTab extends StatelessWidget {
-  final bool darkMode;
+  final AppVisualMode visualMode;
+  final AppAccentColor accentColor;
   final double sellFeePercent;
   final int snapshotCount;
   final DateTime? pricesUpdatedAt;
   final bool isRefreshingPrices;
-  final ValueChanged<bool> onDarkModeChanged;
+  final ValueChanged<AppVisualMode> onVisualModeChanged;
+  final ValueChanged<AppAccentColor> onAccentColorChanged;
   final VoidCallback onRefreshPrices;
   final VoidCallback onEditSellFee;
   final VoidCallback onOpenAlerts;
@@ -5609,12 +5846,14 @@ class SettingsTab extends StatelessWidget {
 
   const SettingsTab({
     super.key,
-    required this.darkMode,
+    required this.visualMode,
+    required this.accentColor,
     required this.sellFeePercent,
     required this.snapshotCount,
     required this.pricesUpdatedAt,
     required this.isRefreshingPrices,
-    required this.onDarkModeChanged,
+    required this.onVisualModeChanged,
+    required this.onAccentColorChanged,
     required this.onRefreshPrices,
     required this.onEditSellFee,
     required this.onOpenAlerts,
@@ -5636,17 +5875,57 @@ class SettingsTab extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: <Widget>[
         CardPanel(
-          title: 'Apariencia',
-          subtitle: 'Cambia la app a pantalla oscura cuando quieras.',
-          child: SwitchListTile(
-            value: darkMode,
-            onChanged: onDarkModeChanged,
-            title: const Text('Pantalla oscura'),
-            contentPadding: EdgeInsets.zero,
+          title: 'Tema',
+          subtitle: 'Modo visual y color de acento para la interfaz.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Modo visual',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<AppVisualMode>(
+                segments: AppVisualMode.values
+                    .map(
+                      (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
+                        value: mode,
+                        label: Text(mode.label),
+                      ),
+                    )
+                    .toList(),
+                selected: <AppVisualMode>{visualMode},
+                onSelectionChanged: (Set<AppVisualMode> value) {
+                  onVisualModeChanged(value.first);
+                },
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Color de acento',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: AppAccentColor.values.map((AppAccentColor option) {
+                  return ChoiceChip(
+                    selected: accentColor == option,
+                    label: Text(option.label),
+                    avatar: CircleAvatar(backgroundColor: option.color),
+                    onSelected: (_) => onAccentColorChanged(option),
+                  );
+                }).toList(),
+              ),
+            ],
           ),
         ),
         CardPanel(
-          title: 'Cálculo',
+          title: 'Ajustes de cálculo',
           subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
           child: Align(
             alignment: Alignment.centerLeft,
@@ -5785,7 +6064,7 @@ class SnapshotTrendPanel extends StatelessWidget {
     final double plChange = latest.totalUnrealizedPL - first.totalUnrealizedPL;
 
     return CardPanel(
-      title: 'Tendencia histórica',
+      title: 'Evolución por snapshots',
       subtitle: ordered.length < 2
           ? 'Guarda otro snapshot para ver líneas comparativas.'
           : '${ordered.length} snapshots entre ${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
@@ -6544,9 +6823,93 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+enum AppVisualMode { system, light, dark }
+
+extension AppVisualModeLabel on AppVisualMode {
+  String get label {
+    switch (this) {
+      case AppVisualMode.system:
+        return 'Sistema';
+      case AppVisualMode.light:
+        return 'Claro';
+      case AppVisualMode.dark:
+        return 'Oscuro';
+    }
+  }
+
+  ThemeMode get themeMode {
+    switch (this) {
+      case AppVisualMode.system:
+        return ThemeMode.system;
+      case AppVisualMode.light:
+        return ThemeMode.light;
+      case AppVisualMode.dark:
+        return ThemeMode.dark;
+    }
+  }
+}
+
+AppVisualMode appVisualModeFromName(String? value) {
+  for (final AppVisualMode mode in AppVisualMode.values) {
+    if (mode.name == value) return mode;
+  }
+  return AppVisualMode.system;
+}
+
+enum AppAccentColor { green, blue, purple, red, orange, grey, bitcoin }
+
+extension AppAccentColorLabel on AppAccentColor {
+  String get label {
+    switch (this) {
+      case AppAccentColor.green:
+        return 'Verde';
+      case AppAccentColor.blue:
+        return 'Azul';
+      case AppAccentColor.purple:
+        return 'Morado';
+      case AppAccentColor.red:
+        return 'Rojo';
+      case AppAccentColor.orange:
+        return 'Naranja';
+      case AppAccentColor.grey:
+        return 'Gris';
+      case AppAccentColor.bitcoin:
+        return 'Bitcoin';
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case AppAccentColor.green:
+        return Colors.green;
+      case AppAccentColor.blue:
+        return Colors.blue;
+      case AppAccentColor.purple:
+        return Colors.deepPurple;
+      case AppAccentColor.red:
+        return Colors.red;
+      case AppAccentColor.orange:
+        return Colors.orange;
+      case AppAccentColor.grey:
+        return Colors.blueGrey;
+      case AppAccentColor.bitcoin:
+        return const Color(0xFFF7931A);
+    }
+  }
+}
+
+AppAccentColor appAccentColorFromName(String? value) {
+  for (final AppAccentColor color in AppAccentColor.values) {
+    if (color.name == value) return color;
+  }
+  return AppAccentColor.blue;
+}
+
 enum MovementType { buy, sell, transferIn, transferOut }
 
-enum SimulationMode { buy, sell, rotation }
+enum SimulationMode { operation, rotation }
+
+enum OperationSimulationMode { buy, sell }
 
 enum SimulationSellMethod { percent, quantity, grossAmount }
 
@@ -6816,6 +7179,22 @@ class PortfolioSnapshot {
     required this.movementCount,
     required this.coins,
   });
+
+  String get dominantCoinLabel {
+    final List<CoinSnapshot> active = coins
+        .where((CoinSnapshot coin) => coin.currentValue > 0)
+        .toList()
+      ..sort(
+        (CoinSnapshot a, CoinSnapshot b) =>
+            b.currentValue.compareTo(a.currentValue),
+      );
+    if (active.isEmpty) return 'Sin posición dominante';
+    final CoinSnapshot leader = active.first;
+    final double share = totalCurrentValue <= 0
+        ? 0.0
+        : (leader.currentValue / totalCurrentValue) * 100;
+    return '${leader.coin} · ${pct(share)}';
+  }
 
   factory PortfolioSnapshot.fromJson(Map<String, dynamic> json) {
     return PortfolioSnapshot(
