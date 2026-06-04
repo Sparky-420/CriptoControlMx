@@ -1,37 +1,33 @@
-name: Build Android Debug APK
+name: Build experimental debug APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ "experimental" ]
+    branches:
+      - experimental
+  pull_request:
 
 jobs:
   build-debug-apk:
-    if: github.ref == 'refs/heads/experimental'
+    if: github.event_name == 'push' || github.head_ref == 'experimental'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Flutter
+      - name: Install Flutter stable
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
-      - name: Flutter pub get
+      - name: Install dependencies
         run: flutter pub get
 
       - name: Build debug APK
         run: flutter build apk --debug
 
-      - name: Upload debug APK artifact
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: cripto-control-mx-debug-apk
