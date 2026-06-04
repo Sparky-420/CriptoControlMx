@@ -119,10 +119,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     final String? savedVisualMode = prefs.getString(_themeModeKey);
     if (savedVisualMode != null) {
       _visualMode = appVisualModeFromName(savedVisualMode);
-    } else {
+    } else if (prefs.containsKey(_darkModeKey)) {
       _visualMode = (prefs.getBool(_darkModeKey) ?? false)
           ? AppVisualMode.dark
-          : AppVisualMode.system;
+          : AppVisualMode.light;
+    } else {
+      _visualMode = AppVisualMode.system;
     }
     _accentColor = appAccentColorFromName(prefs.getString(_accentColorKey));
     await _loadPriceAlertSettings(prefs);
@@ -1906,6 +1908,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               coins: _coins,
               stats: stats,
               defaultFeePercent: _sellFeePercent == 0 ? 1.5 : _sellFeePercent,
+              targetExitFeePercent: _sellFeePercent,
               initialMode: _requestedSimulationMode,
             ),
             SummaryTab(
@@ -2619,6 +2622,7 @@ class SimulationTab extends StatefulWidget {
   final List<String> coins;
   final Map<String, CoinStats> stats;
   final double defaultFeePercent;
+  final double targetExitFeePercent;
   final SimulationMode initialMode;
 
   const SimulationTab({
@@ -2626,6 +2630,7 @@ class SimulationTab extends StatefulWidget {
     required this.coins,
     required this.stats,
     required this.defaultFeePercent,
+    required this.targetExitFeePercent,
     this.initialMode = SimulationMode.operation,
   });
 
@@ -3847,6 +3852,7 @@ class _SimulationTabState extends State<SimulationTab> {
     final double targetPrice = _parseInput(_rotationTargetPriceController);
     final double sellFeePercent = _parseInput(_rotationSellFeeController);
     final double buyFeePercent = _parseInput(_rotationBuyFeeController);
+    final double targetExitFeePercent = widget.targetExitFeePercent;
 
     if (_rotationOriginCoin == _rotationTargetCoin) {
       warnings.add('Advertencia: origen y destino son iguales.');
@@ -3863,6 +3869,12 @@ class _SimulationTabState extends State<SimulationTab> {
     if (buyFeePercent < 0 || buyFeePercent >= 100) {
       return RotationSimulationResult.invalid(
         'Ingresa una comisión de compra destino válida (0 a 99.99%).',
+        warnings,
+      );
+    }
+    if (targetExitFeePercent < 0 || targetExitFeePercent >= 100) {
+      return RotationSimulationResult.invalid(
+        'Configura una comisión de salida destino válida (0 a 99.99%).',
         warnings,
       );
     }
@@ -3966,7 +3978,7 @@ class _SimulationTabState extends State<SimulationTab> {
         ? targetCostBaseAfter / targetBalanceAfter
         : 0.0;
     final double targetBreakEvenAfter =
-        targetAvgAfter / (1 - (sellFeePercent / 100));
+        targetAvgAfter / (1 - (targetExitFeePercent / 100));
     final double? targetDistanceToBreakEvenPct = targetPrice > 0
         ? ((targetBreakEvenAfter - targetPrice) / targetPrice) * 100
         : null;
