@@ -17,6 +17,7 @@ dependencies:
   pdf: ^3.12.0
   excel: ^4.0.6
   file_picker: ^11.0.2
+  flutter_svg: ^2.0.17
 
 dev_dependencies:
   flutter_test:
@@ -31,3 +32,5 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/crypto/

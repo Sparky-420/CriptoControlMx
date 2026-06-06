@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:excel/excel.dart' as xl;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -31,6 +32,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   static const String _darkModeKey = 'dark_mode_v24';
   static const String _themeModeKey = 'theme_mode_v25';
   static const String _accentColorKey = 'accent_color_v25';
+  static const String _themeStyleKey = 'theme_style_v26';
+  static const String _visiblePositionsKey = 'visible_positions_v26';
+  static const String _positionSortKey = 'position_sort_v26';
+  static const String _snapshotModeKey = 'snapshot_mode_v26';
+  static const String _snapshotRetentionKey = 'snapshot_retention_v26';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -48,7 +54,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   int _currentIndex = 0;
   double _sellFeePercent = 0.0;
   AppVisualMode _visualMode = AppVisualMode.system;
-  AppAccentColor _accentColor = AppAccentColor.blue;
+  AppThemeStyle _themeStyle = AppThemeStyle.proDark;
+  VisiblePositions _visiblePositions = VisiblePositions.three;
+  PositionSortMode _positionSortMode = PositionSortMode.largestValue;
+  SnapshotAutomationMode _snapshotAutomationMode =
+      SnapshotAutomationMode.manual;
+  SnapshotRetention _snapshotRetention = SnapshotRetention.last30;
   SimulationMode _requestedSimulationMode = SimulationMode.operation;
   int _simulationOpenNonce = 0;
   DateTime? _pricesUpdatedAt;
@@ -126,10 +137,26 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     } else {
       _visualMode = AppVisualMode.system;
     }
-    _accentColor = appAccentColorFromName(prefs.getString(_accentColorKey));
+    _themeStyle = appThemeStyleFromName(
+      prefs.getString(_themeStyleKey) ?? prefs.getString(_accentColorKey),
+    );
+    _visiblePositions = visiblePositionsFromName(
+      prefs.getString(_visiblePositionsKey),
+    );
+    _positionSortMode = positionSortModeFromName(
+      prefs.getString(_positionSortKey),
+    );
+    _snapshotAutomationMode = snapshotAutomationModeFromName(
+      prefs.getString(_snapshotModeKey),
+    );
+    _snapshotRetention = snapshotRetentionFromName(
+      prefs.getString(_snapshotRetentionKey),
+    );
     await _loadPriceAlertSettings(prefs);
 
     if (mounted) setState(() {});
+
+    await _captureAutomaticSnapshotIfNeeded(SnapshotTrigger.appOpen);
 
     await _refreshPricesIfNeeded(prefs);
   }
@@ -408,6 +435,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       _applyPriceCache(priceCache);
       await _evaluatePriceAlerts(prefs);
       setState(() {});
+      await _captureAutomaticSnapshotIfNeeded(SnapshotTrigger.priceUpdate);
       messenger.showSnackBar(
         const SnackBar(content: Text('Precios actualizados')),
       );
@@ -437,7 +465,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
     await prefs.setDouble(_sellFeePercentKey, _sellFeePercent);
     await prefs.setString(_themeModeKey, _visualMode.name);
-    await prefs.setString(_accentColorKey, _accentColor.name);
+    await prefs.setString(_themeStyleKey, _themeStyle.name);
+    await prefs.setString(_accentColorKey, _themeStyle.name);
+    await prefs.setString(_visiblePositionsKey, _visiblePositions.name);
+    await prefs.setString(_positionSortKey, _positionSortMode.name);
+    await prefs.setString(_snapshotModeKey, _snapshotAutomationMode.name);
+    await prefs.setString(_snapshotRetentionKey, _snapshotRetention.name);
     await prefs.setBool(_darkModeKey, _visualMode == AppVisualMode.dark);
   }
 
@@ -448,6 +481,55 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       _snapshotsKey,
       jsonEncode(_snapshots.map((PortfolioSnapshot s) => s.toJson()).toList()),
     );
+    await _saveData();
+  }
+
+  PortfolioSnapshot _buildCurrentSnapshot() {
+    final Map<String, CoinStats> stats = _computeStats();
+    final PortfolioTotals totals = _totals(stats);
+
+    return PortfolioSnapshot(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      createdAt: DateTime.now(),
+      totalCostBase: totals.costBase,
+      totalCurrentValue: totals.currentValue,
+      totalUnrealizedPL: totals.unrealizedPL,
+      totalRealizedPL: totals.realizedPL,
+      movementCount: _movements.length,
+      coins: _coins
+          .map((String coin) => CoinSnapshot.fromStats(stats[coin]!))
+          .toList(),
+    );
+  }
+
+  void _insertSnapshot(PortfolioSnapshot snapshot) {
+    _snapshots.insert(0, snapshot);
+    _snapshots.sort(
+      (PortfolioSnapshot a, PortfolioSnapshot b) =>
+          b.createdAt.compareTo(a.createdAt),
+    );
+    _enforceSnapshotRetention();
+  }
+
+  void _enforceSnapshotRetention() {
+    final int? limit = _snapshotRetention.limit;
+    if (limit != null && _snapshots.length > limit) {
+      _snapshots.removeRange(limit, _snapshots.length);
+    }
+  }
+
+  Future<void> _captureAutomaticSnapshotIfNeeded(
+    SnapshotTrigger trigger,
+  ) async {
+    if (!_snapshotAutomationMode.shouldCapture(trigger, _snapshots)) return;
+    if (!mounted) return;
+    setState(() => _insertSnapshot(_buildCurrentSnapshot()));
+    await _saveSnapshots();
+  }
+
+  Future<void> _saveMovementAndMaybeSnapshot(SnapshotTrigger trigger) async {
+    await _captureAutomaticSnapshotIfNeeded(trigger);
+    await _saveData();
   }
 
   Map<String, CoinStats> _computeStats() {
@@ -635,8 +717,30 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     _saveData();
   }
 
-  void _changeAccentColor(AppAccentColor value) {
-    setState(() => _accentColor = value);
+  void _changeThemeStyle(AppThemeStyle value) {
+    setState(() => _themeStyle = value);
+    _saveData();
+  }
+
+  void _changeVisiblePositions(VisiblePositions value) {
+    setState(() => _visiblePositions = value);
+    _saveData();
+  }
+
+  void _changePositionSortMode(PositionSortMode value) {
+    setState(() => _positionSortMode = value);
+    _saveData();
+  }
+
+  void _changeSnapshotAutomationMode(SnapshotAutomationMode value) {
+    setState(() => _snapshotAutomationMode = value);
+    _saveData();
+  }
+
+  void _changeSnapshotRetention(SnapshotRetention value) {
+    setState(() => _snapshotRetention = value);
+    _enforceSnapshotRetention();
+    _saveSnapshots();
     _saveData();
   }
 
@@ -988,7 +1092,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                 }
                               });
 
-                              _saveData();
+                              _saveMovementAndMaybeSnapshot(
+                                SnapshotTrigger.movementChange,
+                              );
                               Navigator.of(sheetContext).pop();
                             },
                             icon: Icon(
@@ -1101,29 +1207,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
   Future<void> _saveSnapshot(BuildContext pageContext) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
-    final Map<String, CoinStats> stats = _computeStats();
-    final PortfolioTotals totals = _totals(stats);
+    final PortfolioSnapshot snapshot = _buildCurrentSnapshot();
 
-    final PortfolioSnapshot snapshot = PortfolioSnapshot(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      createdAt: DateTime.now(),
-      totalCostBase: totals.costBase,
-      totalCurrentValue: totals.currentValue,
-      totalUnrealizedPL: totals.unrealizedPL,
-      totalRealizedPL: totals.realizedPL,
-      movementCount: _movements.length,
-      coins: _coins
-          .map((String coin) => CoinSnapshot.fromStats(stats[coin]!))
-          .toList(),
-    );
-
-    setState(() {
-      _snapshots.insert(0, snapshot);
-      _snapshots.sort(
-        (PortfolioSnapshot a, PortfolioSnapshot b) =>
-            b.createdAt.compareTo(a.createdAt),
-      );
-    });
+    setState(() => _insertSnapshot(snapshot));
 
     await _saveSnapshots();
 
@@ -1808,33 +1894,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     final Map<String, CoinStats> stats = _computeStats();
     final PortfolioTotals totals = _totals(stats);
 
+    final AppPalette palette = _themeStyle.palette;
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'CriptoControlMx',
       themeMode: _visualMode.themeMode,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: _accentColor.color,
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFF7FAF2),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: _accentColor.color,
-        brightness: Brightness.dark,
-        cardTheme: CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-        ),
-      ),
+      theme: buildPremiumTheme(palette, Brightness.light),
+      darkTheme: buildPremiumTheme(palette, Brightness.dark),
       home: Builder(
         builder: (BuildContext pageContext) {
           void openMorePage(String title, Widget child) {
@@ -1872,32 +1939,33 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             ),
             onDelete: (Movement movement) {
               setState(() => _movements.remove(movement));
-              _saveData();
+              _saveMovementAndMaybeSnapshot(SnapshotTrigger.movementChange);
             },
           );
 
           Widget buildSettingsTab() => SettingsTab(
             visualMode: _visualMode,
-            accentColor: _accentColor,
+            themeStyle: _themeStyle,
+            visiblePositions: _visiblePositions,
+            positionSortMode: _positionSortMode,
+            snapshotAutomationMode: _snapshotAutomationMode,
+            snapshotRetention: _snapshotRetention,
             sellFeePercent: _sellFeePercent,
             snapshotCount: _snapshots.length,
-            pricesUpdatedAt: _pricesUpdatedAt,
-            isRefreshingPrices: _isRefreshingPrices,
             onVisualModeChanged: _changeVisualMode,
-            onAccentColorChanged: _changeAccentColor,
-            onRefreshPrices: () => _refreshPricesNow(pageContext),
+            onThemeStyleChanged: _changeThemeStyle,
+            onVisiblePositionsChanged: _changeVisiblePositions,
+            onPositionSortModeChanged: _changePositionSortMode,
+            onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
+            onSnapshotRetentionChanged: _changeSnapshotRetention,
             onEditSellFee: () => _showSellFeeDialog(pageContext),
             onOpenAlerts: openAlertsTab,
             onSaveSnapshot: () => _saveSnapshot(pageContext),
             onViewSnapshots: () => _showSnapshots(pageContext),
-            onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
-            onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
             onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
             onExportXlsx: () => _exportXlsx(pageContext),
             onExportPdf: () => _exportPdf(pageContext),
             onExportBackup: () => _exportBackup(pageContext),
-            onImportBackup: () => _importBackup(pageContext),
-            onImportBackupFile: () => _importBackupFile(pageContext),
           );
 
           final List<Widget> pages = <Widget>[
@@ -1915,6 +1983,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               stats: stats,
               totals: totals,
               sellFeePercent: _sellFeePercent,
+              visiblePositions: _visiblePositions,
+              positionSortMode: _positionSortMode,
               latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first,
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
@@ -1960,18 +2030,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             MoreTab(
               totals: totals,
               pricesUpdatedAt: _pricesUpdatedAt,
-              isRefreshingPrices: _isRefreshingPrices,
               movementCount: _movements.length,
               snapshotCount: _snapshots.length,
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
                   .length,
-              onAddMovement: () => _showAddMovementSheet(pageContext),
-              onRefreshPrices: () => _refreshPricesNow(pageContext),
-              onOpenSimulation: () =>
-                  _openSimulationMode(SimulationMode.operation),
-              onOpenRotationSimulation: () =>
-                  _openSimulationMode(SimulationMode.rotation),
               onOpenCharts: () => openMorePage('Gráficas', buildChartsTab()),
               onOpenMovements: () =>
                   openMorePage('Historial', buildMovementsTab()),
@@ -2053,6 +2116,8 @@ class SummaryTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
   final double sellFeePercent;
+  final VisiblePositions visiblePositions;
+  final PositionSortMode positionSortMode;
   final PortfolioSnapshot? latestSnapshot;
   final void Function(CoinStats stats) onDetails;
   final VoidCallback onSaveSnapshot;
@@ -2064,6 +2129,8 @@ class SummaryTab extends StatelessWidget {
     required this.stats,
     required this.totals,
     required this.sellFeePercent,
+    required this.visiblePositions,
+    required this.positionSortMode,
     required this.latestSnapshot,
     required this.onDetails,
     required this.onSaveSnapshot,
@@ -2073,13 +2140,15 @@ class SummaryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<CoinStats> active = stats.values
-        .where((CoinStats s) => s.quantity > 0)
-        .toList()
-      ..sort(
-        (CoinStats a, CoinStats b) =>
-            b.currentValue.compareTo(a.currentValue),
-      );
+    final List<CoinStats> active = sortedPositions(
+      stats.values.where((CoinStats s) => s.quantity > 0),
+      positionSortMode,
+      sellFeePercent,
+    );
+    final int? visibleLimit = visiblePositions.limit;
+    final List<CoinStats> visibleActive = visibleLimit == null
+        ? active
+        : active.take(visibleLimit).toList();
     final CoinStats? leader = active.isEmpty ? null : active.first;
     final CoinStats? weakest = active.isEmpty
         ? null
@@ -2178,7 +2247,7 @@ class SummaryTab extends StatelessWidget {
           ],
         ),
         _CommandSection(
-          title: 'Posiciones',
+          title: 'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
           children: active.isEmpty
               ? <Widget>[
                   const EmptyState(
@@ -2187,7 +2256,7 @@ class SummaryTab extends StatelessWidget {
                     subtitle: 'Agrega un movimiento para empezar.',
                   ),
                 ]
-              : active
+              : visibleActive
                     .map(
                       (CoinStats s) => CleanCoinCard(
                         stats: s,
@@ -2195,7 +2264,19 @@ class SummaryTab extends StatelessWidget {
                         onDetails: () => onDetails(s),
                       ),
                     )
-                    .toList(),
+                    .toList()
+                ..addAll(
+                  active.length > visibleActive.length
+                      ? <Widget>[
+                          PremiumInfoPanel(
+                            icon: Icons.visibility_off_outlined,
+                            title: '${active.length - visibleActive.length} posiciones ocultas',
+                            subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+                            badge: positionSortMode.label,
+                          ),
+                        ]
+                      : <Widget>[],
+                ),
         ),
       ],
     );
@@ -2285,6 +2366,52 @@ class LatestSnapshotCard extends StatelessWidget {
   }
 }
 
+
+class CoinLogo extends StatelessWidget {
+  final String coin;
+  final double size;
+
+  const CoinLogo({super.key, required this.coin, this.size = 42});
+
+  static const Set<String> _localIcons = <String>{
+    'BTC',
+    'ETH',
+    'LINK',
+    'LTC',
+    'UNI',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final String normalized = coin.toUpperCase();
+    final String asset = 'assets/crypto/${normalized.toLowerCase()}.svg';
+    final BorderRadius radius = BorderRadius.circular(size * 0.34);
+
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        color: Theme.of(context).colorScheme.primaryContainer,
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: _localIcons.contains(normalized)
+          ? ClipRRect(
+              borderRadius: radius,
+              child: SvgPicture.asset(asset, width: size, height: size),
+            )
+          : Text(
+              normalized,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: math.max(10, size * 0.28),
+              ),
+            ),
+    );
+  }
+}
+
 class CleanCoinCard extends StatelessWidget {
   final CoinStats stats;
   final double sellFeePercent;
@@ -2313,22 +2440,7 @@ class CleanCoinCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Container(
-                  width: 46,
-                  height: 46,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                  ),
-                  child: Text(
-                    stats.coin,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
+                CoinLogo(coin: stats.coin, size: 46),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -4502,8 +4614,8 @@ class _AlertsTabState extends State<AlertsTab> {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
       children: <Widget>[
         PremiumDashboardHero(
-          title: 'Alertas',
-          subtitle: 'Centro compacto para mercado y recuperación',
+          title: 'Alertas internas',
+          subtitle: 'Se revisan al abrir la app o al actualizar precios',
           icon: Icons.notifications_active_outlined,
           metrics: <PremiumMetricData>[
             PremiumMetricData(
@@ -4567,7 +4679,7 @@ class _AlertsTabState extends State<AlertsTab> {
     return Column(
       children: <Widget>[
         CardPanel(
-          title: 'Alertas de mercado',
+          title: 'Alertas internas de mercado',
           subtitle: '${pct(widget.priceAlertThresholdPercent)} · ${priceUpdatedLabel(widget.pricesUpdatedAt)}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -4657,7 +4769,7 @@ class _AlertsTabState extends State<AlertsTab> {
     return Column(
       children: <Widget>[
         CardPanel(
-          title: 'Alertas de recuperación',
+          title: 'Alertas internas de recuperación',
           subtitle: 'Avance hacia break even.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -4776,10 +4888,7 @@ class AlertCoinRow extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          CircleAvatar(
-            radius: 20,
-            child: Text(coin, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
-          ),
+          CoinLogo(coin: coin, size: 40),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -4844,10 +4953,7 @@ class RecoveryAlertCoinRow extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              CircleAvatar(
-                radius: 20,
-                child: Text(coin, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
-              ),
+              CoinLogo(coin: coin, size: 40),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -4888,6 +4994,80 @@ class RecoveryAlertCoinRow extends StatelessWidget {
 }
 
 
+
+String _btcDominance(Map<String, CoinStats> stats, PortfolioTotals totals) {
+  if (totals.currentValue <= 0) return '—';
+  final double btcValue = stats['BTC']?.currentValue ?? 0;
+  return pct((btcValue / totals.currentValue) * 100);
+}
+
+class AnalyticsControlPanel extends StatefulWidget {
+  final List<PortfolioSnapshot> snapshots;
+
+  const AnalyticsControlPanel({super.key, required this.snapshots});
+
+  @override
+  State<AnalyticsControlPanel> createState() => _AnalyticsControlPanelState();
+}
+
+class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
+  String _range = '30D';
+  String _metric = 'Portfolio value';
+
+  @override
+  Widget build(BuildContext context) {
+    return CardPanel(
+      title: 'Vista analítica',
+      subtitle: 'Filtros visuales para snapshots locales.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <String>['7D', '30D', '90D', 'All'].map((String range) {
+              return ChoiceChip(
+                selected: _range == range,
+                label: Text(range),
+                onSelected: (_) => setState(() => _range = range),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _metric,
+            decoration: const InputDecoration(labelText: 'Métrica'),
+            items: <String>[
+              'Portfolio value',
+              'Invested',
+              'Unrealized P&L',
+              'Realized P&L',
+              'BTC dominance',
+            ]
+                .map((String metric) => DropdownMenuItem<String>(
+                      value: metric,
+                      child: Text(metric),
+                    ))
+                .toList(),
+            onChanged: (String? value) {
+              if (value != null) setState(() => _metric = value);
+            },
+          ),
+          const SizedBox(height: 12),
+          EmptyState(
+            icon: Icons.insights_outlined,
+            title: _metric,
+            subtitle: widget.snapshots.isEmpty
+                ? 'Guarda snapshots para poblar este filtro.'
+                : 'Filtro $_range aplicado sobre '
+                    '${widget.snapshots.length} snapshots locales.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ChartsTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
@@ -4909,7 +5089,9 @@ class ChartsTab extends StatelessWidget {
     final List<CoinStats> active = stats.values
         .where((CoinStats s) => s.currentValue > 0)
         .toList()
-      ..sort((CoinStats a, CoinStats b) => b.currentValue.compareTo(a.currentValue));
+      ..sort(
+        (CoinStats a, CoinStats b) => b.currentValue.compareTo(a.currentValue),
+      );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -4921,8 +5103,38 @@ class ChartsTab extends StatelessWidget {
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
-        const Text('Distribución, resultado y snapshots en una vista visual.'),
+        const Text(
+          'Analítica limpia con filtros de tiempo, métricas semánticas y snapshots.',
+        ),
         const SizedBox(height: 12),
+        AnalyticsControlPanel(snapshots: snapshots),
+        const SizedBox(height: 12),
+        _CommandSection(
+          title: 'Indicadores',
+          children: <Widget>[
+            PremiumMetricCard(
+              label: 'Valor cartera',
+              value: moneyShort(totals.currentValue),
+              icon: Icons.account_balance_wallet_outlined,
+            ),
+            PremiumMetricCard(
+              label: 'Invertido',
+              value: moneyShort(totals.costBase),
+              icon: Icons.savings_outlined,
+            ),
+            PremiumMetricCard(
+              label: 'P&L no realizado',
+              value: moneyShort(totals.unrealizedPL),
+              icon: Icons.trending_up,
+              color: pnlColor(totals.unrealizedPL),
+            ),
+            PremiumMetricCard(
+              label: 'BTC dominance',
+              value: _btcDominance(stats, totals),
+              icon: Icons.currency_bitcoin,
+            ),
+          ],
+        ),
         CardPanel(
           title: 'Distribución actual',
           subtitle: totals.currentValue <= 0
@@ -4932,7 +5144,8 @@ class ChartsTab extends StatelessWidget {
               ? const EmptyState(
                   icon: Icons.pie_chart_outline,
                   title: 'Sin datos para graficar',
-                  subtitle: 'Carga precios y movimientos para ver barras por moneda.',
+                  subtitle: 'Carga precios y movimientos para activar una '
+                      'lectura visual premium.',
                 )
               : Column(
                   children: active.map((CoinStats stat) {
@@ -4949,8 +5162,8 @@ class ChartsTab extends StatelessWidget {
                 ),
         ),
         CardPanel(
-          title: 'Resultado por moneda',
-          subtitle: 'Barras rápidas de ganancia o pérdida no realizada.',
+          title: 'P&L no realizado por moneda',
+          subtitle: 'Barras semánticas: ganancias verdes, pérdidas rojas.',
           child: active.isEmpty
               ? const Text('Sin posiciones abiertas.')
               : Column(
@@ -5088,14 +5301,9 @@ class ResultBar extends StatelessWidget {
 class MoreTab extends StatelessWidget {
   final PortfolioTotals totals;
   final DateTime? pricesUpdatedAt;
-  final bool isRefreshingPrices;
   final int movementCount;
   final int snapshotCount;
   final int chartDataCount;
-  final VoidCallback onAddMovement;
-  final VoidCallback onRefreshPrices;
-  final VoidCallback onOpenSimulation;
-  final VoidCallback onOpenRotationSimulation;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
   final VoidCallback onOpenSettings;
@@ -5116,14 +5324,9 @@ class MoreTab extends StatelessWidget {
     super.key,
     required this.totals,
     required this.pricesUpdatedAt,
-    required this.isRefreshingPrices,
     required this.movementCount,
     required this.snapshotCount,
     required this.chartDataCount,
-    required this.onAddMovement,
-    required this.onRefreshPrices,
-    required this.onOpenSimulation,
-    required this.onOpenRotationSimulation,
     required this.onOpenCharts,
     required this.onOpenMovements,
     required this.onOpenSettings,
@@ -5145,126 +5348,88 @@ class MoreTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color pnlColor = totals.unrealizedPL >= 0 ? Colors.green : Colors.red;
+    final Color semanticPnl = pnlColor(totals.unrealizedPL);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
       children: <Widget>[
         _CommandCenterHeader(
           totals: totals,
-          pnlColor: pnlColor,
+          pnlColor: semanticPnl,
           pricesUpdatedAt: pricesUpdatedAt,
           priceSource: _priceSource,
         ),
-        const SizedBox(height: 14),
-        FilledButton.icon(
-          onPressed: () => _showQuickActions(context),
-          icon: const Icon(Icons.bolt_outlined),
-          label: const Text('Acción rápida'),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-          ),
-        ),
         const SizedBox(height: 18),
         _CommandSection(
-          title: 'Herramientas',
+          title: 'Cuenta y respaldo',
           children: <Widget>[
             _CommandCard(
-              icon: Icons.add_circle_outline,
-              title: 'Agregar movimiento',
-              subtitle: 'Compra, venta o transferencia',
-              onTap: onAddMovement,
+              icon: Icons.account_circle_outlined,
+              title: 'Cuenta',
+              subtitle: 'Próximamente: sincronización y respaldo en la nube',
+              badge: 'Local',
+              onTap: () => _showAccountPlaceholder(context),
             ),
             _CommandCard(
-              icon: Icons.calculate_outlined,
-              title: 'Simular operación',
-              subtitle: 'Abrir modo operación',
-              onTap: onOpenSimulation,
-            ),
-            _CommandCard(
-              icon: Icons.swap_horiz_outlined,
-              title: 'Simular rotación',
-              subtitle: 'Abrir modo rotación',
-              onTap: onOpenRotationSimulation,
-            ),
-            _CommandCard(
-              icon: Icons.sync,
-              title: 'Actualizar precios',
-              subtitle: priceUpdatedLabel(pricesUpdatedAt),
-              loading: isRefreshingPrices,
-              onTap: isRefreshingPrices ? null : onRefreshPrices,
-            ),
-          ],
-        ),
-        _CommandSection(
-          title: 'Datos y respaldo',
-          children: <Widget>[
-            _CommandCard(
-              icon: Icons.photo_library_outlined,
-              title: 'Snapshots',
-              subtitle: snapshotCount == 0
-                  ? 'Sin fotos de cartera'
-                  : 'Evolución guardada',
-              badge: snapshotCount == 0 ? null : '$snapshotCount',
-              emptyTitle: snapshotCount == 0 ? 'No hay snapshots' : null,
-              emptySubtitle: snapshotCount == 0
-                  ? 'Guarda un snapshot para ver evolución.'
-                  : null,
-              emptyActionLabel: snapshotCount == 0 ? 'Guardar' : null,
-              onEmptyAction: snapshotCount == 0 ? onSaveSnapshot : null,
-              onTap: onViewSnapshots,
+              icon: Icons.backup_outlined,
+              title: 'Copia de seguridad',
+              subtitle: 'Copiar JSON completo sin cambiar estructura',
+              onTap: onExportBackup,
             ),
             _CommandCard(
               icon: Icons.table_chart_outlined,
               title: 'Exportaciones',
-              subtitle: 'CSV, PDF y XLSX disponibles',
-              badge: 'CSV · PDF · XLSX',
+              subtitle: 'CSV, JSON, PDF y XLSX cuando están soportados',
+              badge: 'Reportes',
               onTap: () => _showDataActions(context),
-            ),
-            _CommandCard(
-              icon: Icons.data_object_outlined,
-              title: 'Respaldo JSON',
-              subtitle: 'Copiar respaldo completo',
-              onTap: onExportBackup,
-            ),
-            _CommandCard(
-              icon: Icons.upload_file_outlined,
-              title: 'Importar respaldo',
-              subtitle: 'Pegar o cargar JSON',
-              onTap: onImportBackupFile,
             ),
           ],
         ),
         _CommandSection(
-          title: 'Sistema',
+          title: 'Personalización',
           children: <Widget>[
             _CommandCard(
               icon: Icons.palette_outlined,
               title: 'Tema',
-              subtitle: 'Modo visual y color de acento',
+              subtitle: 'Paletas premium de aplicación completa',
               onTap: onOpenSettings,
             ),
             _CommandCard(
-              icon: Icons.percent_outlined,
-              title: 'Ajustes de cálculo',
-              subtitle: 'Comisión de salida y parámetros',
+              icon: Icons.view_agenda_outlined,
+              title: 'Apariencia de resumen',
+              subtitle: 'Posiciones visibles y orden del portafolio',
               onTap: onOpenSettings,
+            ),
+            _CommandCard(
+              icon: Icons.visibility_outlined,
+              title: 'Monedas visibles',
+              subtitle: 'BTC, ETH, LINK, LTC y UNI con logos locales',
+              badge: '5',
+              onTap: onOpenSettings,
+            ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Herramientas',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.health_and_safety_outlined,
+              title: 'Diagnóstico',
+              subtitle: 'Datos locales, snapshots y fuente de precios',
+              badge: pricesUpdatedAt == null ? 'Pendiente' : 'OK',
+              onTap: () => _showDiagnostics(context),
+            ),
+            _CommandCard(
+              icon: Icons.upload_file_outlined,
+              title: 'Importar respaldo',
+              subtitle: 'Pegar JSON o cargar archivo local',
+              onTap: () => _showImportActions(context),
             ),
             _CommandCard(
               icon: Icons.notifications_active_outlined,
-              title: 'Alertas',
-              subtitle: 'Mercado y recuperación',
+              title: 'Alertas internas',
+              subtitle: 'Se revisan al abrir la app o al actualizar precios',
               onTap: onOpenAlerts,
-            ),
-            _CommandCard(
-              icon: Icons.health_and_safety_outlined,
-              title: 'Diagnóstico de app',
-              subtitle: 'Datos locales y precios',
-              badge: pricesUpdatedAt == null ? 'Pendiente' : 'OK',
-              onTap: () => _showDiagnostics(context),
             ),
           ],
         ),
@@ -5272,45 +5437,21 @@ class MoreTab extends StatelessWidget {
     );
   }
 
-  void _showQuickActions(BuildContext context) {
+  void _showAccountPlaceholder(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      isScrollControlled: true,
-      builder: (BuildContext sheetContext) => _CommandActionSheet(
-        title: 'Acción rápida',
-        actions: <_SheetAction>[
-          _SheetAction(
-            icon: Icons.add_circle_outline,
-            title: 'Agregar movimiento',
-            subtitle: 'Registrar una operación',
-            onTap: onAddMovement,
+      builder: (BuildContext sheetContext) => const Padding(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, 28),
+        child: SafeArea(
+          top: false,
+          child: EmptyState(
+            icon: Icons.cloud_sync_outlined,
+            title: 'Cuenta local',
+            subtitle: 'Próximamente: sincronización y respaldo en la nube. '
+                'No se agregó Firebase en esta versión.',
           ),
-          _SheetAction(
-            icon: Icons.sync,
-            title: 'Actualizar precios',
-            subtitle: priceUpdatedLabel(pricesUpdatedAt),
-            onTap: isRefreshingPrices ? null : onRefreshPrices,
-          ),
-          _SheetAction(
-            icon: Icons.calculate_outlined,
-            title: 'Simular operación',
-            subtitle: 'Abrir modo operación',
-            onTap: onOpenSimulation,
-          ),
-          _SheetAction(
-            icon: Icons.swap_horiz_outlined,
-            title: 'Simular rotación',
-            subtitle: 'Abrir modo rotación',
-            onTap: onOpenRotationSimulation,
-          ),
-          _SheetAction(
-            icon: Icons.restart_alt_outlined,
-            title: 'Reiniciar referencias de alertas',
-            subtitle: 'Usar referencias actuales de mercado',
-            onTap: onResetPriceAlertReferences,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -5341,6 +5482,12 @@ class MoreTab extends StatelessWidget {
             onTap: onExportSnapshotsCsv,
           ),
           _SheetAction(
+            icon: Icons.data_object_outlined,
+            title: 'JSON respaldo',
+            subtitle: 'Copia completa compatible',
+            onTap: onExportBackup,
+          ),
+          _SheetAction(
             icon: Icons.picture_as_pdf_outlined,
             title: 'PDF reporte',
             subtitle: 'Reporte existente',
@@ -5349,8 +5496,32 @@ class MoreTab extends StatelessWidget {
           _SheetAction(
             icon: Icons.table_chart_outlined,
             title: 'XLSX reporte',
-            subtitle: 'Libro de cálculo',
+            subtitle: 'Libro de cálculo existente',
             onTap: onExportXlsx,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImportActions(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => _CommandActionSheet(
+        title: 'Importar respaldo',
+        actions: <_SheetAction>[
+          _SheetAction(
+            icon: Icons.content_paste_outlined,
+            title: 'Pegar JSON',
+            subtitle: 'Importar desde portapapeles o texto',
+            onTap: onImportBackup,
+          ),
+          _SheetAction(
+            icon: Icons.upload_file_outlined,
+            title: 'Importar archivo',
+            subtitle: 'Seleccionar respaldo JSON',
+            onTap: onImportBackupFile,
           ),
         ],
       ),
@@ -5370,17 +5541,23 @@ class MoreTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Diagnóstico de app',
+                'Diagnóstico',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
               const SizedBox(height: 12),
-              InfoLine('Movimientos', '$movementCount'),
-              InfoLine('Snapshots', '$snapshotCount'),
-              InfoLine('Valor cartera', money(totals.currentValue)),
-              InfoLine('Fuente precios', _priceSource),
-              InfoLine('Precios', priceUpdatedLabel(pricesUpdatedAt)),
+              InfoLine('Movimientos locales', movementCount.toString()),
+              InfoLine('Snapshots', snapshotCount.toString()),
+              InfoLine('Monedas con valor', chartDataCount.toString()),
+              InfoLine('Fuente de precios', _priceSource),
+              InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: onResetPriceAlertReferences,
+                icon: const Icon(Icons.restart_alt_outlined),
+                label: const Text('Reiniciar referencias de alertas'),
+              ),
             ],
           ),
         ),
@@ -5835,50 +6012,52 @@ class _CommandActionSheet extends StatelessWidget {
 
 class SettingsTab extends StatelessWidget {
   final AppVisualMode visualMode;
-  final AppAccentColor accentColor;
+  final AppThemeStyle themeStyle;
+  final VisiblePositions visiblePositions;
+  final PositionSortMode positionSortMode;
+  final SnapshotAutomationMode snapshotAutomationMode;
+  final SnapshotRetention snapshotRetention;
   final double sellFeePercent;
   final int snapshotCount;
-  final DateTime? pricesUpdatedAt;
-  final bool isRefreshingPrices;
   final ValueChanged<AppVisualMode> onVisualModeChanged;
-  final ValueChanged<AppAccentColor> onAccentColorChanged;
-  final VoidCallback onRefreshPrices;
+  final ValueChanged<AppThemeStyle> onThemeStyleChanged;
+  final ValueChanged<VisiblePositions> onVisiblePositionsChanged;
+  final ValueChanged<PositionSortMode> onPositionSortModeChanged;
+  final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
+  final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final VoidCallback onEditSellFee;
   final VoidCallback onOpenAlerts;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
-  final VoidCallback onExportMovementsCsv;
-  final VoidCallback onExportSummaryCsv;
   final VoidCallback onExportSnapshotsCsv;
   final VoidCallback onExportXlsx;
   final VoidCallback onExportPdf;
   final VoidCallback onExportBackup;
-  final VoidCallback onImportBackup;
-  final VoidCallback onImportBackupFile;
 
   const SettingsTab({
     super.key,
     required this.visualMode,
-    required this.accentColor,
+    required this.themeStyle,
+    required this.visiblePositions,
+    required this.positionSortMode,
+    required this.snapshotAutomationMode,
+    required this.snapshotRetention,
     required this.sellFeePercent,
     required this.snapshotCount,
-    required this.pricesUpdatedAt,
-    required this.isRefreshingPrices,
     required this.onVisualModeChanged,
-    required this.onAccentColorChanged,
-    required this.onRefreshPrices,
+    required this.onThemeStyleChanged,
+    required this.onVisiblePositionsChanged,
+    required this.onPositionSortModeChanged,
+    required this.onSnapshotAutomationModeChanged,
+    required this.onSnapshotRetentionChanged,
     required this.onEditSellFee,
     required this.onOpenAlerts,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
-    required this.onExportMovementsCsv,
-    required this.onExportSummaryCsv,
     required this.onExportSnapshotsCsv,
     required this.onExportXlsx,
     required this.onExportPdf,
     required this.onExportBackup,
-    required this.onImportBackup,
-    required this.onImportBackupFile,
   });
 
   @override
@@ -5888,15 +6067,16 @@ class SettingsTab extends StatelessWidget {
       children: <Widget>[
         CardPanel(
           title: 'Tema',
-          subtitle: 'Modo visual y color de acento para la interfaz.',
+          subtitle: 'Paletas premium completas, sin alterar colores '
+              'semánticos financieros.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
                 'Modo visual',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
               const SizedBox(height: 8),
               SegmentedButton<AppVisualMode>(
@@ -5913,31 +6093,68 @@ class SettingsTab extends StatelessWidget {
                   onVisualModeChanged(value.first);
                 },
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               Text(
-                'Color de acento',
+                'Estilo visual',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: AppAccentColor.values.map((AppAccentColor option) {
-                  return ChoiceChip(
-                    selected: accentColor == option,
-                    label: Text(option.label),
-                    avatar: CircleAvatar(backgroundColor: option.color),
-                    onSelected: (_) => onAccentColorChanged(option),
-                  );
-                }).toList(),
+              const SizedBox(height: 10),
+              ...AppThemeStyle.values.map(
+                (AppThemeStyle option) => _ThemePaletteTile(
+                  option: option,
+                  selected: themeStyle == option,
+                  onTap: () => onThemeStyleChanged(option),
+                ),
               ),
             ],
           ),
         ),
         CardPanel(
-          title: 'Ajustes de cálculo',
+          title: 'Portafolio',
+          subtitle: 'Configura cuántas posiciones aparecen en resumen y '
+              'cómo se ordenan.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Visible positions',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: VisiblePositions.values.map(
+                  (VisiblePositions option) {
+                    return ChoiceChip(
+                      selected: visiblePositions == option,
+                      label: Text(option.label),
+                      onSelected: (_) => onVisiblePositionsChanged(option),
+                    );
+                  },
+                ).toList(),
+              ),
+              const SizedBox(height: 16),
+              Text('Orden', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              ...PositionSortMode.values.map(
+                (PositionSortMode option) => RadioListTile<PositionSortMode>(
+                  contentPadding: EdgeInsets.zero,
+                  value: option,
+                  groupValue: positionSortMode,
+                  title: Text(option.label),
+                  onChanged: (PositionSortMode? value) {
+                    if (value != null) onPositionSortModeChanged(value);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        CardPanel(
+          title: 'Cálculo',
           subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
           child: Align(
             alignment: Alignment.centerLeft,
@@ -5948,110 +6165,173 @@ class SettingsTab extends StatelessWidget {
           ),
         ),
         CardPanel(
-          title: 'Precios',
-          subtitle: priceUpdatedLabel(pricesUpdatedAt),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              onPressed: isRefreshingPrices ? null : onRefreshPrices,
-              icon: isRefreshingPrices
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.sync),
-              label: Text(
-                isRefreshingPrices ? 'Actualizando' : 'Actualizar ahora',
+          title: 'Snapshots',
+          subtitle: 'Fotos guardadas: $snapshotCount. Manual “Guardar snapshot” '
+              'se mantiene.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Automatización',
+                style: Theme.of(context).textTheme.titleSmall,
               ),
-            ),
+              ...SnapshotAutomationMode.values.map(
+                (SnapshotAutomationMode option) =>
+                    RadioListTile<SnapshotAutomationMode>(
+                  contentPadding: EdgeInsets.zero,
+                  value: option,
+                  groupValue: snapshotAutomationMode,
+                  title: Text(option.label),
+                  onChanged: (SnapshotAutomationMode? value) {
+                    if (value != null) onSnapshotAutomationModeChanged(value);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('Retención', style: Theme.of(context).textTheme.titleSmall),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: SnapshotRetention.values.map(
+                  (SnapshotRetention option) {
+                    return ChoiceChip(
+                      selected: snapshotRetention == option,
+                      label: Text(option.label),
+                      onSelected: (_) => onSnapshotRetentionChanged(option),
+                    );
+                  },
+                ).toList(),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton.tonal(
+                    onPressed: onSaveSnapshot,
+                    child: const Text('Guardar snapshot'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onViewSnapshots,
+                    child: const Text('Ver snapshots'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onExportSnapshotsCsv,
+                    child: const Text('CSV'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onExportXlsx,
+                    child: const Text('XLSX'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: onExportPdf,
+                    child: const Text('PDF'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
         CardPanel(
-          title: 'Alertas',
-          subtitle: 'Configura mercado y recuperación desde su pestaña.',
+          title: 'Notificaciones',
+          subtitle: 'Alertas internas: se revisan al abrir la app o al '
+              'actualizar precios.',
           child: Align(
             alignment: Alignment.centerLeft,
             child: FilledButton.tonalIcon(
               onPressed: onOpenAlerts,
               icon: const Icon(Icons.notifications_active_outlined),
-              label: const Text('Configurar alertas'),
+              label: const Text('Configurar alertas internas'),
             ),
           ),
         ),
         CardPanel(
-          title: 'Snapshots',
-          subtitle: 'Fotos guardadas: $snapshotCount',
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              FilledButton.tonal(
-                onPressed: onSaveSnapshot,
-                child: const Text('Guardar snapshot'),
-              ),
-              FilledButton.tonal(
-                onPressed: onViewSnapshots,
-                child: const Text('Ver snapshots'),
-              ),
-              FilledButton.tonal(
-                onPressed: onExportSnapshotsCsv,
-                child: const Text('CSV snapshots'),
-              ),
-            ],
-          ),
-        ),
-        CardPanel(
-          title: 'Exportaciones',
-          subtitle: 'Archivos básicos para auditoría o respaldo externo.',
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              FilledButton.tonal(
-                onPressed: onExportMovementsCsv,
-                child: const Text('CSV historial'),
-              ),
-              FilledButton.tonal(
-                onPressed: onExportSummaryCsv,
-                child: const Text('CSV resumen'),
-              ),
-              FilledButton.tonal(
-                onPressed: onExportPdf,
-                child: const Text('PDF reporte'),
-              ),
-              FilledButton.tonal(
-                onPressed: onExportXlsx,
-                child: const Text('XLSX reporte'),
-              ),
-            ],
-          ),
-        ),
-        CardPanel(
-          title: 'Respaldo JSON',
-          subtitle:
-              'Copia o importa tu respaldo sin borrar la estructura actual.',
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              FilledButton.tonal(
-                onPressed: onExportBackup,
-                child: const Text('Copiar JSON'),
-              ),
-              FilledButton.tonal(
-                onPressed: onImportBackup,
-                child: const Text('Pegar JSON'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: onImportBackupFile,
-                icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Importar archivo'),
-              ),
-            ],
+          title: 'Respaldo',
+          subtitle: 'Cuenta local. Próximamente: sincronización y respaldo en la nube.',
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: onExportBackup,
+              icon: const Icon(Icons.data_object_outlined),
+              label: const Text('Copiar JSON de respaldo'),
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ThemePaletteTile extends StatelessWidget {
+  final AppThemeStyle option;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ThemePaletteTile({
+    required this.option,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final AppPalette palette = option.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected
+                ? palette.primarySoft.withValues(alpha: 0.75)
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? palette.primary : Theme.of(context).colorScheme.outlineVariant,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(option.label, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 3),
+                    Text(option.description),
+                  ],
+                ),
+              ),
+              Row(
+                children: <Color>[
+                  palette.background,
+                  palette.surfaceAlt,
+                  palette.primary,
+                  palette.positive,
+                  palette.negative,
+                  palette.warning,
+                ]
+                    .map(
+                      (Color color) => Container(
+                        width: 18,
+                        height: 18,
+                        margin: const EdgeInsets.only(left: 4),
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: palette.border),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6835,6 +7115,94 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+
+List<CoinStats> sortedPositions(
+  Iterable<CoinStats> positions,
+  PositionSortMode mode,
+  double sellFeePercent,
+) {
+  final List<CoinStats> sorted = positions.toList();
+  switch (mode) {
+    case PositionSortMode.largestValue:
+      sorted.sort(
+        (CoinStats a, CoinStats b) => b.currentValue.compareTo(a.currentValue),
+      );
+      break;
+    case PositionSortMode.largestLoss:
+      sorted.sort(
+        (CoinStats a, CoinStats b) => a.unrealizedPL.compareTo(b.unrealizedPL),
+      );
+      break;
+    case PositionSortMode.closestBreakEven:
+      sorted.sort((CoinStats a, CoinStats b) {
+        final double da = (a.percentToNetBreakEven(sellFeePercent)).abs();
+        final double db = (b.percentToNetBreakEven(sellFeePercent)).abs();
+        return da.compareTo(db);
+      });
+      break;
+    case PositionSortMode.manual:
+      sorted.sort((CoinStats a, CoinStats b) => a.coin.compareTo(b.coin));
+      break;
+  }
+  return sorted;
+}
+
+ThemeData buildPremiumTheme(AppPalette palette, Brightness brightness) {
+  final ColorScheme scheme = palette.toColorScheme(brightness);
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    colorScheme: scheme,
+    scaffoldBackgroundColor: palette.background,
+    canvasColor: palette.background,
+    cardTheme: CardThemeData(
+      elevation: 0,
+      color: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: palette.border.withValues(alpha: 0.55)),
+      ),
+    ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: palette.background,
+      foregroundColor: palette.textMain,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: palette.surface,
+      indicatorColor: palette.primarySoft,
+      labelTextStyle: WidgetStateProperty.all(
+        TextStyle(color: palette.textMain, fontWeight: FontWeight.w700),
+      ),
+    ),
+    dividerColor: palette.border,
+    chipTheme: ChipThemeData(
+      backgroundColor: palette.surfaceAlt,
+      selectedColor: palette.primarySoft,
+      side: BorderSide(color: palette.border),
+      labelStyle: TextStyle(color: palette.textMain),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: palette.surfaceAlt,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: palette.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: palette.border),
+      ),
+    ),
+    textTheme: ThemeData(brightness: brightness).textTheme.apply(
+          bodyColor: palette.textMain,
+          displayColor: palette.textMain,
+        ),
+  );
+}
+
 enum AppVisualMode { system, light, dark }
 
 extension AppVisualModeLabel on AppVisualMode {
@@ -6868,55 +7236,378 @@ AppVisualMode appVisualModeFromName(String? value) {
   return AppVisualMode.system;
 }
 
-enum AppAccentColor { green, blue, purple, red, orange, grey, bitcoin }
+class AppPalette {
+  final Color background;
+  final Color surface;
+  final Color surfaceAlt;
+  final Color primary;
+  final Color primarySoft;
+  final Color border;
+  final Color positive;
+  final Color negative;
+  final Color warning;
+  final Color textMain;
+  final Color textMuted;
 
-extension AppAccentColorLabel on AppAccentColor {
+  const AppPalette({
+    required this.background,
+    required this.surface,
+    required this.surfaceAlt,
+    required this.primary,
+    required this.primarySoft,
+    required this.border,
+    required this.positive,
+    required this.negative,
+    required this.warning,
+    required this.textMain,
+    required this.textMuted,
+  });
+
+  ColorScheme toColorScheme(Brightness brightness) =>
+      ColorScheme.fromSeed(seedColor: primary, brightness: brightness).copyWith(
+        primary: primary,
+        onPrimary: _bestOnColor(primary),
+        primaryContainer: primarySoft,
+        onPrimaryContainer: textMain,
+        secondary: positive,
+        onSecondary: _bestOnColor(positive),
+        secondaryContainer: positive.withValues(alpha: 0.18),
+        onSecondaryContainer: textMain,
+        tertiary: warning,
+        onTertiary: _bestOnColor(warning),
+        tertiaryContainer: warning.withValues(alpha: 0.20),
+        onTertiaryContainer: textMain,
+        error: negative,
+        onError: _bestOnColor(negative),
+        errorContainer: negative.withValues(alpha: 0.18),
+        onErrorContainer: textMain,
+        surface: surface,
+        onSurface: textMain,
+        surfaceContainerHighest: surfaceAlt,
+        onSurfaceVariant: textMuted,
+        outline: border,
+        outlineVariant: border.withValues(alpha: 0.55),
+        shadow: Colors.black,
+        scrim: Colors.black,
+        inverseSurface: textMain,
+        onInverseSurface: surface,
+        inversePrimary: primarySoft,
+      );
+
+}
+
+Color _bestOnColor(Color color) {
+  return color.computeLuminance() > 0.45 ? Colors.black : Colors.white;
+}
+
+enum AppThemeStyle {
+  proDark,
+  graphite,
+  institutionalBlue,
+  bitcoinDark,
+  terminalGreen,
+  highContrast,
+}
+
+extension AppThemeStyleDetails on AppThemeStyle {
   String get label {
     switch (this) {
-      case AppAccentColor.green:
-        return 'Verde';
-      case AppAccentColor.blue:
-        return 'Azul';
-      case AppAccentColor.purple:
-        return 'Morado';
-      case AppAccentColor.red:
-        return 'Rojo';
-      case AppAccentColor.orange:
-        return 'Naranja';
-      case AppAccentColor.grey:
-        return 'Gris';
-      case AppAccentColor.bitcoin:
-        return 'Bitcoin';
+      case AppThemeStyle.proDark:
+        return 'Pro oscuro';
+      case AppThemeStyle.graphite:
+        return 'Grafito';
+      case AppThemeStyle.institutionalBlue:
+        return 'Azul institucional';
+      case AppThemeStyle.bitcoinDark:
+        return 'Bitcoin dark';
+      case AppThemeStyle.terminalGreen:
+        return 'Verde terminal';
+      case AppThemeStyle.highContrast:
+        return 'Alto contraste';
     }
   }
 
-  Color get color {
+  String get description {
     switch (this) {
-      case AppAccentColor.green:
-        return Colors.green;
-      case AppAccentColor.blue:
-        return Colors.blue;
-      case AppAccentColor.purple:
-        return Colors.deepPurple;
-      case AppAccentColor.red:
-        return Colors.red;
-      case AppAccentColor.orange:
-        return Colors.orange;
-      case AppAccentColor.grey:
-        return Colors.blueGrey;
-      case AppAccentColor.bitcoin:
-        return const Color(0xFFF7931A);
+      case AppThemeStyle.proDark:
+        return 'Negro profundo con acentos violeta premium.';
+      case AppThemeStyle.graphite:
+        return 'Neutros sobrios para lectura prolongada.';
+      case AppThemeStyle.institutionalBlue:
+        return 'Azules financieros con contraste limpio.';
+      case AppThemeStyle.bitcoinDark:
+        return 'Carbón y naranja BTC en paleta completa.';
+      case AppThemeStyle.terminalGreen:
+        return 'Oscuro técnico con energía terminal.';
+      case AppThemeStyle.highContrast:
+        return 'Máxima legibilidad y bordes marcados.';
+    }
+  }
+
+  AppPalette get palette {
+    switch (this) {
+      case AppThemeStyle.proDark:
+        return const AppPalette(
+          background: Color(0xFF090B12),
+          surface: Color(0xFF111520),
+          surfaceAlt: Color(0xFF1B2233),
+          primary: Color(0xFF9B8CFF),
+          primarySoft: Color(0xFF28234F),
+          border: Color(0xFF30384C),
+          positive: Color(0xFF22C55E),
+          negative: Color(0xFFEF4444),
+          warning: Color(0xFFF59E0B),
+          textMain: Color(0xFFF8FAFC),
+          textMuted: Color(0xFF94A3B8),
+        );
+      case AppThemeStyle.graphite:
+        return const AppPalette(
+          background: Color(0xFF111315),
+          surface: Color(0xFF1B1F23),
+          surfaceAlt: Color(0xFF272C31),
+          primary: Color(0xFFCBD5E1),
+          primarySoft: Color(0xFF334155),
+          border: Color(0xFF3B424A),
+          positive: Color(0xFF16A34A),
+          negative: Color(0xFFDC2626),
+          warning: Color(0xFFD97706),
+          textMain: Color(0xFFF1F5F9),
+          textMuted: Color(0xFFA1A1AA),
+        );
+      case AppThemeStyle.institutionalBlue:
+        return const AppPalette(
+          background: Color(0xFF07111F),
+          surface: Color(0xFF0E1B2E),
+          surfaceAlt: Color(0xFF162A46),
+          primary: Color(0xFF60A5FA),
+          primarySoft: Color(0xFF12345C),
+          border: Color(0xFF25496F),
+          positive: Color(0xFF10B981),
+          negative: Color(0xFFF43F5E),
+          warning: Color(0xFFFBBF24),
+          textMain: Color(0xFFF8FAFC),
+          textMuted: Color(0xFF93A8C2),
+        );
+      case AppThemeStyle.bitcoinDark:
+        return const AppPalette(
+          background: Color(0xFF0D0A06),
+          surface: Color(0xFF17110A),
+          surfaceAlt: Color(0xFF2A1B0D),
+          primary: Color(0xFFF7931A),
+          primarySoft: Color(0xFF3A220C),
+          border: Color(0xFF5C3A16),
+          positive: Color(0xFF22C55E),
+          negative: Color(0xFFEF4444),
+          warning: Color(0xFFF59E0B),
+          textMain: Color(0xFFFFFBEB),
+          textMuted: Color(0xFFD6B98A),
+        );
+      case AppThemeStyle.terminalGreen:
+        return const AppPalette(
+          background: Color(0xFF020A06),
+          surface: Color(0xFF07140D),
+          surfaceAlt: Color(0xFF0E2618),
+          primary: Color(0xFF39FF88),
+          primarySoft: Color(0xFF073D20),
+          border: Color(0xFF176B3A),
+          positive: Color(0xFF22C55E),
+          negative: Color(0xFFF87171),
+          warning: Color(0xFFFACC15),
+          textMain: Color(0xFFEFFFF5),
+          textMuted: Color(0xFF88B99C),
+        );
+      case AppThemeStyle.highContrast:
+        return const AppPalette(
+          background: Color(0xFF000000),
+          surface: Color(0xFF0B0B0B),
+          surfaceAlt: Color(0xFF1F1F1F),
+          primary: Color(0xFFFFFFFF),
+          primarySoft: Color(0xFF2C2C2C),
+          border: Color(0xFFFFFFFF),
+          positive: Color(0xFF00E676),
+          negative: Color(0xFFFF1744),
+          warning: Color(0xFFFFD600),
+          textMain: Color(0xFFFFFFFF),
+          textMuted: Color(0xFFE0E0E0),
+        );
     }
   }
 }
 
-AppAccentColor appAccentColorFromName(String? value) {
-  for (final AppAccentColor color in AppAccentColor.values) {
-    if (color.name == value) return color;
+AppThemeStyle appThemeStyleFromName(String? value) {
+  switch (value) {
+    case 'green':
+      return AppThemeStyle.terminalGreen;
+    case 'blue':
+      return AppThemeStyle.institutionalBlue;
+    case 'orange':
+    case 'bitcoin':
+      return AppThemeStyle.bitcoinDark;
+    case 'grey':
+      return AppThemeStyle.graphite;
   }
-  return AppAccentColor.blue;
+  for (final AppThemeStyle style in AppThemeStyle.values) {
+    if (style.name == value) return style;
+  }
+  return AppThemeStyle.proDark;
 }
 
+enum VisiblePositions { one, two, three, five, all }
+
+extension VisiblePositionsDetails on VisiblePositions {
+  String get label {
+    switch (this) {
+      case VisiblePositions.one:
+        return '1';
+      case VisiblePositions.two:
+        return '2';
+      case VisiblePositions.three:
+        return '3';
+      case VisiblePositions.five:
+        return '5';
+      case VisiblePositions.all:
+        return 'All';
+    }
+  }
+
+  int? get limit {
+    switch (this) {
+      case VisiblePositions.one:
+        return 1;
+      case VisiblePositions.two:
+        return 2;
+      case VisiblePositions.three:
+        return 3;
+      case VisiblePositions.five:
+        return 5;
+      case VisiblePositions.all:
+        return null;
+    }
+  }
+}
+
+VisiblePositions visiblePositionsFromName(String? value) {
+  for (final VisiblePositions option in VisiblePositions.values) {
+    if (option.name == value) return option;
+  }
+  return VisiblePositions.three;
+}
+
+enum PositionSortMode { largestValue, largestLoss, closestBreakEven, manual }
+
+extension PositionSortModeDetails on PositionSortMode {
+  String get label {
+    switch (this) {
+      case PositionSortMode.largestValue:
+        return 'Mayor valor';
+      case PositionSortMode.largestLoss:
+        return 'Mayor pérdida';
+      case PositionSortMode.closestBreakEven:
+        return 'Más cerca del equilibrio';
+      case PositionSortMode.manual:
+        return 'Manual';
+    }
+  }
+}
+
+PositionSortMode positionSortModeFromName(String? value) {
+  for (final PositionSortMode mode in PositionSortMode.values) {
+    if (mode.name == value) return mode;
+  }
+  return PositionSortMode.largestValue;
+}
+
+enum SnapshotTrigger { appOpen, priceUpdate, movementChange, daily }
+
+enum SnapshotAutomationMode {
+  manual,
+  appOpen24h,
+  afterPriceUpdate,
+  afterMovementChange,
+  daily,
+}
+
+extension SnapshotAutomationModeDetails on SnapshotAutomationMode {
+  String get label {
+    switch (this) {
+      case SnapshotAutomationMode.manual:
+        return 'Manual only';
+      case SnapshotAutomationMode.appOpen24h:
+        return 'Al abrir si pasaron 24h';
+      case SnapshotAutomationMode.afterPriceUpdate:
+        return 'Después de actualizar precios';
+      case SnapshotAutomationMode.afterMovementChange:
+        return 'Después de cambiar movimientos';
+      case SnapshotAutomationMode.daily:
+        return 'Daily';
+    }
+  }
+
+  bool shouldCapture(
+    SnapshotTrigger trigger,
+    List<PortfolioSnapshot> snapshots,
+  ) {
+    final DateTime? latest = snapshots.isEmpty
+        ? null
+        : snapshots.first.createdAt;
+    final bool olderThan24h = latest == null ||
+        DateTime.now().difference(latest) >= const Duration(hours: 24);
+    switch (this) {
+      case SnapshotAutomationMode.manual:
+        return false;
+      case SnapshotAutomationMode.appOpen24h:
+        return trigger == SnapshotTrigger.appOpen && olderThan24h;
+      case SnapshotAutomationMode.afterPriceUpdate:
+        return trigger == SnapshotTrigger.priceUpdate;
+      case SnapshotAutomationMode.afterMovementChange:
+        return trigger == SnapshotTrigger.movementChange;
+      case SnapshotAutomationMode.daily:
+        return olderThan24h &&
+            (trigger == SnapshotTrigger.appOpen ||
+                trigger == SnapshotTrigger.daily);
+    }
+  }
+}
+
+SnapshotAutomationMode snapshotAutomationModeFromName(String? value) {
+  for (final SnapshotAutomationMode mode in SnapshotAutomationMode.values) {
+    if (mode.name == value) return mode;
+  }
+  return SnapshotAutomationMode.manual;
+}
+
+enum SnapshotRetention { last30, last90, unlimited }
+
+extension SnapshotRetentionDetails on SnapshotRetention {
+  String get label {
+    switch (this) {
+      case SnapshotRetention.last30:
+        return 'Last 30';
+      case SnapshotRetention.last90:
+        return 'Last 90';
+      case SnapshotRetention.unlimited:
+        return 'Unlimited';
+    }
+  }
+
+  int? get limit {
+    switch (this) {
+      case SnapshotRetention.last30:
+        return 30;
+      case SnapshotRetention.last90:
+        return 90;
+      case SnapshotRetention.unlimited:
+        return null;
+    }
+  }
+}
+
+SnapshotRetention snapshotRetentionFromName(String? value) {
+  for (final SnapshotRetention retention in SnapshotRetention.values) {
+    if (retention.name == value) return retention;
+  }
+  return SnapshotRetention.last30;
+}
 enum MovementType { buy, sell, transferIn, transferOut }
 
 enum SimulationMode { operation, rotation }
@@ -7312,7 +8003,7 @@ xl.CellValue? toExcelValue(Object? value) {
 }
 
 Color pnlColor(double value) {
-  if (value > 0) return Colors.green.shade700;
-  if (value < 0) return Colors.red.shade700;
+  if (value > 0) return const Color(0xFF16A34A);
+  if (value < 0) return const Color(0xFFDC2626);
   return Colors.grey.shade700;
 }
