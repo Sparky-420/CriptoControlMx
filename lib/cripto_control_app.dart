@@ -933,7 +933,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                               .map(
                                 (String coin) => DropdownMenuItem<String>(
                                   value: coin,
-                                  child: Text(coin),
+                                  child: CryptoCoinLabel(symbol: coin),
                                 ),
                               )
                               .toList(),
@@ -2159,6 +2159,25 @@ class SummaryTab extends StatelessWidget {
     final int recovered = active
         .where((CoinStats s) => s.isAtOrAboveNetBreakEven(sellFeePercent))
         .length;
+    final List<Widget> visiblePositionCards = visibleActive
+        .map<Widget>(
+          (CoinStats s) => CleanCoinCard(
+            stats: s,
+            sellFeePercent: sellFeePercent,
+            onDetails: () => onDetails(s),
+          ),
+        )
+        .toList();
+    if (active.length > visibleActive.length) {
+      visiblePositionCards.add(
+        PremiumInfoPanel(
+          icon: Icons.visibility_off_outlined,
+          title: '${active.length - visibleActive.length} posiciones ocultas',
+          subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+          badge: positionSortMode.label,
+        ),
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
@@ -2256,27 +2275,7 @@ class SummaryTab extends StatelessWidget {
                     subtitle: 'Agrega un movimiento para empezar.',
                   ),
                 ]
-              : visibleActive
-                    .map(
-                      (CoinStats s) => CleanCoinCard(
-                        stats: s,
-                        sellFeePercent: sellFeePercent,
-                        onDetails: () => onDetails(s),
-                      ),
-                    )
-                    .toList()
-                ..addAll(
-                  active.length > visibleActive.length
-                      ? <Widget>[
-                          PremiumInfoPanel(
-                            icon: Icons.visibility_off_outlined,
-                            title: '${active.length - visibleActive.length} posiciones ocultas',
-                            subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
-                            badge: positionSortMode.label,
-                          ),
-                        ]
-                      : <Widget>[],
-                ),
+              : visiblePositionCards,
         ),
       ],
     );
@@ -2367,47 +2366,103 @@ class LatestSnapshotCard extends StatelessWidget {
 }
 
 
-class CoinLogo extends StatelessWidget {
-  final String coin;
+class CryptoCoinIcon extends StatelessWidget {
+  final String symbol;
   final double size;
 
-  const CoinLogo({super.key, required this.coin, this.size = 42});
+  const CryptoCoinIcon({super.key, required this.symbol, this.size = 42});
 
-  static const Set<String> _localIcons = <String>{
-    'BTC',
-    'ETH',
-    'LINK',
-    'LTC',
-    'UNI',
+  static const Map<String, String> _localSvgAssets = <String, String>{
+    'BTC': 'assets/crypto/btc.svg',
+    'ETH': 'assets/crypto/eth.svg',
+    'LINK': 'assets/crypto/link.svg',
+    'LTC': 'assets/crypto/ltc.svg',
+    'UNI': 'assets/crypto/uni.svg',
   };
 
   @override
   Widget build(BuildContext context) {
-    final String normalized = coin.toUpperCase();
-    final String asset = 'assets/crypto/${normalized.toLowerCase()}.svg';
-    final BorderRadius radius = BorderRadius.circular(size * 0.34);
+    final String normalized = symbol.trim().toUpperCase();
+    final String? asset = _localSvgAssets[normalized];
+    final ColorScheme colors = Theme.of(context).colorScheme;
 
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        color: Theme.of(context).colorScheme.primaryContainer,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: _localIcons.contains(normalized)
-          ? ClipRRect(
-              borderRadius: radius,
-              child: SvgPicture.asset(asset, width: size, height: size),
-            )
-          : Text(
-              normalized,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: math.max(10, size * 0.28),
+    return Semantics(
+      label: 'Logo $normalized',
+      image: true,
+      child: Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        padding: EdgeInsets.all(size * 0.16),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: colors.surfaceContainerHighest,
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: asset == null
+            ? _TickerFallback(symbol: normalized, size: size)
+            : SvgPicture.asset(
+                asset,
+                width: size * 0.68,
+                height: size * 0.68,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => _TickerFallback(
+                  symbol: normalized,
+                  size: size,
+                ),
               ),
-            ),
+      ),
+    );
+  }
+}
+
+class CryptoCoinLabel extends StatelessWidget {
+  final String symbol;
+  final double iconSize;
+
+  const CryptoCoinLabel({
+    super.key,
+    required this.symbol,
+    this.iconSize = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        CryptoCoinIcon(symbol: symbol, size: iconSize),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            symbol.toUpperCase(),
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TickerFallback extends StatelessWidget {
+  final String symbol;
+  final double size;
+
+  const _TickerFallback({required this.symbol, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        symbol,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: math.max(10, size * 0.28),
+        ),
+      ),
     );
   }
 }
@@ -2440,7 +2495,7 @@ class CleanCoinCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                CoinLogo(coin: stats.coin, size: 46),
+                CryptoCoinIcon(symbol: stats.coin, size: 46),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -3015,7 +3070,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   .map(
                     (String coin) => DropdownMenuItem<String>(
                       value: coin,
-                      child: Text(coin),
+                      child: CryptoCoinLabel(symbol: coin),
                     ),
                   )
                   .toList(),
@@ -3185,7 +3240,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   .map(
                     (String coin) => DropdownMenuItem<String>(
                       value: coin,
-                      child: Text(coin),
+                      child: CryptoCoinLabel(symbol: coin),
                     ),
                   )
                   .toList(),
@@ -3391,7 +3446,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   .map(
                     (String coin) => DropdownMenuItem<String>(
                       value: coin,
-                      child: Text(coin),
+                      child: CryptoCoinLabel(symbol: coin),
                     ),
                   )
                   .toList(),
@@ -3416,7 +3471,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   .map(
                     (String coin) => DropdownMenuItem<String>(
                       value: coin,
-                      child: Text(coin),
+                      child: CryptoCoinLabel(symbol: coin),
                     ),
                   )
                   .toList(),
@@ -4459,7 +4514,6 @@ class PremiumCoinCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
-    final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -4470,29 +4524,16 @@ class PremiumCoinCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Container(
-                  width: 52,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: colors.primaryContainer.withValues(alpha: 0.74),
-                  ),
-                  child: Text(
-                    stat.coin,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
+                CryptoCoinIcon(symbol: stat.coin, size: 52),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        hasPosition ? 'Posición abierta' : 'Sin posición',
+                        hasPosition
+                            ? '${stat.coin} · Posición abierta'
+                            : '${stat.coin} · Sin posición',
                         style: Theme.of(context).textTheme.labelLarge
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
@@ -4888,7 +4929,7 @@ class AlertCoinRow extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          CoinLogo(coin: coin, size: 40),
+          CryptoCoinIcon(symbol: coin, size: 40),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -4953,7 +4994,7 @@ class RecoveryAlertCoinRow extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              CoinLogo(coin: coin, size: 40),
+              CryptoCoinIcon(symbol: coin, size: 40),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
