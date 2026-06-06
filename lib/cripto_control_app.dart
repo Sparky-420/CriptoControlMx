@@ -2159,6 +2159,25 @@ class SummaryTab extends StatelessWidget {
     final int recovered = active
         .where((CoinStats s) => s.isAtOrAboveNetBreakEven(sellFeePercent))
         .length;
+    final List<Widget> visiblePositionCards = visibleActive
+        .map<Widget>(
+          (CoinStats s) => CleanCoinCard(
+            stats: s,
+            sellFeePercent: sellFeePercent,
+            onDetails: () => onDetails(s),
+          ),
+        )
+        .toList();
+    if (active.length > visibleActive.length) {
+      visiblePositionCards.add(
+        PremiumInfoPanel(
+          icon: Icons.visibility_off_outlined,
+          title: '${active.length - visibleActive.length} posiciones ocultas',
+          subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+          badge: positionSortMode.label,
+        ),
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
@@ -2256,27 +2275,7 @@ class SummaryTab extends StatelessWidget {
                     subtitle: 'Agrega un movimiento para empezar.',
                   ),
                 ]
-              : visibleActive
-                    .map(
-                      (CoinStats s) => CleanCoinCard(
-                        stats: s,
-                        sellFeePercent: sellFeePercent,
-                        onDetails: () => onDetails(s),
-                      ),
-                    )
-                    .toList()
-                ..addAll(
-                  active.length > visibleActive.length
-                      ? <Widget>[
-                          PremiumInfoPanel(
-                            icon: Icons.visibility_off_outlined,
-                            title: '${active.length - visibleActive.length} posiciones ocultas',
-                            subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
-                            badge: positionSortMode.label,
-                          ),
-                        ]
-                      : <Widget>[],
-                ),
+              : visiblePositionCards,
         ),
       ],
     );
