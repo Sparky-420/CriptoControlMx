@@ -66,6 +66,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   bool _isRefreshingPrices = false;
   bool _priceAlertsEnabled = false;
   bool _notificationsAllowed = true;
+  bool _automaticLocalAlertsEnabled = false;
+  int _automaticLocalAlertsIntervalMinutes =
+      PriceAlertService.defaultAutomaticIntervalMinutes;
   double _priceAlertThresholdPercent =
       PriceAlertService.defaultThresholdPercent;
   Map<String, double> _priceAlertReferences = <String, double>{};
@@ -182,6 +185,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     _recoveryAlertThresholdPoints = settings.recoveryThresholdPoints;
     _recoveryAlertReferences = settings.recoveryReferencePnl;
     _notificationsAllowed = notificationsAllowed;
+    _automaticLocalAlertsEnabled = settings.automaticAlertsEnabled;
+    _automaticLocalAlertsIntervalMinutes = settings.automaticIntervalMinutes;
+    await _priceAlertService.configureAutomaticAlerts(
+      enabled: settings.automaticAlertsEnabled,
+      intervalMinutes: settings.automaticIntervalMinutes,
+    );
   }
 
   Future<void> _evaluatePriceAlerts(SharedPreferences prefs) async {
@@ -205,6 +214,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
           evaluation.settings.recoveryThresholdPoints;
       _recoveryAlertReferences = evaluation.settings.recoveryReferencePnl;
       _notificationsAllowed = notificationsAllowed;
+      _automaticLocalAlertsEnabled = evaluation.settings.automaticAlertsEnabled;
+      _automaticLocalAlertsIntervalMinutes =
+          evaluation.settings.automaticIntervalMinutes;
     });
   }
 
@@ -248,6 +260,49 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         ),
       );
     }
+  }
+
+  Future<void> _toggleAutomaticLocalAlerts(
+    BuildContext pageContext,
+    bool enabled,
+  ) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    var notificationsAllowed = await _priceAlertService
+        .areNotificationsAllowed();
+
+    if (enabled && !notificationsAllowed) {
+      notificationsAllowed = await _priceAlertService
+          .requestNotificationPermission();
+    }
+
+    await _priceAlertService.setAutomaticAlertsEnabled(prefs, enabled);
+    await _priceAlertService.configureAutomaticAlerts(
+      enabled: enabled,
+      intervalMinutes: _automaticLocalAlertsIntervalMinutes,
+    );
+    if (enabled) await _priceAlertService.runAutomaticAlertCheckNow();
+    await _loadPriceAlertSettings(prefs);
+    if (mounted) setState(() {});
+
+    if (enabled && !notificationsAllowed && pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Permiso denegado: las alertas internas siguen activas, pero Android no mostrará notificaciones automáticas.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _changeAutomaticLocalAlertInterval(int minutes) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await _priceAlertService.setAutomaticAlertsIntervalMinutes(prefs, minutes);
+    setState(() => _automaticLocalAlertsIntervalMinutes = minutes);
+    await _priceAlertService.configureAutomaticAlerts(
+      enabled: _automaticLocalAlertsEnabled,
+      intervalMinutes: minutes,
+    );
   }
 
   Future<void> _toggleRecoveryAlerts(
@@ -1960,6 +2015,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             onSnapshotRetentionChanged: _changeSnapshotRetention,
             onEditSellFee: () => _showSellFeeDialog(pageContext),
             onOpenAlerts: openAlertsTab,
+            automaticLocalAlertsEnabled: _automaticLocalAlertsEnabled,
+            automaticLocalAlertsIntervalMinutes:
+                _automaticLocalAlertsIntervalMinutes,
+            notificationsAllowed: _notificationsAllowed,
+            onAutomaticLocalAlertsChanged: (bool enabled) =>
+                _toggleAutomaticLocalAlerts(pageContext, enabled),
+            onAutomaticLocalAlertIntervalChanged:
+                _changeAutomaticLocalAlertInterval,
             onSaveSnapshot: () => _saveSnapshot(pageContext),
             onViewSnapshots: () => _showSnapshots(pageContext),
             onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
@@ -2011,6 +2074,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               recoveryAlertReferences: _recoveryAlertReferences,
               sellFeePercent: _sellFeePercent,
               notificationsAllowed: _notificationsAllowed,
+              automaticLocalAlertsEnabled: _automaticLocalAlertsEnabled,
+              automaticLocalAlertsIntervalMinutes:
+                  _automaticLocalAlertsIntervalMinutes,
               pricesUpdatedAt: _pricesUpdatedAt,
               isRefreshingPrices: _isRefreshingPrices,
               onRefreshPrices: () => _refreshPricesNow(pageContext),
@@ -2026,6 +2092,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   _showRecoveryAlertThresholdDialog(pageContext),
               onResetRecoveryAlertReferences: () =>
                   _resetRecoveryAlertReferences(pageContext),
+              onAutomaticLocalAlertsChanged: (bool enabled) =>
+                  _toggleAutomaticLocalAlerts(pageContext, enabled),
+              onAutomaticLocalAlertIntervalChanged:
+                  _changeAutomaticLocalAlertInterval,
             ),
             MoreTab(
               totals: totals,
@@ -2138,6 +2208,48 @@ class SummaryTab extends StatelessWidget {
     required this.onViewSnapshotEvolution,
   });
 
+  List<Widget> _buildVisiblePositionChildren({
+    required List<CoinStats> active,
+    required List<CoinStats> visibleActive,
+    required double sellFeePercent,
+    required PositionSortMode positionSortMode,
+    required void Function(CoinStats stats) onDetails,
+  }) {
+    if (active.isEmpty) {
+      return <Widget>[
+        const EmptyState(
+          icon: Icons.account_balance_wallet_outlined,
+          title: 'Sin posiciones abiertas',
+          subtitle: 'Agrega un movimiento para empezar.',
+        ),
+      ];
+    }
+
+    final List<Widget> children = visibleActive
+        .map<Widget>(
+          (CoinStats s) => CleanCoinCard(
+            stats: s,
+            sellFeePercent: sellFeePercent,
+            onDetails: () => onDetails(s),
+          ),
+        )
+        .toList();
+
+    final int hiddenCount = active.length - visibleActive.length;
+    if (hiddenCount > 0) {
+      children.add(
+        PremiumInfoPanel(
+          icon: Icons.visibility_off_outlined,
+          title: '$hiddenCount posiciones ocultas',
+          subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+          badge: positionSortMode.label,
+        ),
+      );
+    }
+
+    return children;
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<CoinStats> active = sortedPositions(
@@ -2248,35 +2360,13 @@ class SummaryTab extends StatelessWidget {
         ),
         _CommandSection(
           title: 'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
-          children: active.isEmpty
-              ? <Widget>[
-                  const EmptyState(
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: 'Sin posiciones abiertas',
-                    subtitle: 'Agrega un movimiento para empezar.',
-                  ),
-                ]
-              : visibleActive
-                    .map(
-                      (CoinStats s) => CleanCoinCard(
-                        stats: s,
-                        sellFeePercent: sellFeePercent,
-                        onDetails: () => onDetails(s),
-                      ),
-                    )
-                    .toList()
-                ..addAll(
-                  active.length > visibleActive.length
-                      ? <Widget>[
-                          PremiumInfoPanel(
-                            icon: Icons.visibility_off_outlined,
-                            title: '${active.length - visibleActive.length} posiciones ocultas',
-                            subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
-                            badge: positionSortMode.label,
-                          ),
-                        ]
-                      : <Widget>[],
-                ),
+          children: _buildVisiblePositionChildren(
+            active: active,
+            visibleActive: visibleActive,
+            sellFeePercent: sellFeePercent,
+            positionSortMode: positionSortMode,
+            onDetails: onDetails,
+          ),
         ),
       ],
     );
@@ -2303,23 +2393,12 @@ class LatestSnapshotCard extends StatelessWidget {
     return CardPanel(
       title: 'Último snapshot',
       subtitle: current == null
-          ? 'Guarda una foto de cartera para seguir tu evolución.'
+          ? 'Sin foto guardada todavía. Gestiona snapshots desde Gráficas.'
           : 'Guardado el ${longDate(current.createdAt)}.',
       child: current == null
-          ? Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                FilledButton.tonalIcon(
-                  onPressed: onSaveSnapshot,
-                  icon: const Icon(Icons.add_a_photo_outlined),
-                  label: const Text('Guardar snapshot'),
-                ),
-                FilledButton.tonal(
-                  onPressed: onViewSnapshots,
-                  child: const Text('Ver snapshots'),
-                ),
-              ],
+          ? const Text(
+              'Resumen muestra solo el último snapshot. Para guardar, revisar '
+              'o administrar el histórico, entra a Gráficas.',
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2340,25 +2419,13 @@ class LatestSnapshotCard extends StatelessWidget {
                 InfoLine('Inversión total', money(current.totalCostBase)),
                 InfoLine('Moneda dominante', current.dominantCoinLabel),
                 const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    FilledButton.tonalIcon(
-                      onPressed: onSaveSnapshot,
-                      icon: const Icon(Icons.add_a_photo_outlined),
-                      label: const Text('Guardar snapshot'),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: onViewEvolution,
-                      icon: const Icon(Icons.show_chart),
-                      label: const Text('Ver evolución'),
-                    ),
-                    FilledButton.tonal(
-                      onPressed: onViewSnapshots,
-                      child: const Text('Administrar'),
-                    ),
-                  ],
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: onViewEvolution,
+                    icon: const Icon(Icons.show_chart),
+                    label: const Text('Ver evolución en Gráficas'),
+                  ),
                 ),
               ],
             ),
@@ -2385,29 +2452,57 @@ class CoinLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final String normalized = coin.toUpperCase();
     final String asset = 'assets/crypto/${normalized.toLowerCase()}.svg';
-    final BorderRadius radius = BorderRadius.circular(size * 0.34);
+    final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
+      padding: EdgeInsets.all(size * 0.14),
       decoration: BoxDecoration(
-        borderRadius: radius,
-        color: Theme.of(context).colorScheme.primaryContainer,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        shape: BoxShape.circle,
+        color: colors.primaryContainer.withValues(alpha: 0.74),
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: _localIcons.contains(normalized)
-          ? ClipRRect(
-              borderRadius: radius,
-              child: SvgPicture.asset(asset, width: size, height: size),
-            )
-          : Text(
-              normalized,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: math.max(10, size * 0.28),
+          ? ClipOval(
+              child: SvgPicture.asset(
+                asset,
+                width: size * 0.72,
+                height: size * 0.72,
+                fit: BoxFit.contain,
+                placeholderBuilder: (_) => _CoinLogoFallback(
+                  coin: normalized,
+                  size: size,
+                ),
+                errorBuilder: (_, _, _) => _CoinLogoFallback(
+                  coin: normalized,
+                  size: size,
+                ),
               ),
-            ),
+            )
+          : _CoinLogoFallback(coin: normalized, size: size),
+    );
+  }
+}
+
+class _CoinLogoFallback extends StatelessWidget {
+  final String coin;
+  final double size;
+
+  const _CoinLogoFallback({required this.coin, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        coin,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: math.max(10, size * 0.24),
+        ),
+      ),
     );
   }
 }
@@ -4459,8 +4554,6 @@ class PremiumCoinCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
-    final ColorScheme colors = Theme.of(context).colorScheme;
-
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -4470,22 +4563,7 @@ class PremiumCoinCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Container(
-                  width: 52,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: colors.primaryContainer.withValues(alpha: 0.74),
-                  ),
-                  child: Text(
-                    stat.coin,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
+                CoinLogo(coin: stat.coin, size: 52),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -4560,6 +4638,8 @@ class AlertsTab extends StatefulWidget {
   final Map<String, double> recoveryAlertReferences;
   final double sellFeePercent;
   final bool notificationsAllowed;
+  final bool automaticLocalAlertsEnabled;
+  final int automaticLocalAlertsIntervalMinutes;
   final DateTime? pricesUpdatedAt;
   final bool isRefreshingPrices;
   final VoidCallback onRefreshPrices;
@@ -4569,6 +4649,8 @@ class AlertsTab extends StatefulWidget {
   final ValueChanged<bool> onRecoveryAlertsChanged;
   final VoidCallback onEditRecoveryAlertThreshold;
   final VoidCallback onResetRecoveryAlertReferences;
+  final ValueChanged<bool> onAutomaticLocalAlertsChanged;
+  final ValueChanged<int> onAutomaticLocalAlertIntervalChanged;
 
   const AlertsTab({
     super.key,
@@ -4582,6 +4664,8 @@ class AlertsTab extends StatefulWidget {
     required this.recoveryAlertReferences,
     required this.sellFeePercent,
     required this.notificationsAllowed,
+    required this.automaticLocalAlertsEnabled,
+    required this.automaticLocalAlertsIntervalMinutes,
     required this.pricesUpdatedAt,
     required this.isRefreshingPrices,
     required this.onRefreshPrices,
@@ -4591,6 +4675,8 @@ class AlertsTab extends StatefulWidget {
     required this.onRecoveryAlertsChanged,
     required this.onEditRecoveryAlertThreshold,
     required this.onResetRecoveryAlertReferences,
+    required this.onAutomaticLocalAlertsChanged,
+    required this.onAutomaticLocalAlertIntervalChanged,
   });
 
   @override
@@ -4609,13 +4695,16 @@ class _AlertsTabState extends State<AlertsTab> {
     final String globalState = widget.priceAlertsEnabled || widget.recoveryAlertsEnabled
         ? 'Activas'
         : 'En pausa';
+    final String autoState = widget.automaticLocalAlertsEnabled
+        ? intervalLabel(widget.automaticLocalAlertsIntervalMinutes)
+        : 'Desactivadas';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
       children: <Widget>[
         PremiumDashboardHero(
-          title: 'Alertas internas',
-          subtitle: 'Se revisan al abrir la app o al actualizar precios',
+          title: 'Alertas',
+          subtitle: 'Internas al usar la app y automáticas locales en Android',
           icon: Icons.notifications_active_outlined,
           metrics: <PremiumMetricData>[
             PremiumMetricData(
@@ -4635,12 +4724,14 @@ class _AlertsTabState extends State<AlertsTab> {
               icon: Icons.track_changes_outlined,
             ),
             PremiumMetricData(
-              label: 'Última act.',
-              value: priceUpdatedLabel(widget.pricesUpdatedAt),
-              icon: Icons.schedule_outlined,
+              label: 'Automáticas',
+              value: autoState,
+              icon: Icons.work_history_outlined,
             ),
           ],
         ),
+        const SizedBox(height: 14),
+        _buildAutomaticNotificationsCard(context),
         const SizedBox(height: 14),
         PremiumSegmentShell(
           child: SegmentedButton<int>(
@@ -4668,6 +4759,57 @@ class _AlertsTabState extends State<AlertsTab> {
         else
           _buildRecoverySection(context),
       ],
+    );
+  }
+
+
+  Widget _buildAutomaticNotificationsCard(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return CardPanel(
+      title: 'Alertas automáticas locales',
+      subtitle: 'Revisión en segundo plano con WorkManager de Android.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SwitchListTile(
+            dense: true,
+            value: widget.automaticLocalAlertsEnabled,
+            onChanged: widget.onAutomaticLocalAlertsChanged,
+            title: const Text('Activar revisión automática local'),
+            subtitle: Text(
+              widget.notificationsAllowed
+                  ? 'Usa las mismas alertas de mercado y recuperación.'
+                  : 'Falta permiso de notificaciones de Android.',
+            ),
+            contentPadding: EdgeInsets.zero,
+          ),
+          const Text(
+            'Las alertas internas se revisan al abrir la app o actualizar precios. '
+            'Las alertas automáticas locales dependen de Android, batería, '
+            'permisos y conexión. Pueden no ser exactas al minuto.',
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Android puede agrupar o retrasar revisiones para ahorrar batería.',
+            style: TextStyle(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          Text('Intervalo', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: PriceAlertService.automaticIntervalOptions.map((int minutes) {
+              return ChoiceChip(
+                selected: widget.automaticLocalAlertsIntervalMinutes == minutes,
+                label: Text(intervalLabel(minutes)),
+                onSelected: (_) => widget.onAutomaticLocalAlertIntervalChanged(minutes),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -5025,7 +5167,7 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: <String>['7D', '30D', '90D', 'All'].map((String range) {
+            children: <String>['7D', '30D', '90D', 'Todo'].map((String range) {
               return ChoiceChip(
                 selected: _range == range,
                 label: Text(range),
@@ -5383,6 +5525,12 @@ class MoreTab extends StatelessWidget {
               badge: 'Reportes',
               onTap: () => _showDataActions(context),
             ),
+            _CommandCard(
+              icon: Icons.upload_file_outlined,
+              title: 'Importar respaldo',
+              subtitle: 'Pegar JSON o cargar archivo local',
+              onTap: () => _showImportActions(context),
+            ),
           ],
         ),
         _CommandSection(
@@ -5419,18 +5567,6 @@ class MoreTab extends StatelessWidget {
               badge: pricesUpdatedAt == null ? 'Pendiente' : 'OK',
               onTap: () => _showDiagnostics(context),
             ),
-            _CommandCard(
-              icon: Icons.upload_file_outlined,
-              title: 'Importar respaldo',
-              subtitle: 'Pegar JSON o cargar archivo local',
-              onTap: () => _showImportActions(context),
-            ),
-            _CommandCard(
-              icon: Icons.notifications_active_outlined,
-              title: 'Alertas internas',
-              subtitle: 'Se revisan al abrir la app o al actualizar precios',
-              onTap: onOpenAlerts,
-            ),
           ],
         ),
       ],
@@ -5440,6 +5576,8 @@ class MoreTab extends StatelessWidget {
   void _showAccountPlaceholder(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => const Padding(
         padding: EdgeInsets.fromLTRB(20, 0, 20, 28),
@@ -5459,6 +5597,8 @@ class MoreTab extends StatelessWidget {
   void _showDataActions(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => _CommandActionSheet(
         title: 'Exportaciones',
@@ -5507,6 +5647,8 @@ class MoreTab extends StatelessWidget {
   void _showImportActions(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => _CommandActionSheet(
         title: 'Importar respaldo',
@@ -5531,11 +5673,18 @@ class MoreTab extends StatelessWidget {
   void _showDiagnostics(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
-      builder: (BuildContext sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: SafeArea(
-          top: false,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewPaddingOf(context).bottom + 24,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -5959,10 +6108,11 @@ class _CommandActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double bottomPadding = MediaQuery.viewPaddingOf(context).bottom + 20;
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        padding: EdgeInsets.fromLTRB(16, 0, 16, bottomPadding),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -6019,6 +6169,9 @@ class SettingsTab extends StatelessWidget {
   final SnapshotRetention snapshotRetention;
   final double sellFeePercent;
   final int snapshotCount;
+  final bool automaticLocalAlertsEnabled;
+  final int automaticLocalAlertsIntervalMinutes;
+  final bool notificationsAllowed;
   final ValueChanged<AppVisualMode> onVisualModeChanged;
   final ValueChanged<AppThemeStyle> onThemeStyleChanged;
   final ValueChanged<VisiblePositions> onVisiblePositionsChanged;
@@ -6027,6 +6180,8 @@ class SettingsTab extends StatelessWidget {
   final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final VoidCallback onEditSellFee;
   final VoidCallback onOpenAlerts;
+  final ValueChanged<bool> onAutomaticLocalAlertsChanged;
+  final ValueChanged<int> onAutomaticLocalAlertIntervalChanged;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final VoidCallback onExportSnapshotsCsv;
@@ -6044,6 +6199,9 @@ class SettingsTab extends StatelessWidget {
     required this.snapshotRetention,
     required this.sellFeePercent,
     required this.snapshotCount,
+    required this.automaticLocalAlertsEnabled,
+    required this.automaticLocalAlertsIntervalMinutes,
+    required this.notificationsAllowed,
     required this.onVisualModeChanged,
     required this.onThemeStyleChanged,
     required this.onVisiblePositionsChanged,
@@ -6052,6 +6210,8 @@ class SettingsTab extends StatelessWidget {
     required this.onSnapshotRetentionChanged,
     required this.onEditSellFee,
     required this.onOpenAlerts,
+    required this.onAutomaticLocalAlertsChanged,
+    required this.onAutomaticLocalAlertIntervalChanged,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onExportSnapshotsCsv,
@@ -6119,7 +6279,7 @@ class SettingsTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Visible positions',
+                'Posiciones visibles',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 8),
@@ -6166,8 +6326,7 @@ class SettingsTab extends StatelessWidget {
         ),
         CardPanel(
           title: 'Snapshots',
-          subtitle: 'Fotos guardadas: $snapshotCount. Manual “Guardar snapshot” '
-              'se mantiene.',
+          subtitle: 'Fotos guardadas: $snapshotCount. Configura automatización y retención.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -6203,46 +6362,57 @@ class SettingsTab extends StatelessWidget {
                 ).toList(),
               ),
               const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  FilledButton.tonal(
-                    onPressed: onSaveSnapshot,
-                    child: const Text('Guardar snapshot'),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: onViewSnapshots,
-                    child: const Text('Ver snapshots'),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: onExportSnapshotsCsv,
-                    child: const Text('CSV'),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: onExportXlsx,
-                    child: const Text('XLSX'),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: onExportPdf,
-                    child: const Text('PDF'),
-                  ),
-                ],
+              Text(
+                'La creación y revisión de snapshots vive en Gráficas. '
+                'Aquí solo se configura automatización y retención.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
         ),
         CardPanel(
           title: 'Notificaciones',
-          subtitle: 'Alertas internas: se revisan al abrir la app o al '
-              'actualizar precios.',
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              onPressed: onOpenAlerts,
-              icon: const Icon(Icons.notifications_active_outlined),
-              label: const Text('Configurar alertas internas'),
-            ),
+          subtitle: 'Configura comportamiento; la gestión completa vive en Alertas.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text('Alertas internas: al abrir app / actualizar precios.'),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                dense: true,
+                value: automaticLocalAlertsEnabled,
+                onChanged: onAutomaticLocalAlertsChanged,
+                title: const Text('Alertas automáticas locales'),
+                subtitle: Text(
+                  notificationsAllowed
+                      ? 'Revisión en segundo plano de Android.'
+                      : 'Permiso pendiente o denegado en Android.',
+                ),
+                contentPadding: EdgeInsets.zero,
+              ),
+              const Text(
+                'Android puede agrupar o retrasar revisiones para ahorrar batería. '
+                'No son notificaciones push en la nube.',
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: PriceAlertService.automaticIntervalOptions.map((int minutes) {
+                  return ChoiceChip(
+                    selected: automaticLocalAlertsIntervalMinutes == minutes,
+                    label: Text(intervalLabel(minutes)),
+                    onSelected: (_) => onAutomaticLocalAlertIntervalChanged(minutes),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: onOpenAlerts,
+                icon: const Icon(Icons.notifications_active_outlined),
+                label: const Text('Ir a Alertas'),
+              ),
+            ],
           ),
         ),
         CardPanel(
@@ -7466,7 +7636,7 @@ extension VisiblePositionsDetails on VisiblePositions {
       case VisiblePositions.five:
         return '5';
       case VisiblePositions.all:
-        return 'All';
+        return 'Todas';
     }
   }
 
@@ -7531,7 +7701,7 @@ extension SnapshotAutomationModeDetails on SnapshotAutomationMode {
   String get label {
     switch (this) {
       case SnapshotAutomationMode.manual:
-        return 'Manual only';
+        return 'Solo manual';
       case SnapshotAutomationMode.appOpen24h:
         return 'Al abrir si pasaron 24h';
       case SnapshotAutomationMode.afterPriceUpdate:
@@ -7539,7 +7709,7 @@ extension SnapshotAutomationModeDetails on SnapshotAutomationMode {
       case SnapshotAutomationMode.afterMovementChange:
         return 'Después de cambiar movimientos';
       case SnapshotAutomationMode.daily:
-        return 'Daily';
+        return 'Diario';
     }
   }
 
@@ -7582,11 +7752,11 @@ extension SnapshotRetentionDetails on SnapshotRetention {
   String get label {
     switch (this) {
       case SnapshotRetention.last30:
-        return 'Last 30';
+        return 'Últimos 30';
       case SnapshotRetention.last90:
-        return 'Last 90';
+        return 'Últimos 90';
       case SnapshotRetention.unlimited:
-        return 'Unlimited';
+        return 'Ilimitado';
     }
   }
 
@@ -7949,6 +8119,22 @@ String moneyShort(double value) => '\$${value.toStringAsFixed(0)}';
 String crypto(double value) => value.toStringAsFixed(8);
 
 String pct(double value) => '${value.toStringAsFixed(2)}%';
+
+String intervalLabel(int minutes) {
+  switch (minutes) {
+    case 15:
+      return '15 min';
+    case 30:
+      return '30 min';
+    case 60:
+      return '1 h';
+    case 360:
+      return '6 h';
+    case 1440:
+      return 'Diario';
+  }
+  return '$minutes min';
+}
 
 String fixed(double value, int decimals) => value.toStringAsFixed(decimals);
 

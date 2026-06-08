@@ -59,3 +59,8 @@ android {
 flutter {
     source = "../.."
 }
+
+
+dependencies {
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+}

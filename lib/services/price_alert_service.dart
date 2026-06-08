@@ -21,7 +21,13 @@ class PriceAlertService {
       'recovery_alert_reference_pnl_json';
   static const String recoveryLastNotifiedAtKey =
       'recovery_alert_last_notified_at_json';
+  static const String automaticAlertsEnabledKey =
+      'automatic_local_alerts_enabled';
+  static const String automaticAlertsIntervalMinutesKey =
+      'automatic_local_alerts_interval_minutes';
 
+  static const int defaultAutomaticIntervalMinutes = 30;
+  static const List<int> automaticIntervalOptions = <int>[15, 30, 60, 360, 1440];
   static const double defaultThresholdPercent = 2.0;
   static const double defaultRecoveryThresholdPoints = 2.0;
   static const String _channelName = 'mx.criptocontrolmx.app/price_alerts';
@@ -46,6 +52,35 @@ class PriceAlertService {
       return false;
     } on MissingPluginException {
       return false;
+    }
+  }
+
+  Future<void> configureAutomaticAlerts({
+    required bool enabled,
+    required int intervalMinutes,
+  }) async {
+    try {
+      await _channel.invokeMethod<void>(
+        'configureAutomaticAlerts',
+        <String, Object>{
+          'enabled': enabled,
+          'intervalMinutes': intervalMinutes,
+        },
+      );
+    } on PlatformException {
+      // Android puede no tener WorkManager disponible en algunos entornos.
+    } on MissingPluginException {
+      // Tests/plataformas sin canal nativo: no interrumpir el flujo.
+    }
+  }
+
+  Future<void> runAutomaticAlertCheckNow() async {
+    try {
+      await _channel.invokeMethod<void>('runAutomaticAlertCheckNow');
+    } on PlatformException {
+      // No bloquear la app si Android rechaza la tarea inmediata.
+    } on MissingPluginException {
+      // Tests/plataformas sin canal nativo: no interrumpir el flujo.
     }
   }
 
@@ -82,7 +117,30 @@ class PriceAlertService {
       recoveryLastNotifiedAt: _readDateMap(
         prefs.getString(recoveryLastNotifiedAtKey),
       ),
+      automaticAlertsEnabled:
+          prefs.getBool(automaticAlertsEnabledKey) ?? false,
+      automaticIntervalMinutes: prefs.getInt(
+            automaticAlertsIntervalMinutesKey,
+          ) ??
+          defaultAutomaticIntervalMinutes,
     );
+  }
+
+  Future<void> setAutomaticAlertsEnabled(
+    SharedPreferences prefs,
+    bool enabled,
+  ) async {
+    await prefs.setBool(automaticAlertsEnabledKey, enabled);
+  }
+
+  Future<void> setAutomaticAlertsIntervalMinutes(
+    SharedPreferences prefs,
+    int minutes,
+  ) async {
+    final int safeMinutes = automaticIntervalOptions.contains(minutes)
+        ? minutes
+        : defaultAutomaticIntervalMinutes;
+    await prefs.setInt(automaticAlertsIntervalMinutesKey, safeMinutes);
   }
 
   Future<void> setEnabled(SharedPreferences prefs, bool enabled) async {
@@ -269,6 +327,8 @@ class PriceAlertService {
         recoveryThresholdPoints: settings.recoveryThresholdPoints,
         recoveryReferencePnl: recoveryReferences,
         recoveryLastNotifiedAt: recoveryNotifiedAt,
+        automaticAlertsEnabled: settings.automaticAlertsEnabled,
+        automaticIntervalMinutes: settings.automaticIntervalMinutes,
       ),
       notificationCount: notificationCount,
     );
@@ -410,6 +470,8 @@ class PriceAlertSettings {
     required this.recoveryThresholdPoints,
     required this.recoveryReferencePnl,
     required this.recoveryLastNotifiedAt,
+    required this.automaticAlertsEnabled,
+    required this.automaticIntervalMinutes,
   });
 
   final bool enabled;
@@ -421,6 +483,8 @@ class PriceAlertSettings {
   final double recoveryThresholdPoints;
   final Map<String, double> recoveryReferencePnl;
   final Map<String, DateTime> recoveryLastNotifiedAt;
+  final bool automaticAlertsEnabled;
+  final int automaticIntervalMinutes;
 }
 
 class PriceAlertEvaluation {
