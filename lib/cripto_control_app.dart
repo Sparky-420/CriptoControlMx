@@ -2208,6 +2208,48 @@ class SummaryTab extends StatelessWidget {
     required this.onViewSnapshotEvolution,
   });
 
+  List<Widget> _buildVisiblePositionChildren({
+    required List<CoinStats> active,
+    required List<CoinStats> visibleActive,
+    required double sellFeePercent,
+    required PositionSortMode positionSortMode,
+    required void Function(CoinStats stats) onDetails,
+  }) {
+    if (active.isEmpty) {
+      return <Widget>[
+        const EmptyState(
+          icon: Icons.account_balance_wallet_outlined,
+          title: 'Sin posiciones abiertas',
+          subtitle: 'Agrega un movimiento para empezar.',
+        ),
+      ];
+    }
+
+    final List<Widget> children = visibleActive
+        .map<Widget>(
+          (CoinStats s) => CleanCoinCard(
+            stats: s,
+            sellFeePercent: sellFeePercent,
+            onDetails: () => onDetails(s),
+          ),
+        )
+        .toList();
+
+    final int hiddenCount = active.length - visibleActive.length;
+    if (hiddenCount > 0) {
+      children.add(
+        PremiumInfoPanel(
+          icon: Icons.visibility_off_outlined,
+          title: '$hiddenCount posiciones ocultas',
+          subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+          badge: positionSortMode.label,
+        ),
+      );
+    }
+
+    return children;
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<CoinStats> active = sortedPositions(
@@ -2318,35 +2360,13 @@ class SummaryTab extends StatelessWidget {
         ),
         _CommandSection(
           title: 'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
-          children: active.isEmpty
-              ? <Widget>[
-                  const EmptyState(
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: 'Sin posiciones abiertas',
-                    subtitle: 'Agrega un movimiento para empezar.',
-                  ),
-                ]
-              : visibleActive
-                    .map(
-                      (CoinStats s) => CleanCoinCard(
-                        stats: s,
-                        sellFeePercent: sellFeePercent,
-                        onDetails: () => onDetails(s),
-                      ),
-                    )
-                    .toList()
-                ..addAll(
-                  active.length > visibleActive.length
-                      ? <Widget>[
-                          PremiumInfoPanel(
-                            icon: Icons.visibility_off_outlined,
-                            title: '${active.length - visibleActive.length} posiciones ocultas',
-                            subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
-                            badge: positionSortMode.label,
-                          ),
-                        ]
-                      : <Widget>[],
-                ),
+          children: _buildVisiblePositionChildren(
+            active: active,
+            visibleActive: visibleActive,
+            sellFeePercent: sellFeePercent,
+            positionSortMode: positionSortMode,
+            onDetails: onDetails,
+          ),
         ),
       ],
     );
