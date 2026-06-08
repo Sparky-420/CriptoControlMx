@@ -2432,29 +2432,57 @@ class CoinLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final String normalized = coin.toUpperCase();
     final String asset = 'assets/crypto/${normalized.toLowerCase()}.svg';
-    final BorderRadius radius = BorderRadius.circular(size * 0.34);
+    final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
+      padding: EdgeInsets.all(size * 0.14),
       decoration: BoxDecoration(
-        borderRadius: radius,
-        color: Theme.of(context).colorScheme.primaryContainer,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        shape: BoxShape.circle,
+        color: colors.primaryContainer.withValues(alpha: 0.74),
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: _localIcons.contains(normalized)
-          ? ClipRRect(
-              borderRadius: radius,
-              child: SvgPicture.asset(asset, width: size, height: size),
-            )
-          : Text(
-              normalized,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: math.max(10, size * 0.28),
+          ? ClipOval(
+              child: SvgPicture.asset(
+                asset,
+                width: size * 0.72,
+                height: size * 0.72,
+                fit: BoxFit.contain,
+                placeholderBuilder: (_) => _CoinLogoFallback(
+                  coin: normalized,
+                  size: size,
+                ),
+                errorBuilder: (_, _, _) => _CoinLogoFallback(
+                  coin: normalized,
+                  size: size,
+                ),
               ),
-            ),
+            )
+          : _CoinLogoFallback(coin: normalized, size: size),
+    );
+  }
+}
+
+class _CoinLogoFallback extends StatelessWidget {
+  final String coin;
+  final double size;
+
+  const _CoinLogoFallback({required this.coin, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        coin,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: math.max(10, size * 0.24),
+        ),
+      ),
     );
   }
 }
@@ -4506,8 +4534,6 @@ class PremiumCoinCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
-    final ColorScheme colors = Theme.of(context).colorScheme;
-
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -4517,22 +4543,7 @@ class PremiumCoinCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Container(
-                  width: 52,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: colors.primaryContainer.withValues(alpha: 0.74),
-                  ),
-                  child: Text(
-                    stat.coin,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
+                CoinLogo(coin: stat.coin, size: 52),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
