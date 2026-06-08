@@ -6,6 +6,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,7 +20,8 @@ import kotlin.math.abs
 
 class MainActivity : FlutterActivity() {
     private val channelName = "mx.criptocontrolmx.app/price_alerts"
-    private val notificationChannelId = "price_alerts"
+    private val notificationChannelId = AlertWorker.notificationChannelId
+    private val automaticWorkName = "cripto_alerts_periodic"
     private val notificationPermissionRequestCode = 4202
     private var pendingPermissionResult: MethodChannel.Result? = null
 
@@ -29,6 +36,16 @@ class MainActivity : FlutterActivity() {
                 }
                 "areNotificationsAllowed" -> result.success(areNotificationsAllowed())
                 "requestNotificationPermission" -> requestNotificationPermission(result)
+                "configureAutomaticAlerts" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    val intervalMinutes = call.argument<Int>("intervalMinutes") ?: 30
+                    configureAutomaticAlerts(enabled, intervalMinutes)
+                    result.success(null)
+                }
+                "runAutomaticAlertCheckNow" -> {
+                    enqueueImmediateAlertCheck()
+                    result.success(null)
+                }
                 "showPriceAlert" -> {
                     val coin = call.argument<String>("coin") ?: "CRIPTO"
                     val title = call.argument<String>("title") ?: "Alerta de precio"
@@ -72,6 +89,34 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun configureAutomaticAlerts(enabled: Boolean, intervalMinutes: Int) {
+        val workManager = WorkManager.getInstance(applicationContext)
+        if (!enabled) {
+            workManager.cancelUniqueWork(automaticWorkName)
+            return
+        }
+
+        val safeMinutes = maxOf(15, intervalMinutes.toLong())
+        val request = PeriodicWorkRequestBuilder<AlertWorker>(
+            safeMinutes,
+            TimeUnit.MINUTES,
+        ).build()
+        workManager.enqueueUniquePeriodicWork(
+            automaticWorkName,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            request,
+        )
+    }
+
+    private fun enqueueImmediateAlertCheck() {
+        val request = OneTimeWorkRequestBuilder<AlertWorker>().build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "cripto_alerts_now",
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
+
     private fun showPriceAlert(coin: String, title: String, body: String): Boolean {
         createPriceAlertChannel()
         if (!areNotificationsAllowed()) return false
@@ -111,10 +156,10 @@ class MainActivity : FlutterActivity() {
 
         val channel = NotificationChannel(
             notificationChannelId,
-            "Alertas de precio",
+            "Alertas de CriptoControlMx",
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
-            description = "Notificaciones locales de subidas y bajadas de precio"
+            description = "Alertas de mercado y recuperación"
         }
 
         notificationManager().createNotificationChannel(channel)
