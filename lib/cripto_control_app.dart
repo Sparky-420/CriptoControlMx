@@ -2986,8 +2986,6 @@ class _SimulationTabState extends State<SimulationTab> {
           ],
         ),
         const SizedBox(height: 14),
-        _buildAutomaticNotificationsCard(context),
-        const SizedBox(height: 14),
         PremiumSegmentShell(
           child: SegmentedButton<SimulationMode>(
             segments: const <ButtonSegment<SimulationMode>>[
