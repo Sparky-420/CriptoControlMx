@@ -895,7 +895,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     );
   }
 
-  void _showAddMovementSheet(
+  Future<void> _showAddMovementSheet(
     BuildContext pageContext, {
     Movement? existing,
     int? index,
@@ -926,7 +926,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       text: existing?.note ?? '',
     );
 
-    showModalBottomSheet<void>(
+    return showModalBottomSheet<void>(
       context: pageContext,
       isScrollControlled: true,
       useSafeArea: true,
@@ -2107,7 +2107,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   .length,
               onOpenCharts: () => openMorePage('Gráficas', buildChartsTab()),
               onOpenMovements: () =>
-                  openMorePage('Historial', buildMovementsTab()),
+                  openMorePage('Historial de movimientos', buildMovementsTab()),
               onOpenSettings: () => openMorePage('Ajustes', buildSettingsTab()),
               onOpenAlerts: openAlertsTab,
               onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
@@ -2592,8 +2592,8 @@ class CleanCoinCard extends StatelessWidget {
 class MovementsTab extends StatefulWidget {
   final List<Movement> movements;
   final List<String> coins;
-  final VoidCallback onAdd;
-  final void Function(Movement movement) onEdit;
+  final Future<void> Function() onAdd;
+  final Future<void> Function(Movement movement) onEdit;
   final void Function(Movement movement) onDelete;
 
   const MovementsTab({
@@ -2620,6 +2620,125 @@ class _MovementsTabState extends State<MovementsTab> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmDeleteMovement(
+    BuildContext context,
+    Movement movement,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Borrar movimiento'),
+        content: Text(
+          '¿Quieres borrar el movimiento de ${movement.coin} del '
+          '${shortDate(movement.date)}? Esta acción recalculará el portafolio.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Borrar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      widget.onDelete(movement);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _addMovement() async {
+    await widget.onAdd();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _editMovement(Movement movement) async {
+    await widget.onEdit(movement);
+    if (mounted) setState(() {});
+  }
+
+  void _showMovementDetails(BuildContext context, Movement movement) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewPaddingOf(context).bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Detalle de movimiento',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              InfoLine('Moneda', movement.coin),
+              InfoLine('Tipo', movement.type.label),
+              InfoLine('Fecha', shortDate(movement.date)),
+              InfoLine('Cantidad', crypto(movement.quantity)),
+              InfoLine('Precio', money(movement.unitPrice)),
+              InfoLine('Comisión', money(movement.fee)),
+              InfoLine(
+                'Total',
+                money(movement.quantity * movement.unitPrice),
+                emphasized: true,
+              ),
+              if (movement.source.isNotEmpty)
+                InfoLine('Origen', movement.source),
+              if (movement.wallet.isNotEmpty)
+                InfoLine('Cartera', movement.wallet),
+              if (movement.network.isNotEmpty)
+                InfoLine('Red', movement.network),
+              if (movement.note.isNotEmpty) InfoLine('Nota', movement.note),
+              const SizedBox(height: 16),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _editMovement(movement);
+                      },
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Editar'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _confirmDeleteMovement(context, movement);
+                      },
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Borrar'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -2768,7 +2887,7 @@ class _MovementsTabState extends State<MovementsTab> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: widget.onAdd,
+            onPressed: _addMovement,
             icon: const Icon(Icons.add),
             label: const Text('Agregar movimiento'),
           ),
@@ -2785,13 +2904,19 @@ class _MovementsTabState extends State<MovementsTab> {
             (Movement m) => CardPanel(
               title: '${m.coin} · ${m.type.shortLabel}',
               subtitle: shortDate(m.date),
+              onTap: () => _showMovementDetails(context, m),
               trailing: PopupMenuButton<String>(
                 onSelected: (String value) {
-                  if (value == 'edit') widget.onEdit(m);
-                  if (value == 'delete') widget.onDelete(m);
+                  if (value == 'details') _showMovementDetails(context, m);
+                  if (value == 'edit') _editMovement(m);
+                  if (value == 'delete') _confirmDeleteMovement(context, m);
                 },
                 itemBuilder: (BuildContext context) =>
                     const <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'details',
+                        child: Text('Ver detalle'),
+                      ),
                       PopupMenuItem<String>(
                         value: 'edit',
                         child: Text('Editar'),
@@ -5519,6 +5644,16 @@ class MoreTab extends StatelessWidget {
               onTap: onExportBackup,
             ),
             _CommandCard(
+              icon: Icons.receipt_long_outlined,
+              title: 'Historial de movimientos',
+              subtitle: movementCount == 1
+                  ? '1 movimiento registrado para auditoría, edición y borrado'
+                  : '$movementCount movimientos registrados para auditoría, '
+                      'edición y borrado',
+              badge: 'Core',
+              onTap: onOpenMovements,
+            ),
+            _CommandCard(
               icon: Icons.table_chart_outlined,
               title: 'Exportaciones',
               subtitle: 'CSV, JSON, PDF y XLSX cuando están soportados',
@@ -7058,6 +7193,7 @@ class CardPanel extends StatelessWidget {
   final String? subtitle;
   final Widget child;
   final Widget? trailing;
+  final VoidCallback? onTap;
 
   const CardPanel({
     super.key,
@@ -7065,41 +7201,45 @@ class CardPanel extends StatelessWidget {
     this.subtitle,
     required this.child,
     this.trailing,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+    final Widget content = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (trailing != null) trailing!,
-              ],
-            ),
-            if (subtitle != null) ...<Widget>[
-              const SizedBox(height: 4),
-              Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
+              ),
+              if (trailing != null) trailing!,
             ],
-            const SizedBox(height: 12),
-            child,
+          ),
+          if (subtitle != null) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
           ],
-        ),
+          const SizedBox(height: 12),
+          child,
+        ],
       ),
+    );
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: onTap == null ? Clip.none : Clip.antiAlias,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
