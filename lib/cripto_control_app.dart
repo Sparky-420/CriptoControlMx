@@ -1994,14 +1994,6 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               _saveSnapshot(pageContext).then((_) => refresh?.call());
             },
             onViewSnapshots: () => _showSnapshots(pageContext),
-            onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
-            onOpenSnapshotSettings: () => openMorePage(
-              'Instantáneas',
-              (VoidCallback settingsRefresh) => buildSettingsTab(
-                refresh: settingsRefresh,
-                view: SettingsView.snapshots,
-              ),
-            ),
           );
 
           Widget buildMovementsTab() => MovementsTab(
@@ -2180,13 +2172,6 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 (VoidCallback refresh) => buildSettingsTab(
                   refresh: refresh,
                   view: SettingsView.portfolio,
-                ),
-              ),
-              onOpenSnapshotSettings: () => openMorePage(
-                'Instantáneas',
-                (VoidCallback refresh) => buildSettingsTab(
-                  refresh: refresh,
-                  view: SettingsView.snapshots,
                 ),
               ),
               onOpenAlerts: openAlertsTab,
@@ -2473,57 +2458,42 @@ class LatestSnapshotCard extends StatelessWidget {
     return CardPanel(
       title: 'Última instantánea',
       subtitle: current == null
-          ? 'Sin instantánea guardada todavía. Usa los botones para guardar o abrir Gráficas.'
+          ? 'Sin instantánea guardada todavía.'
           : 'Guardado el ${longDate(current.createdAt)}.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          if (current == null)
-            const Text(
-              'Guarda una instantánea para crear histórico y abrir la evolución.',
+      child: current == null
+          ? const Text(
+              'Resumen muestra solo la última instantánea. Para guardar, revisar '
+              'o administrar el histórico, entra a Gráficas.',
             )
-          else ...<Widget>[
-            InfoLine('Fecha', longDate(current.createdAt)),
-            InfoLine('Valor de cartera', money(current.totalCurrentValue)),
-            InfoLine(
-              'P&L no realizado',
-              money(current.totalUnrealizedPL),
-              valueColor: pnlColor(current.totalUnrealizedPL),
-              emphasized: true,
-            ),
-            InfoLine(
-              'P&L realizado',
-              money(current.totalRealizedPL),
-              valueColor: pnlColor(current.totalRealizedPL),
-            ),
-            InfoLine('Inversión total', money(current.totalCostBase)),
-            InfoLine('Moneda dominante', current.dominantCoinLabel),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              FilledButton.tonalIcon(
-                onPressed: onSaveSnapshot,
-                icon: const Icon(Icons.add_a_photo_outlined),
-                label: const Text('Guardar instantánea'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: onViewEvolution,
-                icon: const Icon(Icons.show_chart),
-                label: const Text('Ver evolución en Gráficas'),
-              ),
-              if (current != null)
-                TextButton.icon(
-                  onPressed: onViewSnapshots,
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Administrar instantáneas'),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                InfoLine('Fecha', longDate(current.createdAt)),
+                InfoLine('Valor de cartera', money(current.totalCurrentValue)),
+                InfoLine(
+                  'P&L no realizado',
+                  money(current.totalUnrealizedPL),
+                  valueColor: pnlColor(current.totalUnrealizedPL),
+                  emphasized: true,
                 ),
-            ],
-          ),
-        ],
-      ),
+                InfoLine(
+                  'P&L realizado',
+                  money(current.totalRealizedPL),
+                  valueColor: pnlColor(current.totalRealizedPL),
+                ),
+                InfoLine('Inversión total', money(current.totalCostBase)),
+                InfoLine('Moneda dominante', current.dominantCoinLabel),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: onViewEvolution,
+                    icon: const Icon(Icons.show_chart),
+                    label: const Text('Ver evolución en Gráficas'),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -5615,8 +5585,6 @@ class ChartsTab extends StatelessWidget {
   final List<PortfolioSnapshot> snapshots;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
-  final VoidCallback onExportSnapshotsCsv;
-  final VoidCallback onOpenSnapshotSettings;
 
   const ChartsTab({
     super.key,
@@ -5625,8 +5593,6 @@ class ChartsTab extends StatelessWidget {
     required this.snapshots,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
-    required this.onExportSnapshotsCsv,
-    required this.onOpenSnapshotSettings,
   });
 
   @override
@@ -5730,76 +5696,32 @@ class ChartsTab extends StatelessWidget {
           CardPanel(
             title: 'Histórico de instantáneas',
             subtitle: 'Guarda instantáneas para activar líneas de tendencia.',
-            child: _SnapshotActionWrap(
-              onSaveSnapshot: onSaveSnapshot,
-              onViewSnapshots: onViewSnapshots,
-              onExportSnapshotsCsv: onExportSnapshotsCsv,
-              onOpenSnapshotSettings: onOpenSnapshotSettings,
-              hasSnapshots: false,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.tonalIcon(
+                  onPressed: onSaveSnapshot,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: const Text('Guardar instantánea'),
+                ),
+                FilledButton.tonal(
+                  onPressed: onViewSnapshots,
+                  child: const Text('Ver instantáneas'),
+                ),
+              ],
             ),
           )
         else ...<Widget>[
           SnapshotTrendPanel(snapshots: snapshots),
-          CardPanel(
-            title: 'Controles de instantáneas',
-            subtitle: 'Guarda, administra, exporta o configura el histórico.',
-            child: _SnapshotActionWrap(
-              onSaveSnapshot: onSaveSnapshot,
-              onViewSnapshots: onViewSnapshots,
-              onExportSnapshotsCsv: onExportSnapshotsCsv,
-              onOpenSnapshotSettings: onOpenSnapshotSettings,
-              hasSnapshots: true,
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.tonal(
+              onPressed: onViewSnapshots,
+              child: const Text('Administrar instantáneas'),
             ),
           ),
         ],
-      ],
-    );
-  }
-}
-
-class _SnapshotActionWrap extends StatelessWidget {
-  final VoidCallback onSaveSnapshot;
-  final VoidCallback onViewSnapshots;
-  final VoidCallback onExportSnapshotsCsv;
-  final VoidCallback onOpenSnapshotSettings;
-  final bool hasSnapshots;
-
-  const _SnapshotActionWrap({
-    required this.onSaveSnapshot,
-    required this.onViewSnapshots,
-    required this.onExportSnapshotsCsv,
-    required this.onOpenSnapshotSettings,
-    required this.hasSnapshots,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: <Widget>[
-        FilledButton.tonalIcon(
-          onPressed: onSaveSnapshot,
-          icon: const Icon(Icons.add_a_photo_outlined),
-          label: const Text('Guardar instantánea'),
-        ),
-        OutlinedButton.icon(
-          onPressed: onViewSnapshots,
-          icon: const Icon(Icons.photo_library_outlined),
-          label: Text(
-            hasSnapshots ? 'Administrar instantáneas' : 'Ver instantáneas',
-          ),
-        ),
-        OutlinedButton.icon(
-          onPressed: hasSnapshots ? onExportSnapshotsCsv : null,
-          icon: const Icon(Icons.download_outlined),
-          label: const Text('Exportar instantáneas'),
-        ),
-        OutlinedButton.icon(
-          onPressed: onOpenSnapshotSettings,
-          icon: const Icon(Icons.tune_outlined),
-          label: const Text('Automatización y retención'),
-        ),
       ],
     );
   }
@@ -5899,7 +5821,6 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onOpenMovements;
   final VoidCallback onOpenThemeSettings;
   final VoidCallback onOpenPortfolioSettings;
-  final VoidCallback onOpenSnapshotSettings;
   final VoidCallback onOpenAlerts;
   final VoidCallback onExportMovementsCsv;
   final VoidCallback onExportSummaryCsv;
@@ -5926,7 +5847,6 @@ class MoreTab extends StatelessWidget {
     required this.onOpenMovements,
     required this.onOpenThemeSettings,
     required this.onOpenPortfolioSettings,
-    required this.onOpenSnapshotSettings,
     required this.onOpenAlerts,
     required this.onExportMovementsCsv,
     required this.onExportSummaryCsv,
@@ -5972,19 +5892,6 @@ class MoreTab extends StatelessWidget {
               title: 'Copia de seguridad',
               subtitle: 'Copiar JSON completo sin cambiar estructura',
               onTap: onExportBackup,
-            ),
-            _CommandCard(
-              icon: Icons.show_chart_outlined,
-              title: 'Gráficas',
-              subtitle: 'Evolución, métricas e instantáneas de cartera',
-              badge: snapshotCount == 0 ? 'Sin datos' : '$snapshotCount',
-              onTap: onOpenCharts,
-            ),
-            _CommandCard(
-              icon: Icons.photo_library_outlined,
-              title: 'Instantáneas',
-              subtitle: 'Guardar, administrar y configurar histórico',
-              onTap: () => _showSnapshotActions(context),
             ),
             _CommandCard(
               icon: Icons.receipt_long_outlined,
@@ -6073,50 +5980,6 @@ class MoreTab extends StatelessWidget {
                 'No se agregó Firebase en esta versión.',
           ),
         ),
-      ),
-    );
-  }
-
-  void _showSnapshotActions(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (BuildContext sheetContext) => _CommandActionSheet(
-        title: 'Instantáneas',
-        actions: <_SheetAction>[
-          _SheetAction(
-            icon: Icons.add_a_photo_outlined,
-            title: 'Guardar instantánea',
-            subtitle: 'Crear una foto local de la cartera actual',
-            onTap: onSaveSnapshot,
-          ),
-          _SheetAction(
-            icon: Icons.show_chart_outlined,
-            title: 'Ver evolución en Gráficas',
-            subtitle: 'Abrir líneas, filtros y métricas históricas',
-            onTap: onOpenCharts,
-          ),
-          _SheetAction(
-            icon: Icons.photo_library_outlined,
-            title: 'Administrar instantáneas',
-            subtitle: 'Revisar o borrar instantáneas guardadas',
-            onTap: onViewSnapshots,
-          ),
-          _SheetAction(
-            icon: Icons.download_outlined,
-            title: 'Exportar instantáneas',
-            subtitle: 'Generar CSV del histórico guardado',
-            onTap: onExportSnapshotsCsv,
-          ),
-          _SheetAction(
-            icon: Icons.tune_outlined,
-            title: 'Automatización y retención',
-            subtitle: 'Configurar captura automática y límite histórico',
-            onTap: onOpenSnapshotSettings,
-          ),
-        ],
       ),
     );
   }
@@ -6687,7 +6550,7 @@ class _CommandActionSheet extends StatelessWidget {
   }
 }
 
-enum SettingsView { all, theme, portfolio, snapshots }
+enum SettingsView { all, theme, portfolio }
 
 class SettingsTab extends StatelessWidget {
   final SettingsView view;
@@ -6757,8 +6620,6 @@ class SettingsTab extends StatelessWidget {
         view == SettingsView.all || view == SettingsView.theme;
     final bool showPortfolio =
         view == SettingsView.all || view == SettingsView.portfolio;
-    final bool showSnapshots =
-        view == SettingsView.all || view == SettingsView.snapshots;
     final bool showAdvanced = view == SettingsView.all;
 
     return ListView(
@@ -6866,7 +6727,7 @@ class SettingsTab extends StatelessWidget {
             ),
           ),
         ),
-        if (showSnapshots)
+        if (showAdvanced)
           CardPanel(
             title: 'Instantáneas',
           subtitle: 'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
@@ -6905,31 +6766,9 @@ class SettingsTab extends StatelessWidget {
                 ).toList(),
               ),
               const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  FilledButton.tonalIcon(
-                    onPressed: onSaveSnapshot,
-                    icon: const Icon(Icons.add_a_photo_outlined),
-                    label: const Text('Guardar instantánea'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: onViewSnapshots,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Administrar instantáneas'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: onExportSnapshotsCsv,
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Exportar instantáneas'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
               Text(
-                'La evolución visual vive en Gráficas. Aquí se configura '
-                'automatización, retención y acciones del histórico.',
+                'La creación y revisión de instantáneas vive en Gráficas. '
+                'Aquí solo se configura automatización y retención.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
