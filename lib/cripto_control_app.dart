@@ -2011,7 +2011,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             },
           );
 
-          Widget buildSettingsTab({VoidCallback? refresh}) => SettingsTab(
+          Widget buildSettingsTab({
+            VoidCallback? refresh,
+            SettingsView view = SettingsView.all,
+          }) => SettingsTab(
+            view: view,
             visualMode: _visualMode,
             themeStyle: _themeStyle,
             visiblePositions: _visiblePositions,
@@ -2156,9 +2160,19 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 'Historial de movimientos',
                 (_) => buildMovementsTab(),
               ),
-              onOpenSettings: () => openMorePage(
-                'Ajustes',
-                (VoidCallback refresh) => buildSettingsTab(refresh: refresh),
+              onOpenThemeSettings: () => openMorePage(
+                'Tema',
+                (VoidCallback refresh) => buildSettingsTab(
+                  refresh: refresh,
+                  view: SettingsView.theme,
+                ),
+              ),
+              onOpenPortfolioSettings: () => openMorePage(
+                'Resumen de cartera',
+                (VoidCallback refresh) => buildSettingsTab(
+                  refresh: refresh,
+                  view: SettingsView.portfolio,
+                ),
               ),
               onOpenAlerts: openAlertsTab,
               onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
@@ -2292,7 +2306,7 @@ class SummaryTab extends StatelessWidget {
         PremiumInfoPanel(
           icon: Icons.visibility_off_outlined,
           title: '$hiddenCount posiciones ocultas',
-          subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+          subtitle: 'Cambia el límite en Más > Portafolio.',
           badge: positionSortMode.label,
         ),
       );
@@ -5805,7 +5819,8 @@ class MoreTab extends StatelessWidget {
   final int chartDataCount;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
-  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenThemeSettings;
+  final VoidCallback onOpenPortfolioSettings;
   final VoidCallback onOpenAlerts;
   final VoidCallback onExportMovementsCsv;
   final VoidCallback onExportSummaryCsv;
@@ -5830,7 +5845,8 @@ class MoreTab extends StatelessWidget {
     required this.chartDataCount,
     required this.onOpenCharts,
     required this.onOpenMovements,
-    required this.onOpenSettings,
+    required this.onOpenThemeSettings,
+    required this.onOpenPortfolioSettings,
     required this.onOpenAlerts,
     required this.onExportMovementsCsv,
     required this.onExportSummaryCsv,
@@ -5884,7 +5900,7 @@ class MoreTab extends StatelessWidget {
                   ? '1 movimiento registrado para auditoría, edición y borrado'
                   : '$movementCount movimientos registrados para auditoría, '
                       'edición y borrado',
-              badge: 'Core',
+              badge: 'Clave',
               onTap: onOpenMovements,
             ),
             _CommandCard(
@@ -5903,26 +5919,31 @@ class MoreTab extends StatelessWidget {
           ],
         ),
         _CommandSection(
-          title: 'Personalización',
+          title: 'Apariencia global',
           children: <Widget>[
             _CommandCard(
               icon: Icons.palette_outlined,
               title: 'Tema',
               subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
-              onTap: onOpenSettings,
+              onTap: onOpenThemeSettings,
             ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Portafolio',
+          children: <Widget>[
             _CommandCard(
               icon: Icons.view_agenda_outlined,
-              title: 'Apariencia de resumen',
+              title: 'Resumen de cartera',
               subtitle: 'Posiciones visibles y orden del portafolio',
-              onTap: onOpenSettings,
+              onTap: onOpenPortfolioSettings,
             ),
             _CommandCard(
               icon: Icons.visibility_outlined,
-              title: 'Monedas visibles',
+              title: 'Monedas monitoreadas',
               subtitle: 'BTC, ETH, LINK, LTC y UNI con logos locales',
               badge: '5',
-              onTap: onOpenSettings,
+              onTap: onOpenPortfolioSettings,
             ),
           ],
         ),
@@ -6529,7 +6550,10 @@ class _CommandActionSheet extends StatelessWidget {
   }
 }
 
+enum SettingsView { all, theme, portfolio }
+
 class SettingsTab extends StatelessWidget {
+  final SettingsView view;
   final AppVisualMode visualMode;
   final AppThemeStyle themeStyle;
   final VisiblePositions visiblePositions;
@@ -6560,6 +6584,7 @@ class SettingsTab extends StatelessWidget {
 
   const SettingsTab({
     super.key,
+    this.view = SettingsView.all,
     required this.visualMode,
     required this.themeStyle,
     required this.visiblePositions,
@@ -6591,11 +6616,18 @@ class SettingsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool showTheme =
+        view == SettingsView.all || view == SettingsView.theme;
+    final bool showPortfolio =
+        view == SettingsView.all || view == SettingsView.portfolio;
+    final bool showAdvanced = view == SettingsView.all;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: <Widget>[
-        CardPanel(
-          title: 'Tema',
+        if (showTheme)
+          CardPanel(
+            title: 'Tema',
           subtitle: 'Paletas premium completas, sin alterar colores '
               'semánticos financieros.',
           child: Column(
@@ -6640,8 +6672,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Portafolio',
+        if (showPortfolio)
+          CardPanel(
+            title: 'Resumen de cartera',
           subtitle: 'Configura cuántas posiciones aparecen en resumen y '
               'cómo se ordenan.',
           child: Column(
@@ -6682,8 +6715,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Cálculo',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Cálculo',
           subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
           child: Align(
             alignment: Alignment.centerLeft,
@@ -6693,8 +6727,9 @@ class SettingsTab extends StatelessWidget {
             ),
           ),
         ),
-        CardPanel(
-          title: 'Instantáneas',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Instantáneas',
           subtitle: 'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -6739,8 +6774,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Notificaciones',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Notificaciones',
           subtitle: 'Configura comportamiento; la gestión completa vive en Alertas.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -6784,8 +6820,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Respaldo',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Respaldo',
           subtitle: 'Cuenta local. Próximamente: sincronización y respaldo en la nube.',
           child: Align(
             alignment: Alignment.centerLeft,
@@ -7779,7 +7816,7 @@ extension AppVisualModeLabel on AppVisualMode {
   String get label {
     switch (this) {
       case AppVisualMode.system:
-        return 'Sistema';
+        return 'Auto';
       case AppVisualMode.light:
         return 'Claro';
       case AppVisualMode.dark:
