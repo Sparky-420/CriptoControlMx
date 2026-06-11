@@ -895,7 +895,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     );
   }
 
-  void _showAddMovementSheet(
+  Future<void> _showAddMovementSheet(
     BuildContext pageContext, {
     Movement? existing,
     int? index,
@@ -926,7 +926,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       text: existing?.note ?? '',
     );
 
-    showModalBottomSheet<void>(
+    return showModalBottomSheet<void>(
       context: pageContext,
       isScrollControlled: true,
       useSafeArea: true,
@@ -1203,12 +1203,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   InfoLine('Cantidad', crypto(stats.quantity)),
                   InfoLine('Invertido actual', money(stats.costBase)),
                   InfoLine(
-                    'Vale hoy',
+                    'Valor de cartera',
                     money(stats.currentValue),
                     emphasized: true,
                   ),
                   InfoLine(
-                    'Resultado actual',
+                    'P&L no realizado',
                     money(stats.unrealizedPL),
                     valueColor: pnlColor(stats.unrealizedPL),
                     emphasized: true,
@@ -1232,7 +1232,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                   InfoLine('Comisiones acumuladas', money(audit.fees)),
                   InfoLine('Promedio histórico actual', money(stats.avgPrice)),
                   InfoLine(
-                    'Resultado vendido',
+                    'P&L realizado',
                     money(stats.realizedPL),
                     valueColor: pnlColor(stats.realizedPL),
                   ),
@@ -1246,7 +1246,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                 children: <Widget>[
                   Text('Promedio = invertido actual / cantidad actual'),
                   SizedBox(height: 6),
-                  Text('Resultado actual = vale hoy - invertido actual'),
+                  Text('P&L no realizado = valor de cartera - invertido actual'),
                   SizedBox(height: 6),
                   Text(
                     'Precio para recuperar = promedio / (1 - comisión de salida)',
@@ -1270,7 +1270,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
     if (mounted) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Snapshot guardado')),
+        const SnackBar(content: Text('Instantánea guardada')),
       );
     }
   }
@@ -1297,16 +1297,16 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                       padding: const EdgeInsets.all(16),
                       children: <Widget>[
                         SheetHeader(
-                          title: 'Snapshots',
+                          title: 'Instantáneas',
                           onClose: () => Navigator.of(sheetContext).pop(),
                         ),
                         const SizedBox(height: 12),
                         if (_snapshots.isEmpty)
                           const EmptyState(
                             icon: Icons.photo_library_outlined,
-                            title: 'Sin snapshots',
-                            subtitle:
-                                'Guarda una foto de cartera desde Ajustes.',
+                            title: 'Sin instantáneas',
+                            subtitle: 'Guarda una instantánea de cartera desde '
+                                'Más → Instantáneas.',
                           )
                         else ...<Widget>[
                           SnapshotTrendPanel(snapshots: _snapshots),
@@ -1314,7 +1314,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                             (PortfolioSnapshot snapshot) => CardPanel(
                               title: longDate(snapshot.createdAt),
                               trailing: IconButton(
-                                tooltip: 'Borrar snapshot',
+                                tooltip: 'Borrar instantánea',
                                 icon: const Icon(Icons.delete_outline),
                                 onPressed: () async {
                                   setState(
@@ -1331,7 +1331,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                 children: <Widget>[
                                   InfoLine('Fecha', longDate(snapshot.createdAt)),
                                   InfoLine(
-                                    'Valor cartera',
+                                    'Valor de cartera',
                                     money(snapshot.totalCurrentValue),
                                   ),
                                   InfoLine(
@@ -1343,7 +1343,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                     emphasized: true,
                                   ),
                                   InfoLine(
-                                    'Resultado vendido',
+                                    'P&L realizado',
                                     money(snapshot.totalRealizedPL),
                                     valueColor: pnlColor(
                                       snapshot.totalRealizedPL,
@@ -1682,9 +1682,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             headers: <String>['Concepto', 'Monto'],
             data: <List<String>>[
               <String>['Invertido actual', money(totals.costBase)],
-              <String>['Vale hoy', money(totals.currentValue)],
-              <String>['Resultado actual', money(totals.unrealizedPL)],
-              <String>['Resultado vendido', money(totals.realizedPL)],
+              <String>['Valor de cartera', money(totals.currentValue)],
+              <String>['P&L no realizado', money(totals.unrealizedPL)],
+              <String>['P&L realizado', money(totals.realizedPL)],
             ],
           ),
           pw.SizedBox(height: 18),
@@ -1699,7 +1699,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               'Cripto',
               'Cantidad',
               'Invertido',
-              'Vale hoy',
+              'Valor de cartera',
               'Resultado',
               'Recuperar',
             ],
@@ -1782,7 +1782,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       fileName: 'criptocontrolmx_snapshots.csv',
       mimeType: 'text/csv',
       bytes: utf8.encode('\ufeff${_buildSnapshotsCsv()}'),
-      successMessage: 'Snapshots CSV listo',
+      successMessage: 'Instantáneas CSV listas',
     );
   }
 
@@ -1959,12 +1959,23 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       darkTheme: buildPremiumTheme(palette, Brightness.dark),
       home: Builder(
         builder: (BuildContext pageContext) {
-          void openMorePage(String title, Widget child) {
+          void openMorePage(
+            String title,
+            Widget Function(VoidCallback refresh) childBuilder,
+          ) {
             Navigator.of(pageContext).push(
               MaterialPageRoute<void>(
-                builder: (_) => Scaffold(
-                  appBar: AppBar(title: Text(title)),
-                  body: child,
+                builder: (_) => StatefulBuilder(
+                  builder: (
+                    BuildContext routeContext,
+                    void Function(void Function()) routeSetState,
+                  ) {
+                    void refresh() => routeSetState(() {});
+                    return Scaffold(
+                      appBar: AppBar(title: Text(title)),
+                      body: childBuilder(refresh),
+                    );
+                  },
                 ),
               ),
             );
@@ -1975,11 +1986,13 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             setState(() => _currentIndex = 3);
           }
 
-          Widget buildChartsTab() => ChartsTab(
+          Widget buildChartsTab({VoidCallback? refresh}) => ChartsTab(
             stats: stats,
             totals: totals,
             snapshots: _snapshots,
-            onSaveSnapshot: () => _saveSnapshot(pageContext),
+            onSaveSnapshot: () {
+              _saveSnapshot(pageContext).then((_) => refresh?.call());
+            },
             onViewSnapshots: () => _showSnapshots(pageContext),
           );
 
@@ -1998,7 +2011,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             },
           );
 
-          Widget buildSettingsTab() => SettingsTab(
+          Widget buildSettingsTab({
+            VoidCallback? refresh,
+            SettingsView view = SettingsView.all,
+          }) => SettingsTab(
+            view: view,
             visualMode: _visualMode,
             themeStyle: _themeStyle,
             visiblePositions: _visiblePositions,
@@ -2007,23 +2024,47 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             snapshotRetention: _snapshotRetention,
             sellFeePercent: _sellFeePercent,
             snapshotCount: _snapshots.length,
-            onVisualModeChanged: _changeVisualMode,
-            onThemeStyleChanged: _changeThemeStyle,
-            onVisiblePositionsChanged: _changeVisiblePositions,
-            onPositionSortModeChanged: _changePositionSortMode,
-            onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
-            onSnapshotRetentionChanged: _changeSnapshotRetention,
+            onVisualModeChanged: (AppVisualMode value) {
+              _changeVisualMode(value);
+              refresh?.call();
+            },
+            onThemeStyleChanged: (AppThemeStyle value) {
+              _changeThemeStyle(value);
+              refresh?.call();
+            },
+            onVisiblePositionsChanged: (VisiblePositions value) {
+              _changeVisiblePositions(value);
+              refresh?.call();
+            },
+            onPositionSortModeChanged: (PositionSortMode value) {
+              _changePositionSortMode(value);
+              refresh?.call();
+            },
+            onSnapshotAutomationModeChanged: (SnapshotAutomationMode value) {
+              _changeSnapshotAutomationMode(value);
+              refresh?.call();
+            },
+            onSnapshotRetentionChanged: (SnapshotRetention value) {
+              _changeSnapshotRetention(value);
+              refresh?.call();
+            },
             onEditSellFee: () => _showSellFeeDialog(pageContext),
             onOpenAlerts: openAlertsTab,
             automaticLocalAlertsEnabled: _automaticLocalAlertsEnabled,
             automaticLocalAlertsIntervalMinutes:
                 _automaticLocalAlertsIntervalMinutes,
             notificationsAllowed: _notificationsAllowed,
-            onAutomaticLocalAlertsChanged: (bool enabled) =>
-                _toggleAutomaticLocalAlerts(pageContext, enabled),
-            onAutomaticLocalAlertIntervalChanged:
-                _changeAutomaticLocalAlertInterval,
-            onSaveSnapshot: () => _saveSnapshot(pageContext),
+            onAutomaticLocalAlertsChanged: (bool enabled) {
+              _toggleAutomaticLocalAlerts(pageContext, enabled)
+                  .then((_) => refresh?.call());
+            },
+            onAutomaticLocalAlertIntervalChanged: (int minutes) {
+              _changeAutomaticLocalAlertInterval(minutes)
+                  .then((_) => refresh?.call());
+            },
+            onSaveSnapshot: () {
+              _saveSnapshot(pageContext).then((_) => refresh?.call());
+            },
             onViewSnapshots: () => _showSnapshots(pageContext),
             onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
             onExportXlsx: () => _exportXlsx(pageContext),
@@ -2053,7 +2094,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onViewSnapshotEvolution: () =>
-                  openMorePage('Gráficas', buildChartsTab()),
+                  openMorePage(
+                    'Gráficas',
+                    (VoidCallback refresh) =>
+                        buildChartsTab(refresh: refresh),
+                  ),
             ),
             CoinsTab(
               coins: _coins,
@@ -2100,15 +2145,37 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             MoreTab(
               totals: totals,
               pricesUpdatedAt: _pricesUpdatedAt,
+              visualMode: _visualMode,
+              themeStyle: _themeStyle,
               movementCount: _movements.length,
               snapshotCount: _snapshots.length,
+              snapshotAutomationMode: _snapshotAutomationMode,
+              snapshotRetention: _snapshotRetention,
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
                   .length,
-              onOpenCharts: () => openMorePage('Gráficas', buildChartsTab()),
-              onOpenMovements: () =>
-                  openMorePage('Historial', buildMovementsTab()),
-              onOpenSettings: () => openMorePage('Ajustes', buildSettingsTab()),
+              onOpenCharts: () => openMorePage(
+                'Gráficas',
+                (VoidCallback refresh) => buildChartsTab(refresh: refresh),
+              ),
+              onOpenMovements: () => openMorePage(
+                'Historial de movimientos',
+                (_) => buildMovementsTab(),
+              ),
+              onOpenThemeSettings: () => openMorePage(
+                'Tema',
+                (VoidCallback refresh) => buildSettingsTab(
+                  refresh: refresh,
+                  view: SettingsView.theme,
+                ),
+              ),
+              onOpenPortfolioSettings: () => openMorePage(
+                'Resumen de cartera',
+                (VoidCallback refresh) => buildSettingsTab(
+                  refresh: refresh,
+                  view: SettingsView.portfolio,
+                ),
+              ),
               onOpenAlerts: openAlertsTab,
               onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
               onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
@@ -2120,6 +2187,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onImportBackupFile: () => _importBackupFile(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
+              onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
+              onSnapshotRetentionChanged: _changeSnapshotRetention,
               onResetPriceAlertReferences: () =>
                   _resetPriceAlertReferences(pageContext),
             ),
@@ -2241,7 +2310,7 @@ class SummaryTab extends StatelessWidget {
         PremiumInfoPanel(
           icon: Icons.visibility_off_outlined,
           title: '$hiddenCount posiciones ocultas',
-          subtitle: 'Cambia el límite desde Ajustes > Portafolio.',
+          subtitle: 'Cambia el límite en Más > Portafolio.',
           badge: positionSortMode.label,
         ),
       );
@@ -2283,7 +2352,7 @@ class SummaryTab extends StatelessWidget {
           icon: Icons.space_dashboard_outlined,
           metrics: <PremiumMetricData>[
             PremiumMetricData(
-              label: 'Valor cartera',
+              label: 'Valor de cartera',
               value: moneyShort(totals.currentValue),
               icon: Icons.account_balance_wallet_outlined,
             ),
@@ -2296,7 +2365,7 @@ class SummaryTab extends StatelessWidget {
                   : Icons.trending_down,
             ),
             PremiumMetricData(
-              label: 'Resultado vendido',
+              label: 'P&L realizado',
               value: moneyShort(totals.realizedPL),
               color: pnlColor(totals.realizedPL),
               icon: Icons.payments_outlined,
@@ -2391,20 +2460,20 @@ class LatestSnapshotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final PortfolioSnapshot? current = snapshot;
     return CardPanel(
-      title: 'Último snapshot',
+      title: 'Última instantánea',
       subtitle: current == null
-          ? 'Sin foto guardada todavía. Gestiona snapshots desde Gráficas.'
+          ? 'Sin instantánea guardada todavía.'
           : 'Guardado el ${longDate(current.createdAt)}.',
       child: current == null
           ? const Text(
-              'Resumen muestra solo el último snapshot. Para guardar, revisar '
-              'o administrar el histórico, entra a Gráficas.',
+              'Resumen muestra solo la última instantánea. Gestiona el histórico '
+              'desde Más → Instantáneas.',
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 InfoLine('Fecha', longDate(current.createdAt)),
-                InfoLine('Valor cartera', money(current.totalCurrentValue)),
+                InfoLine('Valor de cartera', money(current.totalCurrentValue)),
                 InfoLine(
                   'P&L no realizado',
                   money(current.totalUnrealizedPL),
@@ -2412,7 +2481,7 @@ class LatestSnapshotCard extends StatelessWidget {
                   emphasized: true,
                 ),
                 InfoLine(
-                  'Resultado vendido',
+                  'P&L realizado',
                   money(current.totalRealizedPL),
                   valueColor: pnlColor(current.totalRealizedPL),
                 ),
@@ -2592,8 +2661,8 @@ class CleanCoinCard extends StatelessWidget {
 class MovementsTab extends StatefulWidget {
   final List<Movement> movements;
   final List<String> coins;
-  final VoidCallback onAdd;
-  final void Function(Movement movement) onEdit;
+  final Future<void> Function() onAdd;
+  final Future<void> Function(Movement movement) onEdit;
   final void Function(Movement movement) onDelete;
 
   const MovementsTab({
@@ -2620,6 +2689,125 @@ class _MovementsTabState extends State<MovementsTab> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmDeleteMovement(
+    BuildContext context,
+    Movement movement,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Borrar movimiento'),
+        content: Text(
+          '¿Quieres borrar el movimiento de ${movement.coin} del '
+          '${shortDate(movement.date)}? Esta acción recalculará el portafolio.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Borrar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      widget.onDelete(movement);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _addMovement() async {
+    await widget.onAdd();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _editMovement(Movement movement) async {
+    await widget.onEdit(movement);
+    if (mounted) setState(() {});
+  }
+
+  void _showMovementDetails(BuildContext context, Movement movement) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewPaddingOf(context).bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Detalle de movimiento',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              InfoLine('Moneda', movement.coin),
+              InfoLine('Tipo', movement.type.label),
+              InfoLine('Fecha', shortDate(movement.date)),
+              InfoLine('Cantidad', crypto(movement.quantity)),
+              InfoLine('Precio', money(movement.unitPrice)),
+              InfoLine('Comisión', money(movement.fee)),
+              InfoLine(
+                'Total',
+                money(movement.quantity * movement.unitPrice),
+                emphasized: true,
+              ),
+              if (movement.source.isNotEmpty)
+                InfoLine('Origen', movement.source),
+              if (movement.wallet.isNotEmpty)
+                InfoLine('Cartera', movement.wallet),
+              if (movement.network.isNotEmpty)
+                InfoLine('Red', movement.network),
+              if (movement.note.isNotEmpty) InfoLine('Nota', movement.note),
+              const SizedBox(height: 16),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _editMovement(movement);
+                      },
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Editar'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _confirmDeleteMovement(context, movement);
+                      },
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Borrar'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -2768,7 +2956,7 @@ class _MovementsTabState extends State<MovementsTab> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: widget.onAdd,
+            onPressed: _addMovement,
             icon: const Icon(Icons.add),
             label: const Text('Agregar movimiento'),
           ),
@@ -2785,13 +2973,19 @@ class _MovementsTabState extends State<MovementsTab> {
             (Movement m) => CardPanel(
               title: '${m.coin} · ${m.type.shortLabel}',
               subtitle: shortDate(m.date),
+              onTap: () => _showMovementDetails(context, m),
               trailing: PopupMenuButton<String>(
                 onSelected: (String value) {
-                  if (value == 'edit') widget.onEdit(m);
-                  if (value == 'delete') widget.onDelete(m);
+                  if (value == 'details') _showMovementDetails(context, m);
+                  if (value == 'edit') _editMovement(m);
+                  if (value == 'delete') _confirmDeleteMovement(context, m);
                 },
                 itemBuilder: (BuildContext context) =>
                     const <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'details',
+                        child: Text('Ver detalle'),
+                      ),
                       PopupMenuItem<String>(
                         value: 'edit',
                         child: Text('Editar'),
@@ -5115,7 +5309,7 @@ class RecoveryAlertCoinRow extends StatelessWidget {
             runSpacing: 10,
             children: <Widget>[
               MiniMetric(
-                label: 'P&L',
+                label: 'P&L no realizado',
                 value: hasPosition ? money(position.unrealizedPnl) : 'Sin posición',
                 color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
               ),
@@ -5143,6 +5337,93 @@ String _btcDominance(Map<String, CoinStats> stats, PortfolioTotals totals) {
   return pct((btcValue / totals.currentValue) * 100);
 }
 
+
+enum SnapshotMetric {
+  portfolioValue,
+  invested,
+  unrealizedPnl,
+  realizedPnl,
+  btcDominance,
+}
+
+extension SnapshotMetricDetails on SnapshotMetric {
+  String get label {
+    switch (this) {
+      case SnapshotMetric.portfolioValue:
+        return 'Valor de cartera';
+      case SnapshotMetric.invested:
+        return 'Invertido';
+      case SnapshotMetric.unrealizedPnl:
+        return 'P&L no realizado';
+      case SnapshotMetric.realizedPnl:
+        return 'P&L realizado';
+      case SnapshotMetric.btcDominance:
+        return 'Dominancia BTC';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case SnapshotMetric.portfolioValue:
+        return Icons.account_balance_wallet_outlined;
+      case SnapshotMetric.invested:
+        return Icons.savings_outlined;
+      case SnapshotMetric.unrealizedPnl:
+        return Icons.trending_up;
+      case SnapshotMetric.realizedPnl:
+        return Icons.sell_outlined;
+      case SnapshotMetric.btcDominance:
+        return Icons.currency_bitcoin;
+    }
+  }
+
+  double valueFor(PortfolioSnapshot snapshot) {
+    switch (this) {
+      case SnapshotMetric.portfolioValue:
+        return snapshot.totalCurrentValue;
+      case SnapshotMetric.invested:
+        return snapshot.totalCostBase;
+      case SnapshotMetric.unrealizedPnl:
+        return snapshot.totalUnrealizedPL;
+      case SnapshotMetric.realizedPnl:
+        return snapshot.totalRealizedPL;
+      case SnapshotMetric.btcDominance:
+        return snapshot.btcDominancePercent;
+    }
+  }
+
+  String format(double value) {
+    switch (this) {
+      case SnapshotMetric.btcDominance:
+        return pct(value);
+      case SnapshotMetric.portfolioValue:
+      case SnapshotMetric.invested:
+      case SnapshotMetric.unrealizedPnl:
+      case SnapshotMetric.realizedPnl:
+        return money(value);
+    }
+  }
+
+  String shortFormat(double value) {
+    switch (this) {
+      case SnapshotMetric.btcDominance:
+        return pct(value);
+      case SnapshotMetric.portfolioValue:
+      case SnapshotMetric.invested:
+      case SnapshotMetric.unrealizedPnl:
+      case SnapshotMetric.realizedPnl:
+        return moneyShort(value);
+    }
+  }
+}
+
+class SnapshotRangeOption {
+  final String label;
+  final int? days;
+
+  const SnapshotRangeOption(this.label, this.days);
+}
+
 class AnalyticsControlPanel extends StatefulWidget {
   final List<PortfolioSnapshot> snapshots;
 
@@ -5153,56 +5434,148 @@ class AnalyticsControlPanel extends StatefulWidget {
 }
 
 class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
-  String _range = '30D';
-  String _metric = 'Portfolio value';
+  static const List<SnapshotRangeOption> _ranges = <SnapshotRangeOption>[
+    SnapshotRangeOption('7D', 7),
+    SnapshotRangeOption('30D', 30),
+    SnapshotRangeOption('90D', 90),
+    SnapshotRangeOption('Todo', null),
+  ];
+
+  SnapshotRangeOption _range = _ranges[1];
+  SnapshotMetric _metric = SnapshotMetric.portfolioValue;
+
+  List<PortfolioSnapshot> _filteredSnapshots() {
+    final List<PortfolioSnapshot> ordered = widget.snapshots.toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+
+    if (_range.days == null || ordered.isEmpty) return ordered;
+
+    final DateTime latest = ordered.last.createdAt;
+    final DateTime from = latest.subtract(Duration(days: _range.days!));
+    return ordered
+        .where((PortfolioSnapshot snapshot) => !snapshot.createdAt.isBefore(from))
+        .toList();
+  }
+
+  Color _metricColor(BuildContext context, List<PortfolioSnapshot> filtered) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    switch (_metric) {
+      case SnapshotMetric.portfolioValue:
+        return colors.primary;
+      case SnapshotMetric.invested:
+        return colors.tertiary;
+      case SnapshotMetric.unrealizedPnl:
+        final double value = filtered.isEmpty ? 0 : _metric.valueFor(filtered.last);
+        return pnlColor(value);
+      case SnapshotMetric.realizedPnl:
+        return colors.secondary;
+      case SnapshotMetric.btcDominance:
+        return const Color(0xFFF7931A);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final List<PortfolioSnapshot> filtered = _filteredSnapshots();
+    final Color metricColor = _metricColor(context, filtered);
+    final double? latestValue = filtered.isEmpty ? null : _metric.valueFor(filtered.last);
+    final double? firstValue = filtered.isEmpty ? null : _metric.valueFor(filtered.first);
+    final double? delta = latestValue == null || firstValue == null
+        ? null
+        : latestValue - firstValue;
+
     return CardPanel(
-      title: 'Vista analítica',
-      subtitle: 'Filtros visuales para snapshots locales.',
+      title: 'Evolución por instantáneas',
+      subtitle: 'Filtro temporal y métrica principal con línea y puntos.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: <String>['7D', '30D', '90D', 'Todo'].map((String range) {
+            children: _ranges.map((SnapshotRangeOption range) {
               return ChoiceChip(
                 selected: _range == range,
-                label: Text(range),
+                label: Text(range.label),
                 onSelected: (_) => setState(() => _range = range),
               );
             }).toList(),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
+          DropdownButtonFormField<SnapshotMetric>(
             value: _metric,
-            decoration: const InputDecoration(labelText: 'Métrica'),
-            items: <String>[
-              'Portfolio value',
-              'Invested',
-              'Unrealized P&L',
-              'Realized P&L',
-              'BTC dominance',
-            ]
-                .map((String metric) => DropdownMenuItem<String>(
-                      value: metric,
-                      child: Text(metric),
-                    ))
+            decoration: const InputDecoration(
+              labelText: 'Métrica',
+              border: OutlineInputBorder(),
+            ),
+            items: SnapshotMetric.values
+                .map(
+                  (SnapshotMetric metric) => DropdownMenuItem<SnapshotMetric>(
+                    value: metric,
+                    child: Text(metric.label),
+                  ),
+                )
                 .toList(),
-            onChanged: (String? value) {
+            onChanged: (SnapshotMetric? value) {
               if (value != null) setState(() => _metric = value);
             },
           ),
+          const SizedBox(height: 14),
+          if (filtered.length < 2)
+            EmptyState(
+              icon: Icons.show_chart_outlined,
+              title: filtered.isEmpty
+                  ? 'Sin instantáneas para graficar'
+                  : 'Hace falta otra instantánea',
+              subtitle: filtered.isEmpty
+                  ? 'Guarda al menos dos instantáneas para ver una línea histórica.'
+                  : 'Con una sola instantánea se muestra el dato, pero se '
+                      'necesita otra para conectar puntos.',
+            )
+          else ...<Widget>[
+            SnapshotLineChart(
+              snapshots: filtered,
+              height: 240,
+              includeZero: _metric != SnapshotMetric.btcDominance,
+              series: <SnapshotChartSeries>[
+                SnapshotChartSeries(
+                  label: _metric.label,
+                  color: metricColor,
+                  values: filtered
+                      .map((PortfolioSnapshot s) => _metric.valueFor(s))
+                      .toList(),
+                  valueFormatter: (double value) => _metric.shortFormat(value),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ChartLegendDot(label: _metric.label, color: metricColor),
+          ],
           const SizedBox(height: 12),
-          EmptyState(
-            icon: Icons.insights_outlined,
-            title: _metric,
-            subtitle: widget.snapshots.isEmpty
-                ? 'Guarda snapshots para poblar este filtro.'
-                : 'Filtro $_range aplicado sobre '
-                    '${widget.snapshots.length} snapshots locales.',
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              MiniMetric(
+                label: 'Último dato',
+                value: latestValue == null ? '—' : _metric.format(latestValue),
+                color: _metric == SnapshotMetric.unrealizedPnl && latestValue != null
+                    ? pnlColor(latestValue)
+                    : null,
+              ),
+              MiniMetric(
+                label: 'Cambio del periodo',
+                value: delta == null ? '—' : _metric.format(delta),
+                color: delta == null ? null : pnlColor(delta),
+              ),
+              MiniMetric(
+                label: 'Instantáneas filtradas',
+                value: filtered.length.toString(),
+              ),
+            ],
           ),
         ],
       ),
@@ -5246,7 +5619,7 @@ class ChartsTab extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Analítica limpia con filtros de tiempo, métricas semánticas y snapshots.',
+          'Analítica limpia con filtros de tiempo, métricas semánticas e instantáneas.',
         ),
         const SizedBox(height: 12),
         AnalyticsControlPanel(snapshots: snapshots),
@@ -5255,7 +5628,7 @@ class ChartsTab extends StatelessWidget {
           title: 'Indicadores',
           children: <Widget>[
             PremiumMetricCard(
-              label: 'Valor cartera',
+              label: 'Valor de cartera',
               value: moneyShort(totals.currentValue),
               icon: Icons.account_balance_wallet_outlined,
             ),
@@ -5271,7 +5644,7 @@ class ChartsTab extends StatelessWidget {
               color: pnlColor(totals.unrealizedPL),
             ),
             PremiumMetricCard(
-              label: 'BTC dominance',
+              label: 'Dominancia BTC',
               value: _btcDominance(stats, totals),
               icon: Icons.currency_bitcoin,
             ),
@@ -5325,8 +5698,8 @@ class ChartsTab extends StatelessWidget {
         ),
         if (snapshots.isEmpty)
           CardPanel(
-            title: 'Histórico',
-            subtitle: 'Guarda snapshots para activar líneas de tendencia.',
+            title: 'Histórico de instantáneas',
+            subtitle: 'Guarda instantáneas para activar líneas de tendencia.',
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -5334,11 +5707,11 @@ class ChartsTab extends StatelessWidget {
                 FilledButton.tonalIcon(
                   onPressed: onSaveSnapshot,
                   icon: const Icon(Icons.add_a_photo_outlined),
-                  label: const Text('Guardar snapshot'),
+                  label: const Text('Guardar instantánea'),
                 ),
                 FilledButton.tonal(
                   onPressed: onViewSnapshots,
-                  child: const Text('Ver snapshots'),
+                  child: const Text('Ver instantáneas'),
                 ),
               ],
             ),
@@ -5349,7 +5722,7 @@ class ChartsTab extends StatelessWidget {
             alignment: Alignment.centerRight,
             child: FilledButton.tonal(
               onPressed: onViewSnapshots,
-              child: const Text('Administrar snapshots'),
+              child: const Text('Administrar instantáneas'),
             ),
           ),
         ],
@@ -5443,12 +5816,17 @@ class ResultBar extends StatelessWidget {
 class MoreTab extends StatelessWidget {
   final PortfolioTotals totals;
   final DateTime? pricesUpdatedAt;
+  final AppVisualMode visualMode;
+  final AppThemeStyle themeStyle;
   final int movementCount;
   final int snapshotCount;
+  final SnapshotAutomationMode snapshotAutomationMode;
+  final SnapshotRetention snapshotRetention;
   final int chartDataCount;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
-  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenThemeSettings;
+  final VoidCallback onOpenPortfolioSettings;
   final VoidCallback onOpenAlerts;
   final VoidCallback onExportMovementsCsv;
   final VoidCallback onExportSummaryCsv;
@@ -5460,18 +5838,25 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onImportBackupFile;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
+  final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
+  final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final VoidCallback onResetPriceAlertReferences;
 
   const MoreTab({
     super.key,
     required this.totals,
     required this.pricesUpdatedAt,
+    required this.visualMode,
+    required this.themeStyle,
     required this.movementCount,
     required this.snapshotCount,
+    required this.snapshotAutomationMode,
+    required this.snapshotRetention,
     required this.chartDataCount,
     required this.onOpenCharts,
     required this.onOpenMovements,
-    required this.onOpenSettings,
+    required this.onOpenThemeSettings,
+    required this.onOpenPortfolioSettings,
     required this.onOpenAlerts,
     required this.onExportMovementsCsv,
     required this.onExportSummaryCsv,
@@ -5483,6 +5868,8 @@ class MoreTab extends StatelessWidget {
     required this.onImportBackupFile,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
+    required this.onSnapshotAutomationModeChanged,
+    required this.onSnapshotRetentionChanged,
     required this.onResetPriceAlertReferences,
   });
 
@@ -5519,6 +5906,16 @@ class MoreTab extends StatelessWidget {
               onTap: onExportBackup,
             ),
             _CommandCard(
+              icon: Icons.receipt_long_outlined,
+              title: 'Historial de movimientos',
+              subtitle: movementCount == 1
+                  ? '1 movimiento registrado para auditoría, edición y borrado'
+                  : '$movementCount movimientos registrados para auditoría, '
+                      'edición y borrado',
+              badge: 'Clave',
+              onTap: onOpenMovements,
+            ),
+            _CommandCard(
               icon: Icons.table_chart_outlined,
               title: 'Exportaciones',
               subtitle: 'CSV, JSON, PDF y XLSX cuando están soportados',
@@ -5531,29 +5928,35 @@ class MoreTab extends StatelessWidget {
               subtitle: 'Pegar JSON o cargar archivo local',
               onTap: () => _showImportActions(context),
             ),
+            _CommandCard(
+              icon: Icons.photo_library_outlined,
+              title: 'Instantáneas',
+              subtitle: snapshotCount == 1
+                  ? '1 instantánea guardada · evolución y controles'
+                  : '$snapshotCount instantáneas guardadas · evolución y controles',
+              onTap: () => _showSnapshotActions(context),
+            ),
           ],
         ),
         _CommandSection(
-          title: 'Personalización',
+          title: 'Apariencia global',
           children: <Widget>[
             _CommandCard(
               icon: Icons.palette_outlined,
               title: 'Tema',
-              subtitle: 'Paletas premium de aplicación completa',
-              onTap: onOpenSettings,
+              subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
+              onTap: onOpenThemeSettings,
             ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Portafolio',
+          children: <Widget>[
             _CommandCard(
               icon: Icons.view_agenda_outlined,
-              title: 'Apariencia de resumen',
+              title: 'Resumen de cartera',
               subtitle: 'Posiciones visibles y orden del portafolio',
-              onTap: onOpenSettings,
-            ),
-            _CommandCard(
-              icon: Icons.visibility_outlined,
-              title: 'Monedas visibles',
-              subtitle: 'BTC, ETH, LINK, LTC y UNI con logos locales',
-              badge: '5',
-              onTap: onOpenSettings,
+              onTap: onOpenPortfolioSettings,
             ),
           ],
         ),
@@ -5563,7 +5966,7 @@ class MoreTab extends StatelessWidget {
             _CommandCard(
               icon: Icons.health_and_safety_outlined,
               title: 'Diagnóstico',
-              subtitle: 'Datos locales, snapshots y fuente de precios',
+              subtitle: 'Datos locales, instantáneas y fuente de precios',
               badge: pricesUpdatedAt == null ? 'Pendiente' : 'OK',
               onTap: () => _showDiagnostics(context),
             ),
@@ -5594,6 +5997,135 @@ class MoreTab extends StatelessWidget {
     );
   }
 
+  void _showSnapshotActions(BuildContext context) {
+    SnapshotAutomationMode selectedAutomation = snapshotAutomationMode;
+    SnapshotRetention selectedRetention = snapshotRetention;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => StatefulBuilder(
+        builder:
+            (
+              BuildContext context,
+              void Function(void Function()) setModalState,
+            ) {
+          void runAndClose(VoidCallback action) {
+            Navigator.of(sheetContext).pop();
+            action();
+          }
+
+          return SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                MediaQuery.viewPaddingOf(context).bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Instantáneas',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    snapshotCount == 1
+                        ? '1 instantánea guardada. Con 2 o más se muestra '
+                            'la línea de evolución.'
+                        : '$snapshotCount instantáneas guardadas. Con 2 o más '
+                            'se muestra la línea de evolución.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        onPressed: () => runAndClose(onSaveSnapshot),
+                        icon: const Icon(Icons.add_a_photo_outlined),
+                        label: const Text('Guardar instantánea'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onOpenCharts),
+                        icon: const Icon(Icons.show_chart_outlined),
+                        label: const Text('Ver evolución / Gráficas'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onViewSnapshots),
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: const Text('Administrar instantáneas'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onExportSnapshotsCsv),
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Exportar CSV instantáneas'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Automatización de instantáneas',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  ...SnapshotAutomationMode.values.map(
+                    (SnapshotAutomationMode option) =>
+                        RadioListTile<SnapshotAutomationMode>(
+                      contentPadding: EdgeInsets.zero,
+                      value: option,
+                      groupValue: selectedAutomation,
+                      title: Text(option.label),
+                      onChanged: (SnapshotAutomationMode? value) {
+                        if (value == null) return;
+                        setModalState(() => selectedAutomation = value);
+                        onSnapshotAutomationModeChanged(value);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Retención',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: SnapshotRetention.values.map(
+                      (SnapshotRetention option) {
+                        return ChoiceChip(
+                          selected: selectedRetention == option,
+                          label: Text(option.label),
+                          onSelected: (_) {
+                            setModalState(() => selectedRetention = option);
+                            onSnapshotRetentionChanged(option);
+                          },
+                        );
+                      },
+                    ).toList(),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _showDataActions(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -5617,7 +6149,7 @@ class MoreTab extends StatelessWidget {
           ),
           _SheetAction(
             icon: Icons.photo_library_outlined,
-            title: 'CSV snapshots',
+            title: 'CSV instantáneas',
             subtitle: 'Evolución guardada',
             onTap: onExportSnapshotsCsv,
           ),
@@ -5697,7 +6229,7 @@ class MoreTab extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               InfoLine('Movimientos locales', movementCount.toString()),
-              InfoLine('Snapshots', snapshotCount.toString()),
+              InfoLine('Instantáneas', snapshotCount.toString()),
               InfoLine('Monedas con valor', chartDataCount.toString()),
               InfoLine('Fuente de precios', _priceSource),
               InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
@@ -6160,7 +6692,10 @@ class _CommandActionSheet extends StatelessWidget {
   }
 }
 
+enum SettingsView { all, theme, portfolio }
+
 class SettingsTab extends StatelessWidget {
+  final SettingsView view;
   final AppVisualMode visualMode;
   final AppThemeStyle themeStyle;
   final VisiblePositions visiblePositions;
@@ -6191,6 +6726,7 @@ class SettingsTab extends StatelessWidget {
 
   const SettingsTab({
     super.key,
+    this.view = SettingsView.all,
     required this.visualMode,
     required this.themeStyle,
     required this.visiblePositions,
@@ -6222,11 +6758,18 @@ class SettingsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool showTheme =
+        view == SettingsView.all || view == SettingsView.theme;
+    final bool showPortfolio =
+        view == SettingsView.all || view == SettingsView.portfolio;
+    final bool showAdvanced = view == SettingsView.all;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: <Widget>[
-        CardPanel(
-          title: 'Tema',
+        if (showTheme)
+          CardPanel(
+            title: 'Tema',
           subtitle: 'Paletas premium completas, sin alterar colores '
               'semánticos financieros.',
           child: Column(
@@ -6271,8 +6814,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Portafolio',
+        if (showPortfolio)
+          CardPanel(
+            title: 'Resumen de cartera',
           subtitle: 'Configura cuántas posiciones aparecen en resumen y '
               'cómo se ordenan.',
           child: Column(
@@ -6313,8 +6857,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Cálculo',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Cálculo',
           subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
           child: Align(
             alignment: Alignment.centerLeft,
@@ -6324,9 +6869,10 @@ class SettingsTab extends StatelessWidget {
             ),
           ),
         ),
-        CardPanel(
-          title: 'Snapshots',
-          subtitle: 'Fotos guardadas: $snapshotCount. Configura automatización y retención.',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Instantáneas',
+          subtitle: 'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -6363,15 +6909,17 @@ class SettingsTab extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                'La creación y revisión de snapshots vive en Gráficas. '
+                'Las acciones principales de instantáneas viven en '
+                'Más → Instantáneas. '
                 'Aquí solo se configura automatización y retención.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
         ),
-        CardPanel(
-          title: 'Notificaciones',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Notificaciones',
           subtitle: 'Configura comportamiento; la gestión completa vive en Alertas.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -6415,8 +6963,9 @@ class SettingsTab extends StatelessWidget {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Respaldo',
+        if (showAdvanced)
+          CardPanel(
+            title: 'Respaldo',
           subtitle: 'Cuenta local. Próximamente: sincronización y respaldo en la nube.',
           child: Align(
             alignment: Alignment.centerLeft,
@@ -6526,10 +7075,11 @@ class SnapshotTrendPanel extends StatelessWidget {
     final double plChange = latest.totalUnrealizedPL - first.totalUnrealizedPL;
 
     return CardPanel(
-      title: 'Evolución por snapshots',
+      title: 'Evolución por instantáneas',
       subtitle: ordered.length < 2
-          ? 'Guarda otro snapshot para ver líneas comparativas.'
-          : '${ordered.length} snapshots entre ${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
+          ? 'Guarda otra instantánea para ver líneas comparativas.'
+          : '${ordered.length} instantáneas entre '
+              '${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -6540,7 +7090,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               includeZero: true,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
-                  label: 'Vale hoy',
+                  label: 'Valor de cartera',
                   color: colors.primary,
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalCurrentValue)
@@ -6562,18 +7112,34 @@ class SnapshotTrendPanel extends StatelessWidget {
               includeZero: true,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
-                  label: 'Resultado actual',
+                  label: 'P&L no realizado',
                   color: pnlColor(latest.totalUnrealizedPL),
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalUnrealizedPL)
                       .toList(),
                 ),
                 SnapshotChartSeries(
-                  label: 'Resultado vendido',
+                  label: 'P&L realizado',
                   color: colors.secondary,
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalRealizedPL)
                       .toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SnapshotLineChart(
+              snapshots: ordered,
+              height: 170,
+              includeZero: false,
+              series: <SnapshotChartSeries>[
+                SnapshotChartSeries(
+                  label: 'Dominancia BTC',
+                  color: const Color(0xFFF7931A),
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.btcDominancePercent)
+                      .toList(),
+                  valueFormatter: pct,
                 ),
               ],
             ),
@@ -6583,15 +7149,19 @@ class SnapshotTrendPanel extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: <Widget>[
-              ChartLegendDot(label: 'Vale hoy', color: colors.primary),
+              ChartLegendDot(label: 'Valor de cartera', color: colors.primary),
               ChartLegendDot(label: 'Invertido', color: colors.tertiary),
               ChartLegendDot(
-                label: 'Resultado actual',
+                label: 'P&L no realizado',
                 color: pnlColor(latest.totalUnrealizedPL),
               ),
               ChartLegendDot(
-                label: 'Resultado vendido',
+                label: 'P&L realizado',
                 color: colors.secondary,
+              ),
+              const ChartLegendDot(
+                label: 'Dominancia BTC',
+                color: Color(0xFFF7931A),
               ),
             ],
           ),
@@ -6603,11 +7173,11 @@ class SnapshotTrendPanel extends StatelessWidget {
             emphasized: true,
           ),
           InfoLine(
-            'Cambio en resultado',
+            'Cambio en P&L no realizado',
             money(plChange),
             valueColor: pnlColor(plChange),
           ),
-          InfoLine('Último valor', money(latest.totalCurrentValue)),
+          InfoLine('Último valor de cartera', money(latest.totalCurrentValue)),
         ],
       ),
     );
@@ -6650,11 +7220,13 @@ class SnapshotChartSeries {
   final String label;
   final Color color;
   final List<double> values;
+  final String Function(double value)? valueFormatter;
 
   const SnapshotChartSeries({
     required this.label,
     required this.color,
     required this.values,
+    this.valueFormatter,
   });
 }
 
@@ -6709,7 +7281,10 @@ class SnapshotLineChartPainter extends CustomPainter {
       canvas.drawLine(Offset(chart.left, y), Offset(chart.right, y), gridPaint);
 
       final double value = maxValue - ((maxValue - minValue) * i / 4);
-      _drawLabel(canvas, moneyShort(value), Offset(0, y - 8), labelColor);
+      final String label = series.length == 1 && series.first.valueFormatter != null
+          ? series.first.valueFormatter!(value)
+          : moneyShort(value);
+      _drawLabel(canvas, label, Offset(0, y - 8), labelColor);
     }
 
     final int pointCount = snapshots.length;
@@ -7058,6 +7633,7 @@ class CardPanel extends StatelessWidget {
   final String? subtitle;
   final Widget child;
   final Widget? trailing;
+  final VoidCallback? onTap;
 
   const CardPanel({
     super.key,
@@ -7065,41 +7641,45 @@ class CardPanel extends StatelessWidget {
     this.subtitle,
     required this.child,
     this.trailing,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+    final Widget content = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (trailing != null) trailing!,
-              ],
-            ),
-            if (subtitle != null) ...<Widget>[
-              const SizedBox(height: 4),
-              Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
+              ),
+              if (trailing != null) trailing!,
             ],
-            const SizedBox(height: 12),
-            child,
+          ),
+          if (subtitle != null) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
           ],
-        ),
+          const SizedBox(height: 12),
+          child,
+        ],
       ),
+    );
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: onTap == null ? Clip.none : Clip.antiAlias,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
@@ -7379,7 +7959,7 @@ extension AppVisualModeLabel on AppVisualMode {
   String get label {
     switch (this) {
       case AppVisualMode.system:
-        return 'Sistema';
+        return 'Auto';
       case AppVisualMode.light:
         return 'Claro';
       case AppVisualMode.dark:
@@ -8067,6 +8647,15 @@ class PortfolioSnapshot {
         ? 0.0
         : (leader.currentValue / totalCurrentValue) * 100;
     return '${leader.coin} · ${pct(share)}';
+  }
+
+
+  double get btcDominancePercent {
+    if (totalCurrentValue <= 0) return 0.0;
+    final double btcValue = coins
+        .where((CoinSnapshot coin) => coin.coin.toUpperCase() == 'BTC')
+        .fold<double>(0.0, (double total, CoinSnapshot coin) => total + coin.currentValue);
+    return (btcValue / totalCurrentValue) * 100;
   }
 
   factory PortfolioSnapshot.fromJson(Map<String, dynamic> json) {
