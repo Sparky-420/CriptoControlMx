@@ -1305,8 +1305,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                           const EmptyState(
                             icon: Icons.photo_library_outlined,
                             title: 'Sin instantáneas',
-                            subtitle:
-                                'Guarda una instantánea de cartera desde Gráficas.',
+                            subtitle: 'Guarda una instantánea de cartera desde '
+                                'Más → Instantáneas.',
                           )
                         else ...<Widget>[
                           SnapshotTrendPanel(snapshots: _snapshots),
@@ -2149,6 +2149,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               themeStyle: _themeStyle,
               movementCount: _movements.length,
               snapshotCount: _snapshots.length,
+              snapshotAutomationMode: _snapshotAutomationMode,
+              snapshotRetention: _snapshotRetention,
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
                   .length,
@@ -2185,6 +2187,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onImportBackupFile: () => _importBackupFile(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
+              onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
+              onSnapshotRetentionChanged: _changeSnapshotRetention,
               onResetPriceAlertReferences: () =>
                   _resetPriceAlertReferences(pageContext),
             ),
@@ -2462,8 +2466,8 @@ class LatestSnapshotCard extends StatelessWidget {
           : 'Guardado el ${longDate(current.createdAt)}.',
       child: current == null
           ? const Text(
-              'Resumen muestra solo la última instantánea. Para guardar, revisar '
-              'o administrar el histórico, entra a Gráficas.',
+              'Resumen muestra solo la última instantánea. Gestiona el histórico '
+              'desde Más → Instantáneas.',
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5816,6 +5820,8 @@ class MoreTab extends StatelessWidget {
   final AppThemeStyle themeStyle;
   final int movementCount;
   final int snapshotCount;
+  final SnapshotAutomationMode snapshotAutomationMode;
+  final SnapshotRetention snapshotRetention;
   final int chartDataCount;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
@@ -5832,6 +5838,8 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onImportBackupFile;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
+  final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
+  final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final VoidCallback onResetPriceAlertReferences;
 
   const MoreTab({
@@ -5842,6 +5850,8 @@ class MoreTab extends StatelessWidget {
     required this.themeStyle,
     required this.movementCount,
     required this.snapshotCount,
+    required this.snapshotAutomationMode,
+    required this.snapshotRetention,
     required this.chartDataCount,
     required this.onOpenCharts,
     required this.onOpenMovements,
@@ -5858,6 +5868,8 @@ class MoreTab extends StatelessWidget {
     required this.onImportBackupFile,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
+    required this.onSnapshotAutomationModeChanged,
+    required this.onSnapshotRetentionChanged,
     required this.onResetPriceAlertReferences,
   });
 
@@ -5916,6 +5928,14 @@ class MoreTab extends StatelessWidget {
               subtitle: 'Pegar JSON o cargar archivo local',
               onTap: () => _showImportActions(context),
             ),
+            _CommandCard(
+              icon: Icons.photo_library_outlined,
+              title: 'Instantáneas',
+              subtitle: snapshotCount == 1
+                  ? '1 instantánea guardada · evolución y controles'
+                  : '$snapshotCount instantáneas guardadas · evolución y controles',
+              onTap: () => _showSnapshotActions(context),
+            ),
           ],
         ),
         _CommandSection(
@@ -5936,13 +5956,6 @@ class MoreTab extends StatelessWidget {
               icon: Icons.view_agenda_outlined,
               title: 'Resumen de cartera',
               subtitle: 'Posiciones visibles y orden del portafolio',
-              onTap: onOpenPortfolioSettings,
-            ),
-            _CommandCard(
-              icon: Icons.visibility_outlined,
-              title: 'Monedas monitoreadas',
-              subtitle: 'BTC, ETH, LINK, LTC y UNI con logos locales',
-              badge: '5',
               onTap: onOpenPortfolioSettings,
             ),
           ],
@@ -5980,6 +5993,135 @@ class MoreTab extends StatelessWidget {
                 'No se agregó Firebase en esta versión.',
           ),
         ),
+      ),
+    );
+  }
+
+  void _showSnapshotActions(BuildContext context) {
+    SnapshotAutomationMode selectedAutomation = snapshotAutomationMode;
+    SnapshotRetention selectedRetention = snapshotRetention;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => StatefulBuilder(
+        builder:
+            (
+              BuildContext context,
+              void Function(void Function()) setModalState,
+            ) {
+          void runAndClose(VoidCallback action) {
+            Navigator.of(sheetContext).pop();
+            action();
+          }
+
+          return SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                MediaQuery.viewPaddingOf(context).bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Instantáneas',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    snapshotCount == 1
+                        ? '1 instantánea guardada. Con 2 o más se muestra '
+                            'la línea de evolución.'
+                        : '$snapshotCount instantáneas guardadas. Con 2 o más '
+                            'se muestra la línea de evolución.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        onPressed: () => runAndClose(onSaveSnapshot),
+                        icon: const Icon(Icons.add_a_photo_outlined),
+                        label: const Text('Guardar instantánea'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onOpenCharts),
+                        icon: const Icon(Icons.show_chart_outlined),
+                        label: const Text('Ver evolución / Gráficas'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onViewSnapshots),
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: const Text('Administrar instantáneas'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onExportSnapshotsCsv),
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Exportar CSV instantáneas'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Automatización de instantáneas',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  ...SnapshotAutomationMode.values.map(
+                    (SnapshotAutomationMode option) =>
+                        RadioListTile<SnapshotAutomationMode>(
+                      contentPadding: EdgeInsets.zero,
+                      value: option,
+                      groupValue: selectedAutomation,
+                      title: Text(option.label),
+                      onChanged: (SnapshotAutomationMode? value) {
+                        if (value == null) return;
+                        setModalState(() => selectedAutomation = value);
+                        onSnapshotAutomationModeChanged(value);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Retención',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: SnapshotRetention.values.map(
+                      (SnapshotRetention option) {
+                        return ChoiceChip(
+                          selected: selectedRetention == option,
+                          label: Text(option.label),
+                          onSelected: (_) {
+                            setModalState(() => selectedRetention = option);
+                            onSnapshotRetentionChanged(option);
+                          },
+                        );
+                      },
+                    ).toList(),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -6767,7 +6909,8 @@ class SettingsTab extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                'La creación y revisión de instantáneas vive en Gráficas. '
+                'Las acciones principales de instantáneas viven en '
+                'Más → Instantáneas. '
                 'Aquí solo se configura automatización y retención.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
