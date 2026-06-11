@@ -52,7 +52,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   };
 
   int _currentIndex = 0;
-  double _sellFeePercent = 0.0;
+  double _sellFeePercent = FinancialEngine.defaultExitFeePercent;
   AppVisualMode _visualMode = AppVisualMode.system;
   AppThemeStyle _themeStyle = AppThemeStyle.proDark;
   VisiblePositions _visiblePositions = VisiblePositions.three;
@@ -129,7 +129,8 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       } catch (_) {}
     }
 
-    _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ?? 0.0;
+    _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ??
+        FinancialEngine.defaultExitFeePercent;
     final String? savedVisualMode = prefs.getString(_themeModeKey);
     if (savedVisualMode != null) {
       _visualMode = appVisualModeFromName(savedVisualMode);
@@ -588,80 +589,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   }
 
   Map<String, CoinStats> _computeStats() {
-    final Map<String, CoinStats> stats = <String, CoinStats>{
-      for (final String coin in _coins)
-        coin: CoinStats(coin: coin, currentPrice: _currentPrices[coin] ?? 0.0),
-    };
-
-    final List<MapEntry<int, Movement>> indexed =
-        _movements.asMap().entries.toList()
-          ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
-            final int dateCompare = a.value.date.compareTo(b.value.date);
-            if (dateCompare != 0) return dateCompare;
-            return a.key.compareTo(b.key);
-          });
-
-    for (final MapEntry<int, Movement> entry in indexed) {
-      final Movement movement = entry.value;
-      final CoinStats? stat = stats[movement.coin];
-      if (stat == null) continue;
-
-      switch (movement.type) {
-        case MovementType.buy:
-        case MovementType.transferIn:
-          stat.quantity += movement.quantity;
-          stat.costBase +=
-              (movement.quantity * movement.unitPrice) + movement.fee;
-          stat.feesPaid += movement.fee;
-          break;
-
-        case MovementType.sell:
-          final double average = stat.quantity > 0
-              ? stat.costBase / stat.quantity
-              : 0.0;
-          final double quantityToRemove = movement.quantity > stat.quantity
-              ? stat.quantity
-              : movement.quantity;
-          final double removedCost = average * quantityToRemove;
-          final double proceeds =
-              (movement.quantity * movement.unitPrice) - movement.fee;
-
-          stat.realizedPL += proceeds - removedCost;
-          stat.quantity -= quantityToRemove;
-          stat.costBase -= removedCost;
-          stat.feesPaid += movement.fee;
-          break;
-
-        case MovementType.transferOut:
-          final double average = stat.quantity > 0
-              ? stat.costBase / stat.quantity
-              : 0.0;
-          final double quantityToRemove = movement.quantity > stat.quantity
-              ? stat.quantity
-              : movement.quantity;
-          final double removedCost = average * quantityToRemove;
-
-          stat.quantity -= quantityToRemove;
-          stat.costBase -= removedCost;
-          stat.feesPaid += movement.fee;
-          break;
-      }
-
-      if (stat.quantity.abs() < 0.0000000001) {
-        stat.quantity = 0.0;
-        stat.costBase = 0.0;
-      }
-
-      if (stat.costBase.abs() < 0.00000001) {
-        stat.costBase = 0.0;
-      }
-    }
-
-    for (final String coin in _coins) {
-      stats[coin]!.currentPrice = _currentPrices[coin] ?? 0.0;
-    }
-
-    return stats;
+    return FinancialEngine.computeStats(
+      coins: _coins,
+      movements: _movements,
+      currentPrices: _currentPrices,
+    );
   }
 
   CoinAudit _auditCoin(String coin) {
@@ -703,68 +635,33 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   }
 
   PortfolioTotals _totals(Map<String, CoinStats> stats) {
-    return PortfolioTotals(
-      costBase: stats.values.fold<double>(
-        0.0,
-        (double sum, CoinStats s) => sum + s.costBase,
-      ),
-      currentValue: stats.values.fold<double>(
-        0.0,
-        (double sum, CoinStats s) => sum + s.currentValue,
-      ),
-      unrealizedPL: stats.values.fold<double>(
-        0.0,
-        (double sum, CoinStats s) => sum + s.unrealizedPL,
-      ),
-      realizedPL: stats.values.fold<double>(
-        0.0,
-        (double sum, CoinStats s) => sum + s.realizedPL,
-      ),
-    );
+    return FinancialEngine.totals(stats);
   }
 
   bool _wouldCreateInvalidPosition(Movement candidate, {int? replaceIndex}) {
-    final List<Movement> testList = <Movement>[..._movements];
+    return FinancialEngine.wouldCreateInvalidPosition(
+      coins: _coins,
+      movements: _movements,
+      candidate: candidate,
+      replaceIndex: replaceIndex,
+    );
+  }
 
-    if (replaceIndex != null &&
-        replaceIndex >= 0 &&
-        replaceIndex < testList.length) {
-      testList[replaceIndex] = candidate;
-    } else {
-      testList.add(candidate);
-    }
+  bool _wouldCreateDuplicateMovement(Movement candidate, {int? replaceIndex}) {
+    return FinancialEngine.wouldCreateDuplicateMovement(
+      movements: _movements,
+      candidate: candidate,
+      replaceIndex: replaceIndex,
+    );
+  }
 
-    final Map<String, double> balances = <String, double>{
-      for (final String coin in _coins) coin: 0.0,
-    };
-
-    final List<MapEntry<int, Movement>> indexed =
-        testList.asMap().entries.toList()
-          ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
-            final int dateCompare = a.value.date.compareTo(b.value.date);
-            if (dateCompare != 0) return dateCompare;
-            return a.key.compareTo(b.key);
-          });
-
-    for (final MapEntry<int, Movement> entry in indexed) {
-      final Movement movement = entry.value;
-      final double current = balances[movement.coin] ?? 0.0;
-
-      switch (movement.type) {
-        case MovementType.buy:
-        case MovementType.transferIn:
-          balances[movement.coin] = current + movement.quantity;
-          break;
-
-        case MovementType.sell:
-        case MovementType.transferOut:
-          if (movement.quantity > current + 0.0000000001) return true;
-          balances[movement.coin] = current - movement.quantity;
-          break;
-      }
-    }
-
-    return false;
+  List<String> _financialDiagnostics() {
+    return FinancialEngine.diagnostics(
+      coins: _coins,
+      movements: _movements,
+      snapshots: _snapshots,
+      currentPrices: _currentPrices,
+    );
   }
 
   void _changeVisualMode(AppVisualMode value) {
@@ -999,20 +896,57 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                           },
                         ),
                         const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            final DateTime? picked = await showDatePicker(
-                              context: context,
-                              initialDate: selectedDate,
-                              firstDate: DateTime(2010),
-                              lastDate: DateTime(2100),
-                            );
-                            if (picked != null) {
-                              setModalState(() => selectedDate = picked);
-                            }
-                          },
-                          icon: const Icon(Icons.calendar_today_outlined),
-                          label: Text('Fecha: ${shortDate(selectedDate)}'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: <Widget>[
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final DateTime? picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: selectedDate.isAfter(DateTime.now())
+                                      ? DateTime.now()
+                                      : selectedDate,
+                                  firstDate: DateTime(2010),
+                                  lastDate: DateTime.now(),
+                                );
+                                if (picked != null) {
+                                  setModalState(
+                                    () => selectedDate = DateTime(
+                                      picked.year,
+                                      picked.month,
+                                      picked.day,
+                                      selectedDate.hour,
+                                      selectedDate.minute,
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.calendar_today_outlined),
+                              label: Text('Fecha: ${shortDate(selectedDate)}'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final TimeOfDay? picked = await showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay.fromDateTime(selectedDate),
+                                );
+                                if (picked != null) {
+                                  setModalState(
+                                    () => selectedDate = DateTime(
+                                      selectedDate.year,
+                                      selectedDate.month,
+                                      selectedDate.day,
+                                      picked.hour,
+                                      picked.minute,
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.schedule_outlined),
+                              label: Text('Hora: ${timeLabel(selectedDate)}'),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -1051,7 +985,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                         TextField(
                           controller: sourceController,
                           decoration: const InputDecoration(
-                            labelText: 'Origen',
+                            labelText: 'Plataforma',
                             border: OutlineInputBorder(),
                           ),
                         ),
@@ -1083,7 +1017,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
-                            onPressed: () {
+                            onPressed: () async {
                               final double? quantity = double.tryParse(
                                 qtyController.text.trim(),
                               );
@@ -1099,8 +1033,18 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                 return;
                               }
 
-                              if (unitPrice == null || unitPrice < 0) {
-                                _snack(pageContext, 'Pon un precio válido');
+                              if (unitPrice == null || unitPrice <= 0) {
+                                _snack(pageContext, 'Pon un precio mayor a cero');
+                                return;
+                              }
+
+                              if (quantity * unitPrice <= 0) {
+                                _snack(pageContext, 'El total MXN debe ser mayor a cero');
+                                return;
+                              }
+
+                              if (selectedDate.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
+                                _snack(pageContext, 'La fecha no puede estar en el futuro');
                                 return;
                               }
 
@@ -1134,6 +1078,32 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
                                   'Ese movimiento dejaría la posición en negativo',
                                 );
                                 return;
+                              }
+
+                              if (_wouldCreateDuplicateMovement(
+                                movement,
+                                replaceIndex: existing == null ? null : index,
+                              )) {
+                                final bool? continueAnyway = await showDialog<bool>(
+                                  context: sheetContext,
+                                  builder: (BuildContext dialogContext) => AlertDialog(
+                                    title: const Text('Posible duplicado'),
+                                    content: const Text(
+                                      'Ya existe un movimiento idéntico. ¿Quieres guardarlo de todos modos?',
+                                    ),
+                                    actions: <Widget>[
+                                      TextButton(
+                                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                                        child: const Text('Revisar'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                                        child: const Text('Guardar'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (continueAnyway != true) return;
                               }
 
                               setState(() {
@@ -1397,14 +1367,14 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         'precio_unitario_mxn',
         'comision_mxn',
         'total_bruto_mxn',
-        'origen',
+        'plataforma',
         'cartera',
         'red',
         'nota',
       ],
       ..._movements.map((Movement m) {
         return <Object?>[
-          isoDate(m.date),
+          m.date.toIso8601String(),
           m.type.label,
           m.type.name,
           m.coin,
@@ -1432,27 +1402,33 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       <Object?>[
         'cripto',
         'cantidad_actual',
+        'cantidad_acumulada',
+        'total_invertido_mxn',
         'invertido_actual_mxn',
-        'precio_promedio_mxn',
+        'costo_promedio_mxn',
         'precio_actual_mxn',
         'valor_actual_mxn',
         'resultado_actual_mxn',
         'resultado_vendido_mxn',
-        'precio_para_recuperar_mxn',
-        'comisiones_acumuladas_mxn',
+        'break_even_real_mxn',
+        'break_even_con_comision_salida_mxn',
+        'comisiones_pagadas_mxn',
       ],
       ..._coins.map((String coin) {
         final CoinStats s = stats[coin]!;
         return <Object?>[
           s.coin,
           fixed(s.quantity, 8),
+          fixed(s.quantity, 8),
+          fixed(s.totalInvested, 2),
           fixed(s.costBase, 2),
           fixed(s.avgPrice, 2),
           fixed(s.currentPrice, 2),
           fixed(s.currentValue, 2),
           fixed(s.unrealizedPL, 2),
           fixed(s.realizedPL, 2),
-          fixed(s.netBreakEvenPrice(_sellFeePercent), 2),
+          fixed(s.breakEvenReal, 2),
+          fixed(s.breakEvenWithExitFee(_sellFeePercent), 2),
           fixed(s.feesPaid, 2),
         ];
       }),
@@ -1528,6 +1504,61 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
         .join('\n');
   }
 
+  String _buildMovementsJson() {
+    return const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+      'version': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'movements': _movements.map((Movement m) => m.toJson()).toList(),
+    });
+  }
+
+  String _buildSnapshotsJson() {
+    return const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+      'version': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'snapshots': _snapshots
+          .map((PortfolioSnapshot snapshot) => snapshot.toJson())
+          .toList(),
+    });
+  }
+
+  String _buildPortfolioSummaryJson() {
+    final Map<String, CoinStats> stats = _computeStats();
+    final PortfolioTotals totals = _totals(stats);
+
+    return const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+      'version': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'priceSource': 'CoinGecko/manual',
+      'pricesUpdatedAt': _pricesUpdatedAt?.toIso8601String(),
+      'sellFeePercent': _sellFeePercent,
+      'totals': <String, dynamic>{
+        'costBase': totals.costBase,
+        'currentValue': totals.currentValue,
+        'unrealizedPL': totals.unrealizedPL,
+        'realizedPL': totals.realizedPL,
+        'feesPaid': totals.feesPaid,
+      },
+      'coins': <Map<String, dynamic>>[
+        for (final String coin in _coins)
+          <String, dynamic>{
+            'coin': coin,
+            'quantity': stats[coin]!.quantity,
+            'totalInvested': stats[coin]!.totalInvested,
+            'costBase': stats[coin]!.costBase,
+            'avgPrice': stats[coin]!.avgPrice,
+            'currentPrice': stats[coin]!.currentPrice,
+            'currentValue': stats[coin]!.currentValue,
+            'unrealizedPL': stats[coin]!.unrealizedPL,
+            'realizedPL': stats[coin]!.realizedPL,
+            'feesPaid': stats[coin]!.feesPaid,
+            'breakEvenReal': stats[coin]!.breakEvenReal,
+            'breakEvenWithExitFee': stats[coin]!.breakEvenWithExitFee(_sellFeePercent),
+          },
+      ],
+    });
+  }
+
   Uint8List _buildXlsxBytes() {
     final Map<String, CoinStats> stats = _computeStats();
     final xl.Excel excel = xl.Excel.createExcel();
@@ -1550,7 +1581,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
 
     for (final Movement movement in _movements) {
       _appendExcelRow(history, <Object?>[
-        isoDate(movement.date),
+        movement.date.toIso8601String(),
         movement.type.label,
         movement.type.name,
         movement.coin,
@@ -1783,6 +1814,36 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
       mimeType: 'text/csv',
       bytes: utf8.encode('\ufeff${_buildSnapshotsCsv()}'),
       successMessage: 'Instantáneas CSV listas',
+    );
+  }
+
+  Future<void> _exportMovementsJson(BuildContext pageContext) async {
+    await _shareDataFile(
+      messenger: ScaffoldMessenger.of(pageContext),
+      fileName: 'criptocontrolmx_movimientos.json',
+      mimeType: 'application/json',
+      bytes: utf8.encode(_buildMovementsJson()),
+      successMessage: 'Movimientos JSON listos',
+    );
+  }
+
+  Future<void> _exportSnapshotsJson(BuildContext pageContext) async {
+    await _shareDataFile(
+      messenger: ScaffoldMessenger.of(pageContext),
+      fileName: 'criptocontrolmx_snapshots.json',
+      mimeType: 'application/json',
+      bytes: utf8.encode(_buildSnapshotsJson()),
+      successMessage: 'Instantáneas JSON listas',
+    );
+  }
+
+  Future<void> _exportPortfolioSummaryJson(BuildContext pageContext) async {
+    await _shareDataFile(
+      messenger: ScaffoldMessenger.of(pageContext),
+      fileName: 'criptocontrolmx_portafolio_resumen.json',
+      mimeType: 'application/json',
+      bytes: utf8.encode(_buildPortfolioSummaryJson()),
+      successMessage: 'Resumen de portafolio JSON listo',
     );
   }
 
@@ -2149,6 +2210,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               themeStyle: _themeStyle,
               movementCount: _movements.length,
               snapshotCount: _snapshots.length,
+              latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first.createdAt,
+              activeCoins: stats.values.where((CoinStats s) => s.quantity > 0).length,
+              financialErrors: _financialDiagnostics(),
               snapshotAutomationMode: _snapshotAutomationMode,
               snapshotRetention: _snapshotRetention,
               chartDataCount: stats.values
@@ -2180,6 +2244,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onExportMovementsCsv: () => _exportMovementsCsv(pageContext),
               onExportSummaryCsv: () => _exportSummaryCsv(pageContext),
               onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
+              onExportMovementsJson: () => _exportMovementsJson(pageContext),
+              onExportSnapshotsJson: () => _exportSnapshotsJson(pageContext),
+              onExportPortfolioSummaryJson: () => _exportPortfolioSummaryJson(pageContext),
               onExportXlsx: () => _exportXlsx(pageContext),
               onExportPdf: () => _exportPdf(pageContext),
               onExportBackup: () => _exportBackup(pageContext),
@@ -2761,7 +2828,7 @@ class _MovementsTabState extends State<MovementsTab> {
               const SizedBox(height: 12),
               InfoLine('Moneda', movement.coin),
               InfoLine('Tipo', movement.type.label),
-              InfoLine('Fecha', shortDate(movement.date)),
+              InfoLine('Fecha y hora', longDate(movement.date)),
               InfoLine('Cantidad', crypto(movement.quantity)),
               InfoLine('Precio', money(movement.unitPrice)),
               InfoLine('Comisión', money(movement.fee)),
@@ -2771,7 +2838,7 @@ class _MovementsTabState extends State<MovementsTab> {
                 emphasized: true,
               ),
               if (movement.source.isNotEmpty)
-                InfoLine('Origen', movement.source),
+                InfoLine('Plataforma', movement.source),
               if (movement.wallet.isNotEmpty)
                 InfoLine('Cartera', movement.wallet),
               if (movement.network.isNotEmpty)
@@ -2972,7 +3039,7 @@ class _MovementsTabState extends State<MovementsTab> {
           ...filtered.map(
             (Movement m) => CardPanel(
               title: '${m.coin} · ${m.type.shortLabel}',
-              subtitle: shortDate(m.date),
+              subtitle: longDate(m.date),
               onTap: () => _showMovementDetails(context, m),
               trailing: PopupMenuButton<String>(
                 onSelected: (String value) {
@@ -3006,7 +3073,7 @@ class _MovementsTabState extends State<MovementsTab> {
                     money(m.quantity * m.unitPrice),
                     emphasized: true,
                   ),
-                  if (m.source.isNotEmpty) InfoLine('Origen', m.source),
+                  if (m.source.isNotEmpty) InfoLine('Plataforma', m.source),
                   if (m.wallet.isNotEmpty) InfoLine('Cartera', m.wallet),
                   if (m.network.isNotEmpty) InfoLine('Red', m.network),
                   if (m.note.isNotEmpty) InfoLine('Nota', m.note),
@@ -5699,7 +5766,7 @@ class ChartsTab extends StatelessWidget {
         if (snapshots.isEmpty)
           CardPanel(
             title: 'Histórico de instantáneas',
-            subtitle: 'Guarda instantáneas para activar líneas de tendencia.',
+            subtitle: 'No hay datos históricos guardados. Crea un snapshot manual para iniciar el historial.',
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -5820,6 +5887,9 @@ class MoreTab extends StatelessWidget {
   final AppThemeStyle themeStyle;
   final int movementCount;
   final int snapshotCount;
+  final DateTime? latestSnapshot;
+  final int activeCoins;
+  final List<String> financialErrors;
   final SnapshotAutomationMode snapshotAutomationMode;
   final SnapshotRetention snapshotRetention;
   final int chartDataCount;
@@ -5831,6 +5901,9 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onExportMovementsCsv;
   final VoidCallback onExportSummaryCsv;
   final VoidCallback onExportSnapshotsCsv;
+  final VoidCallback onExportMovementsJson;
+  final VoidCallback onExportSnapshotsJson;
+  final VoidCallback onExportPortfolioSummaryJson;
   final VoidCallback onExportXlsx;
   final VoidCallback onExportPdf;
   final VoidCallback onExportBackup;
@@ -5850,6 +5923,9 @@ class MoreTab extends StatelessWidget {
     required this.themeStyle,
     required this.movementCount,
     required this.snapshotCount,
+    required this.latestSnapshot,
+    required this.activeCoins,
+    required this.financialErrors,
     required this.snapshotAutomationMode,
     required this.snapshotRetention,
     required this.chartDataCount,
@@ -5861,6 +5937,9 @@ class MoreTab extends StatelessWidget {
     required this.onExportMovementsCsv,
     required this.onExportSummaryCsv,
     required this.onExportSnapshotsCsv,
+    required this.onExportMovementsJson,
+    required this.onExportSnapshotsJson,
+    required this.onExportPortfolioSummaryJson,
     required this.onExportXlsx,
     required this.onExportPdf,
     required this.onExportBackup,
@@ -6070,6 +6149,11 @@ class MoreTab extends StatelessWidget {
                         icon: const Icon(Icons.download_outlined),
                         label: const Text('Exportar CSV instantáneas'),
                       ),
+                      OutlinedButton.icon(
+                        onPressed: () => runAndClose(onExportSnapshotsJson),
+                        icon: const Icon(Icons.data_object_outlined),
+                        label: const Text('Exportar JSON instantáneas'),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 18),
@@ -6155,6 +6239,24 @@ class MoreTab extends StatelessWidget {
           ),
           _SheetAction(
             icon: Icons.data_object_outlined,
+            title: 'JSON movimientos',
+            subtitle: 'Historial completo sin respaldo',
+            onTap: onExportMovementsJson,
+          ),
+          _SheetAction(
+            icon: Icons.data_object_outlined,
+            title: 'JSON instantáneas',
+            subtitle: 'Histórico de snapshots',
+            onTap: onExportSnapshotsJson,
+          ),
+          _SheetAction(
+            icon: Icons.account_balance_wallet_outlined,
+            title: 'JSON portafolio',
+            subtitle: 'Resumen calculado por el motor financiero',
+            onTap: onExportPortfolioSummaryJson,
+          ),
+          _SheetAction(
+            icon: Icons.data_object_outlined,
             title: 'JSON respaldo',
             subtitle: 'Copia completa compatible',
             onTap: onExportBackup,
@@ -6228,11 +6330,25 @@ class MoreTab extends StatelessWidget {
                     ),
               ),
               const SizedBox(height: 12),
-              InfoLine('Movimientos locales', movementCount.toString()),
-              InfoLine('Instantáneas', snapshotCount.toString()),
-              InfoLine('Monedas con valor', chartDataCount.toString()),
+              InfoLine('Total de movimientos', movementCount.toString()),
+              InfoLine('Total de snapshots', snapshotCount.toString()),
+              InfoLine(
+                'Último snapshot',
+                latestSnapshot == null ? 'Sin snapshots' : longDate(latestSnapshot!),
+              ),
+              InfoLine('Última actualización de precios', priceUpdatedLabel(pricesUpdatedAt)),
+              InfoLine('Monedas activas', activeCoins.toString()),
+              InfoLine('Errores detectados', financialErrors.length.toString()),
+              InfoLine('Estado de JSON', 'Local compatible'),
               InfoLine('Fuente de precios', _priceSource),
-              InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
+              if (financialErrors.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
+                ...financialErrors.take(6).map(
+                  (String error) => InfoLine('Alerta', error),
+                ),
+                if (financialErrors.length > 6)
+                  InfoLine('Más alertas', '+${financialErrors.length - 6}'),
+              ],
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
                 onPressed: onResetPriceAlertReferences,
@@ -7145,39 +7261,42 @@ class SnapshotTrendPanel extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              ChartLegendDot(label: 'Valor de cartera', color: colors.primary),
-              ChartLegendDot(label: 'Invertido', color: colors.tertiary),
-              ChartLegendDot(
-                label: 'P&L no realizado',
-                color: pnlColor(latest.totalUnrealizedPL),
-              ),
-              ChartLegendDot(
-                label: 'P&L realizado',
-                color: colors.secondary,
-              ),
-              const ChartLegendDot(
-                label: 'Dominancia BTC',
-                color: Color(0xFFF7931A),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          InfoLine(
-            'Cambio en valor',
-            money(valueChange),
-            valueColor: pnlColor(valueChange),
-            emphasized: true,
-          ),
-          InfoLine(
-            'Cambio en P&L no realizado',
-            money(plChange),
-            valueColor: pnlColor(plChange),
-          ),
-          InfoLine('Último valor de cartera', money(latest.totalCurrentValue)),
+          if (ordered.length >= 2) ...<Widget>[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                ChartLegendDot(label: 'Valor de cartera', color: colors.primary),
+                ChartLegendDot(label: 'Invertido', color: colors.tertiary),
+                ChartLegendDot(
+                  label: 'P&L no realizado',
+                  color: pnlColor(latest.totalUnrealizedPL),
+                ),
+                ChartLegendDot(
+                  label: 'P&L realizado',
+                  color: colors.secondary,
+                ),
+                const ChartLegendDot(
+                  label: 'Dominancia BTC',
+                  color: Color(0xFFF7931A),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            InfoLine(
+              'Cambio en valor',
+              money(valueChange),
+              valueColor: pnlColor(valueChange),
+              emphasized: true,
+            ),
+            InfoLine(
+              'Cambio en P&L no realizado',
+              money(plChange),
+              valueColor: pnlColor(plChange),
+            ),
+          ],
+          InfoLine('Dato actual', money(latest.totalCurrentValue)),
+          InfoLine('Snapshots guardados', ordered.length.toString()),
         ],
       ),
     );
@@ -8430,6 +8549,249 @@ MovementType movementTypeFromAny(dynamic value) {
   return MovementType.buy;
 }
 
+
+class FinancialEngine {
+  static const double defaultExitFeePercent = 1.5;
+
+  const FinancialEngine._();
+
+  static Map<String, CoinStats> computeStats({
+    required List<String> coins,
+    required List<Movement> movements,
+    required Map<String, double> currentPrices,
+  }) {
+    final Map<String, CoinStats> stats = <String, CoinStats>{
+      for (final String coin in coins)
+        coin: CoinStats(coin: coin, currentPrice: currentPrices[coin] ?? 0.0),
+    };
+
+    final List<MapEntry<int, Movement>> indexed =
+        movements.asMap().entries.toList()
+          ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
+            final int dateCompare = a.value.date.compareTo(b.value.date);
+            if (dateCompare != 0) return dateCompare;
+            return a.key.compareTo(b.key);
+          });
+
+    for (final MapEntry<int, Movement> entry in indexed) {
+      final Movement movement = entry.value;
+      final CoinStats? stat = stats[movement.coin];
+      if (stat == null) continue;
+
+      switch (movement.type) {
+        case MovementType.buy:
+        case MovementType.transferIn:
+          stat.quantity += movement.quantity;
+          stat.costBase += movement.grossTotal + movement.fee;
+          stat.totalInvested += movement.grossTotal + movement.fee;
+          stat.feesPaid += movement.fee;
+          break;
+
+        case MovementType.sell:
+          final double average = stat.quantity > 0
+              ? stat.costBase / stat.quantity
+              : 0.0;
+          final double quantityToRemove = movement.quantity > stat.quantity
+              ? stat.quantity
+              : movement.quantity;
+          final double removedCost = average * quantityToRemove;
+          final double proceeds = movement.grossTotal - movement.fee;
+
+          stat.realizedPL += proceeds - removedCost;
+          stat.quantity -= quantityToRemove;
+          stat.costBase -= removedCost;
+          stat.feesPaid += movement.fee;
+          break;
+
+        case MovementType.transferOut:
+          final double average = stat.quantity > 0
+              ? stat.costBase / stat.quantity
+              : 0.0;
+          final double quantityToRemove = movement.quantity > stat.quantity
+              ? stat.quantity
+              : movement.quantity;
+          final double removedCost = average * quantityToRemove;
+
+          stat.quantity -= quantityToRemove;
+          stat.costBase -= removedCost;
+          stat.feesPaid += movement.fee;
+          break;
+      }
+
+      if (stat.quantity.abs() < 0.0000000001) {
+        stat.quantity = 0.0;
+        stat.costBase = 0.0;
+      }
+
+      if (stat.costBase.abs() < 0.00000001) {
+        stat.costBase = 0.0;
+      }
+    }
+
+    for (final String coin in coins) {
+      stats[coin]!.currentPrice = currentPrices[coin] ?? 0.0;
+    }
+
+    return stats;
+  }
+
+  static PortfolioTotals totals(Map<String, CoinStats> stats) {
+    return PortfolioTotals(
+      costBase: stats.values.fold<double>(
+        0.0,
+        (double sum, CoinStats s) => sum + s.costBase,
+      ),
+      currentValue: stats.values.fold<double>(
+        0.0,
+        (double sum, CoinStats s) => sum + s.currentValue,
+      ),
+      unrealizedPL: stats.values.fold<double>(
+        0.0,
+        (double sum, CoinStats s) => sum + s.unrealizedPL,
+      ),
+      realizedPL: stats.values.fold<double>(
+        0.0,
+        (double sum, CoinStats s) => sum + s.realizedPL,
+      ),
+      feesPaid: stats.values.fold<double>(
+        0.0,
+        (double sum, CoinStats s) => sum + s.feesPaid,
+      ),
+    );
+  }
+
+  static bool wouldCreateInvalidPosition({
+    required List<String> coins,
+    required List<Movement> movements,
+    required Movement candidate,
+    int? replaceIndex,
+  }) {
+    final List<Movement> testList = <Movement>[...movements];
+
+    if (replaceIndex != null &&
+        replaceIndex >= 0 &&
+        replaceIndex < testList.length) {
+      testList[replaceIndex] = candidate;
+    } else {
+      testList.add(candidate);
+    }
+
+    final Map<String, double> balances = <String, double>{
+      for (final String coin in coins) coin: 0.0,
+    };
+
+    final List<MapEntry<int, Movement>> indexed =
+        testList.asMap().entries.toList()
+          ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
+            final int dateCompare = a.value.date.compareTo(b.value.date);
+            if (dateCompare != 0) return dateCompare;
+            return a.key.compareTo(b.key);
+          });
+
+    for (final MapEntry<int, Movement> entry in indexed) {
+      final Movement movement = entry.value;
+      final double current = balances[movement.coin] ?? 0.0;
+
+      switch (movement.type) {
+        case MovementType.buy:
+        case MovementType.transferIn:
+          balances[movement.coin] = current + movement.quantity;
+          break;
+        case MovementType.sell:
+        case MovementType.transferOut:
+          if (movement.quantity > current + 0.0000000001) return true;
+          balances[movement.coin] = current - movement.quantity;
+          break;
+      }
+    }
+
+    return false;
+  }
+
+  static bool wouldCreateDuplicateMovement({
+    required List<Movement> movements,
+    required Movement candidate,
+    int? replaceIndex,
+  }) {
+    for (int i = 0; i < movements.length; i++) {
+      if (replaceIndex != null && i == replaceIndex) continue;
+      if (movements[i].isFinanciallyIdenticalTo(candidate)) return true;
+    }
+    return false;
+  }
+
+  static List<String> diagnostics({
+    required List<String> coins,
+    required List<Movement> movements,
+    required List<PortfolioSnapshot> snapshots,
+    required Map<String, double> currentPrices,
+  }) {
+    final List<String> errors = <String>[];
+
+    for (int i = 0; i < movements.length; i++) {
+      final Movement movement = movements[i];
+      final int number = i + 1;
+      if (!coins.contains(movement.coin)) {
+        errors.add('Movimiento #$number tiene moneda no soportada');
+      }
+      if (movement.quantity <= 0) {
+        errors.add('Movimiento #$number tiene cantidad en cero o negativa');
+      }
+      if (movement.unitPrice <= 0) {
+        errors.add('Movimiento #$number tiene precio en cero o negativo');
+      }
+      if (movement.grossTotal <= 0) {
+        errors.add('Movimiento #$number tiene total MXN en cero');
+      }
+      if (movement.fee < 0) {
+        errors.add('Movimiento #$number tiene comisión negativa');
+      }
+      if (movement.date.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
+        errors.add('Movimiento #$number tiene fecha futura');
+      }
+      for (int j = i + 1; j < movements.length; j++) {
+        if (movement.isFinanciallyIdenticalTo(movements[j])) {
+          errors.add('Posible duplicado: movimientos #$number y #${j + 1}');
+        }
+      }
+    }
+
+    if (wouldCreateInvalidHistoricalBalance(movements)) {
+      errors.add('Hay ventas o salidas mayores al saldo disponible');
+    }
+
+    for (final String coin in coins) {
+      if ((currentPrices[coin] ?? 0.0) <= 0) {
+        errors.add('Precio actual pendiente para $coin');
+      }
+    }
+
+    if (snapshots.any((PortfolioSnapshot s) => s.createdAt.isAfter(DateTime.now().add(const Duration(minutes: 5))))) {
+      errors.add('Hay snapshots con fecha futura');
+    }
+
+    return errors;
+  }
+
+  static bool wouldCreateInvalidHistoricalBalance(List<Movement> movements) {
+    final Set<String> coins = movements.map((Movement m) => m.coin).toSet();
+    return wouldCreateInvalidPosition(
+      coins: coins.toList(),
+      movements: movements,
+      candidate: Movement(
+        type: MovementType.buy,
+        coin: coins.isEmpty ? 'BTC' : coins.first,
+        date: DateTime.fromMillisecondsSinceEpoch(0),
+        quantity: 0.00000001,
+        unitPrice: 1,
+        fee: 0,
+        note: '',
+      ),
+      replaceIndex: movements.length + 1,
+    );
+  }
+}
+
 class Movement {
   final MovementType type;
   final String coin;
@@ -8455,6 +8817,8 @@ class Movement {
     required this.note,
   });
 
+  double get grossTotal => quantity * unitPrice;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'type': type.name,
     'coin': coin,
@@ -8467,6 +8831,17 @@ class Movement {
     'network': network,
     'note': note,
   };
+
+  bool isFinanciallyIdenticalTo(Movement other) {
+    return type == other.type &&
+        coin == other.coin &&
+        date.millisecondsSinceEpoch == other.date.millisecondsSinceEpoch &&
+        (quantity - other.quantity).abs() < 0.0000000001 &&
+        (unitPrice - other.unitPrice).abs() < 0.00000001 &&
+        (fee - other.fee).abs() < 0.00000001 &&
+        source.trim().toLowerCase() == other.source.trim().toLowerCase() &&
+        note.trim().toLowerCase() == other.note.trim().toLowerCase();
+  }
 
   factory Movement.fromJson(Map<String, dynamic> json) {
     return Movement(
@@ -8491,6 +8866,7 @@ class CoinStats {
   double currentPrice;
   double realizedPL;
   double feesPaid;
+  double totalInvested;
 
   CoinStats({
     required this.coin,
@@ -8499,11 +8875,15 @@ class CoinStats {
     this.currentPrice = 0.0,
     this.realizedPL = 0.0,
     this.feesPaid = 0.0,
+    this.totalInvested = 0.0,
   });
 
   double get avgPrice => quantity > 0 ? costBase / quantity : 0.0;
   double get currentValue => quantity * currentPrice;
   double get unrealizedPL => currentValue - costBase;
+  double get breakEvenReal => avgPrice;
+  double breakEvenWithExitFee([double sellFeePercent = FinancialEngine.defaultExitFeePercent]) =>
+      netBreakEvenPrice(sellFeePercent);
 
   double netBreakEvenPrice(double sellFeePercent) {
     if (quantity <= 0) return 0.0;
@@ -8553,12 +8933,14 @@ class PortfolioTotals {
   final double currentValue;
   final double unrealizedPL;
   final double realizedPL;
+  final double feesPaid;
 
   PortfolioTotals({
     required this.costBase,
     required this.currentValue,
     required this.unrealizedPL,
     required this.realizedPL,
+    this.feesPaid = 0.0,
   });
 }
 
@@ -8737,7 +9119,11 @@ String shortDate(DateTime date) {
 }
 
 String longDate(DateTime date) {
-  return '${shortDate(date)} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  return '${shortDate(date)} ${timeLabel(date)}';
+}
+
+String timeLabel(DateTime date) {
+  return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 }
 
 String priceUpdatedLabel(DateTime? updatedAt) {
