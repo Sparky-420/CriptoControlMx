@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
+import 'ui/app_theme.dart' as ccmx;
 
 class CriptoControlApp extends StatefulWidget {
   const CriptoControlApp({super.key});
@@ -2010,14 +2011,15 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     final Map<String, CoinStats> stats = _computeStats();
     final PortfolioTotals totals = _totals(stats);
 
-    final AppPalette palette = _themeStyle.palette;
+    final ccmx.CcmxThemeStyle themeStyle =
+        ccmx.CcmxThemeStyle.values.byName(_themeStyle.name);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'CriptoControlMx',
       themeMode: _visualMode.themeMode,
-      theme: buildPremiumTheme(palette, Brightness.light),
-      darkTheme: buildPremiumTheme(palette, Brightness.dark),
+      theme: ccmx.CcmxAppTheme.build(style: themeStyle, brightness: Brightness.light),
+      darkTheme: ccmx.CcmxAppTheme.build(style: themeStyle, brightness: Brightness.dark),
       home: Builder(
         builder: (BuildContext pageContext) {
           void openMorePage(
