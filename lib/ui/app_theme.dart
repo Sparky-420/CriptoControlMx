@@ -78,6 +78,17 @@ extension CcmxThemeStyleDetails on CcmxThemeStyle {
   }
 
   CcmxThemePalette paletteFor(Brightness brightness) {
+    if (brightness == Brightness.light) {
+      return switch (this) {
+        CcmxThemeStyle.proDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF5B4FCF), const Color(0xFFE7E3FF)),
+        CcmxThemeStyle.graphite => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF334155), const Color(0xFFE2E8F0)),
+        CcmxThemeStyle.bitcoinDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFFC26A00), const Color(0xFFFFEDD5)),
+        CcmxThemeStyle.terminalGreen => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF047857), const Color(0xFFDCFCE7)),
+        CcmxThemeStyle.highContrast => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF000000), const Color(0xFFE5E7EB)),
+        CcmxThemeStyle.institutionalBlue || CcmxThemeStyle.seriousLight => CcmxThemePalette.seriousLight,
+      };
+    }
+
     switch (this) {
       case CcmxThemeStyle.proDark:
         return CcmxThemePalette.proDark;
@@ -92,9 +103,7 @@ extension CcmxThemeStyleDetails on CcmxThemeStyle {
       case CcmxThemeStyle.highContrast:
         return CcmxThemePalette.highContrast;
       case CcmxThemeStyle.seriousLight:
-        return brightness == Brightness.light
-            ? CcmxThemePalette.seriousLight
-            : CcmxThemePalette.graphite;
+        return CcmxThemePalette.graphite;
     }
   }
 }
@@ -126,6 +135,8 @@ class CcmxThemePalette {
     required this.textMain,
     required this.textMuted,
   });
+
+  CcmxThemePalette withAccent(Color primary, Color primarySoft) => CcmxThemePalette(background: background, surface: surface, surfaceAlt: surfaceAlt, primary: primary, primarySoft: primarySoft, border: border, positive: positive, negative: negative, warning: warning, textMain: textMain, textMuted: textMuted);
 
   static const CcmxThemePalette proDark = CcmxThemePalette(
     background: Color(0xFF090B12),
