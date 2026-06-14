@@ -564,7 +564,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(
-            content: Text('No se pudieron actualizar los precios'),
+            content: Text('No se pudieron actualizar los precios. Revisa tu conexión e inténtalo de nuevo.'),
           ),
         );
       }
@@ -2135,7 +2135,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 );
               } catch (_) {
                 messenger.showSnackBar(
-                  const SnackBar(content: Text('JSON inválido o incompleto')),
+                  const SnackBar(content: Text('Respaldo JSON inválido o incompleto. Revisa el contenido e inténtalo de nuevo.')),
                 );
               }
             },
@@ -2171,7 +2171,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (_) {
       if (mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('No se pudo importar el archivo JSON')),
+          const SnackBar(content: Text('No se pudo importar el archivo JSON. Verifica que sea un respaldo válido.')),
         );
       }
     }
