@@ -5366,7 +5366,7 @@ class _AlertsTabState extends State<AlertsTab> {
       children: <Widget>[
         CardPanel(
           title: 'Alertas internas de recuperación',
-          subtitle: 'Avance hacia break even.',
+          subtitle: 'Avance hacia punto de equilibrio.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -5382,7 +5382,7 @@ class _AlertsTabState extends State<AlertsTab> {
                 'Umbral actual',
                 '${widget.recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
               ),
-              const Text('Avance hacia break even por P&L no realizado.'),
+              const Text('Avance hacia punto de equilibrio por P&L no realizado.'),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -5959,7 +5959,7 @@ class ChartsTab extends StatelessWidget {
         if (snapshots.isEmpty)
           CardPanel(
             title: 'Histórico de instantáneas',
-            subtitle: 'No hay datos históricos guardados. Crea un snapshot manual para iniciar el historial.',
+            subtitle: 'Aún no hay instantáneas guardadas. Crea una instantánea manual para iniciar el historial.',
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -6452,7 +6452,7 @@ class MoreTab extends StatelessWidget {
           _SheetAction(
             icon: Icons.data_object_outlined,
             title: 'JSON instantáneas',
-            subtitle: 'Histórico de snapshots',
+            subtitle: 'Histórico de instantáneas',
             onTap: onExportSnapshotsJson,
           ),
           _SheetAction(
@@ -6537,10 +6537,10 @@ class MoreTab extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               InfoLine('Total de movimientos', movementCount.toString()),
-              InfoLine('Total de snapshots', snapshotCount.toString()),
+              InfoLine('Total de instantáneas', snapshotCount.toString()),
               InfoLine(
-                'Último snapshot',
-                latestSnapshot == null ? 'Sin snapshots' : longDate(latestSnapshot!),
+                'Última instantánea',
+                latestSnapshot == null ? 'Sin instantáneas' : longDate(latestSnapshot!),
               ),
               InfoLine('Última actualización de precios', priceUpdatedLabel(pricesUpdatedAt)),
               InfoLine('Monedas activas', activeCoins.toString()),
@@ -7560,7 +7560,7 @@ class SnapshotTrendPanel extends StatelessWidget {
             ),
           ],
           InfoLine('Dato actual', money(latest.totalCurrentValue)),
-          InfoLine('Snapshots guardados', ordered.length.toString()),
+          InfoLine('Instantáneas guardadas', ordered.length.toString()),
         ],
       ),
     );
@@ -9065,7 +9065,7 @@ class FinancialEngine {
     }
 
     if (snapshots.any((PortfolioSnapshot s) => s.createdAt.isAfter(DateTime.now().add(const Duration(minutes: 5))))) {
-      errors.add('Hay snapshots con fecha futura');
+      errors.add('Hay instantáneas con fecha futura');
     }
 
     return errors;
