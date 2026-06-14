@@ -2334,6 +2334,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               stats: stats,
               totals: totals,
               sellFeePercent: _sellFeePercent,
+              hasMovements: _movements.isNotEmpty,
               visiblePositions: _visiblePositions,
               positionSortMode: _positionSortMode,
               latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first,
@@ -2515,6 +2516,7 @@ class SummaryTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
   final double sellFeePercent;
+  final bool hasMovements;
   final VisiblePositions visiblePositions;
   final PositionSortMode positionSortMode;
   final PortfolioSnapshot? latestSnapshot;
@@ -2528,6 +2530,7 @@ class SummaryTab extends StatelessWidget {
     required this.stats,
     required this.totals,
     required this.sellFeePercent,
+    required this.hasMovements,
     required this.visiblePositions,
     required this.positionSortMode,
     required this.latestSnapshot,
@@ -2546,10 +2549,14 @@ class SummaryTab extends StatelessWidget {
   }) {
     if (active.isEmpty) {
       return <Widget>[
-        const EmptyState(
+        EmptyState(
           icon: Icons.account_balance_wallet_outlined,
-          title: 'Sin posiciones abiertas',
-          subtitle: 'Agrega un movimiento para empezar.',
+          title: hasMovements
+              ? 'No tienes posiciones abiertas'
+              : 'No hay cartera todavía',
+          subtitle: hasMovements
+              ? 'Tus movimientos existen, pero no hay saldos activos por mostrar.'
+              : 'Agrega tu primer movimiento para abrir el seguimiento.',
         ),
       ];
     }
