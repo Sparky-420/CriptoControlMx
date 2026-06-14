@@ -1224,8 +1224,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                 }
                               });
 
-                              _saveMovementAndMaybeSnapshot(
+                              final Future<void> saveFuture =
+                                  _saveMovementAndMaybeSnapshot(
                                 SnapshotTrigger.movementChange,
+                              );
+                              unawaited(
+                                _refreshPricesAfterMovement
+                                    ? saveFuture.then(
+                                        (_) => _refreshPricesSilently(),
+                                      )
+                                    : saveFuture,
                               );
                               Navigator.of(sheetContext).pop();
                             },
