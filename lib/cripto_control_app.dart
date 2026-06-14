@@ -40,11 +40,11 @@ const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
       'LINK': CryptoAssetMetadata(symbol: 'LINK', name: 'Chainlink', coingeckoId: 'chainlink', hasLocalIcon: true, isActive: true),
       'LTC': CryptoAssetMetadata(symbol: 'LTC', name: 'Litecoin', coingeckoId: 'litecoin', hasLocalIcon: true, isActive: true),
       'UNI': CryptoAssetMetadata(symbol: 'UNI', name: 'Uniswap', coingeckoId: 'uniswap', hasLocalIcon: true, isActive: true),
-      'USDT': CryptoAssetMetadata(symbol: 'USDT', name: 'Tether', coingeckoId: 'tether', hasLocalIcon: false, isActive: false),
-      'USDC': CryptoAssetMetadata(symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', hasLocalIcon: false, isActive: false),
-      'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: false, isActive: false),
-      'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: false, isActive: false),
-      'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: false, isActive: false),
+      'USDT': CryptoAssetMetadata(symbol: 'USDT', name: 'Tether', coingeckoId: 'tether', hasLocalIcon: true, isActive: false),
+      'USDC': CryptoAssetMetadata(symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', hasLocalIcon: true, isActive: false),
+      'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: false),
+      'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: false),
+      'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: false),
     };
 
 class CriptoControlApp extends StatefulWidget {
@@ -2812,6 +2812,11 @@ class CoinLogo extends StatelessWidget {
     'LINK',
     'LTC',
     'UNI',
+    'USDT',
+    'USDC',
+    'XRP',
+    'SOL',
+    'ATOM',
   };
 
   @override
