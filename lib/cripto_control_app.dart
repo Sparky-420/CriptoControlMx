@@ -721,6 +721,21 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     _saveData();
   }
 
+  void _changeRefreshPricesOnOpen(bool value) {
+    setState(() => _refreshPricesOnOpen = value);
+    _saveData();
+  }
+
+  void _changeRefreshPricesAfterMovement(bool value) {
+    setState(() => _refreshPricesAfterMovement = value);
+    _saveData();
+  }
+
+  void _changePriceRefreshForegroundMode(PriceRefreshForegroundMode value) {
+    setState(() => _priceRefreshForegroundMode = value);
+    _saveData();
+  }
+
   void _openSimulationMode(SimulationMode mode) {
     setState(() {
       _requestedSimulationMode = mode;
@@ -2109,6 +2124,9 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
             positionSortMode: _positionSortMode,
             snapshotAutomationMode: _snapshotAutomationMode,
             snapshotRetention: _snapshotRetention,
+            refreshPricesOnOpen: _refreshPricesOnOpen,
+            refreshPricesAfterMovement: _refreshPricesAfterMovement,
+            priceRefreshForegroundMode: _priceRefreshForegroundMode,
             sellFeePercent: _sellFeePercent,
             snapshotCount: _snapshots.length,
             onVisualModeChanged: (AppVisualMode value) {
@@ -2135,6 +2153,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               _changeSnapshotRetention(value);
               refresh?.call();
             },
+            onRefreshPricesOnOpenChanged: _changeRefreshPricesOnOpen,
+            onRefreshPricesAfterMovementChanged: _changeRefreshPricesAfterMovement,
+            onPriceRefreshForegroundModeChanged:
+                _changePriceRefreshForegroundMode,
             onEditSellFee: () => _showSellFeeDialog(pageContext),
             onOpenAlerts: openAlertsTab,
             automaticLocalAlertsEnabled: _automaticLocalAlertsEnabled,
@@ -2251,6 +2273,13 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
               onOpenMovements: () => openMorePage(
                 'Historial de movimientos',
                 (_) => buildMovementsTab(),
+              ),
+              onOpenPriceSettings: () => openMorePage(
+                'Actualización de precios',
+                (VoidCallback refresh) => buildSettingsTab(
+                  refresh: refresh,
+                  view: SettingsView.prices,
+                ),
               ),
               onOpenThemeSettings: () => openMorePage(
                 'Tema',
@@ -5921,6 +5950,7 @@ class MoreTab extends StatelessWidget {
   final int chartDataCount;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
+  final VoidCallback onOpenPriceSettings;
   final VoidCallback onOpenThemeSettings;
   final VoidCallback onOpenPortfolioSettings;
   final VoidCallback onOpenAlerts;
@@ -5957,6 +5987,7 @@ class MoreTab extends StatelessWidget {
     required this.chartDataCount,
     required this.onOpenCharts,
     required this.onOpenMovements,
+    required this.onOpenPriceSettings,
     required this.onOpenThemeSettings,
     required this.onOpenPortfolioSettings,
     required this.onOpenAlerts,
@@ -6051,6 +6082,17 @@ class MoreTab extends StatelessWidget {
               title: 'Tema',
               subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
               onTap: onOpenThemeSettings,
+            ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Precios',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.sync_outlined,
+              title: 'Actualización de precios',
+              subtitle: 'Apertura, movimientos e intervalo en pantalla',
+              onTap: onOpenPriceSettings,
             ),
           ],
         ),
@@ -6834,7 +6876,7 @@ class _CommandActionSheet extends StatelessWidget {
   }
 }
 
-enum SettingsView { all, theme, portfolio }
+enum SettingsView { all, theme, portfolio, prices }
 
 class SettingsTab extends StatelessWidget {
   final SettingsView view;
@@ -6844,6 +6886,9 @@ class SettingsTab extends StatelessWidget {
   final PositionSortMode positionSortMode;
   final SnapshotAutomationMode snapshotAutomationMode;
   final SnapshotRetention snapshotRetention;
+  final bool refreshPricesOnOpen;
+  final bool refreshPricesAfterMovement;
+  final PriceRefreshForegroundMode priceRefreshForegroundMode;
   final double sellFeePercent;
   final int snapshotCount;
   final bool automaticLocalAlertsEnabled;
@@ -6855,6 +6900,9 @@ class SettingsTab extends StatelessWidget {
   final ValueChanged<PositionSortMode> onPositionSortModeChanged;
   final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
   final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
+  final ValueChanged<bool> onRefreshPricesOnOpenChanged;
+  final ValueChanged<bool> onRefreshPricesAfterMovementChanged;
+  final ValueChanged<PriceRefreshForegroundMode> onPriceRefreshForegroundModeChanged;
   final VoidCallback onEditSellFee;
   final VoidCallback onOpenAlerts;
   final ValueChanged<bool> onAutomaticLocalAlertsChanged;
@@ -6875,6 +6923,9 @@ class SettingsTab extends StatelessWidget {
     required this.positionSortMode,
     required this.snapshotAutomationMode,
     required this.snapshotRetention,
+    required this.refreshPricesOnOpen,
+    required this.refreshPricesAfterMovement,
+    required this.priceRefreshForegroundMode,
     required this.sellFeePercent,
     required this.snapshotCount,
     required this.automaticLocalAlertsEnabled,
@@ -6886,6 +6937,9 @@ class SettingsTab extends StatelessWidget {
     required this.onPositionSortModeChanged,
     required this.onSnapshotAutomationModeChanged,
     required this.onSnapshotRetentionChanged,
+    required this.onRefreshPricesOnOpenChanged,
+    required this.onRefreshPricesAfterMovementChanged,
+    required this.onPriceRefreshForegroundModeChanged,
     required this.onEditSellFee,
     required this.onOpenAlerts,
     required this.onAutomaticLocalAlertsChanged,
@@ -6904,6 +6958,8 @@ class SettingsTab extends StatelessWidget {
         view == SettingsView.all || view == SettingsView.theme;
     final bool showPortfolio =
         view == SettingsView.all || view == SettingsView.portfolio;
+    final bool showPrices =
+        view == SettingsView.all || view == SettingsView.prices;
     final bool showAdvanced = view == SettingsView.all;
 
     return ListView(
@@ -7009,6 +7065,50 @@ class SettingsTab extends StatelessWidget {
               onPressed: onEditSellFee,
               child: const Text('Editar comisión'),
             ),
+          ),
+          ),
+        if (showPrices)
+          CardPanel(
+            title: 'Precios',
+          subtitle: 'Preferencias de actualización de precios.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              SwitchListTile(
+                dense: true,
+                value: refreshPricesOnOpen,
+                onChanged: onRefreshPricesOnOpenChanged,
+                title: const Text('Actualizar al abrir app'),
+                contentPadding: EdgeInsets.zero,
+              ),
+              SwitchListTile(
+                dense: true,
+                value: refreshPricesAfterMovement,
+                onChanged: onRefreshPricesAfterMovementChanged,
+                title: const Text('Actualizar después de registrar movimiento'),
+                contentPadding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Actualización mientras la app está abierta:',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: PriceRefreshForegroundMode.values.map(
+                  (PriceRefreshForegroundMode option) {
+                    return ChoiceChip(
+                      selected: priceRefreshForegroundMode == option,
+                      label: Text(option.label),
+                      onSelected: (_) =>
+                          onPriceRefreshForegroundModeChanged(option),
+                    );
+                  },
+                ).toList(),
+              ),
+            ],
           ),
         ),
         if (showAdvanced)
@@ -8137,6 +8237,16 @@ enum PriceRefreshForegroundMode {
   everyMinute,
   every15Minutes,
   daily,
+}
+
+extension PriceRefreshForegroundModeLabel on PriceRefreshForegroundMode {
+  String get label => switch (this) {
+        PriceRefreshForegroundMode.manual => 'Manual',
+        PriceRefreshForegroundMode.every25Seconds => '25 s',
+        PriceRefreshForegroundMode.everyMinute => '1 min',
+        PriceRefreshForegroundMode.every15Minutes => '15 min',
+        PriceRefreshForegroundMode.daily => 'Diario',
+      };
 }
 
 PriceRefreshForegroundMode priceRefreshForegroundModeFromName(String? value) {
