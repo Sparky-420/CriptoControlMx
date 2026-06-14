@@ -3223,10 +3223,14 @@ class _MovementsTabState extends State<MovementsTab> {
         ),
         const SizedBox(height: 12),
         if (filtered.isEmpty)
-          const EmptyState(
+          EmptyState(
             icon: Icons.receipt_long_outlined,
-            title: 'Sin movimientos',
-            subtitle: 'No hay registros con esos filtros.',
+            title: widget.movements.isEmpty
+                ? 'No hay movimientos cargados'
+                : 'No hay resultados para este filtro',
+            subtitle: widget.movements.isEmpty
+                ? 'Agrega tu primer movimiento para empezar el historial.'
+                : 'Ajusta los filtros o limpia la búsqueda para ver movimientos.',
           )
         else
           ...filtered.map(
