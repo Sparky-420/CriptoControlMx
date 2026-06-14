@@ -38,6 +38,11 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   static const String _positionSortKey = 'position_sort_v26';
   static const String _snapshotModeKey = 'snapshot_mode_v26';
   static const String _snapshotRetentionKey = 'snapshot_retention_v26';
+  static const String _priceRefreshOnOpenKey = 'price_refresh_on_open_v1';
+  static const String _priceRefreshAfterMovementKey =
+      'price_refresh_after_movement_v1';
+  static const String _priceRefreshForegroundModeKey =
+      'price_refresh_foreground_mode_v1';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -61,6 +66,10 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   SnapshotAutomationMode _snapshotAutomationMode =
       SnapshotAutomationMode.manual;
   SnapshotRetention _snapshotRetention = SnapshotRetention.last30;
+  bool _refreshPricesOnOpen = true;
+  bool _refreshPricesAfterMovement = false;
+  PriceRefreshForegroundMode _priceRefreshForegroundMode =
+      PriceRefreshForegroundMode.manual;
   SimulationMode _requestedSimulationMode = SimulationMode.operation;
   int _simulationOpenNonce = 0;
   DateTime? _pricesUpdatedAt;
@@ -156,6 +165,12 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     );
     _snapshotRetention = snapshotRetentionFromName(
       prefs.getString(_snapshotRetentionKey),
+    );
+    _refreshPricesOnOpen = prefs.getBool(_priceRefreshOnOpenKey) ?? true;
+    _refreshPricesAfterMovement =
+        prefs.getBool(_priceRefreshAfterMovementKey) ?? false;
+    _priceRefreshForegroundMode = priceRefreshForegroundModeFromName(
+      prefs.getString(_priceRefreshForegroundModeKey),
     );
     await _loadPriceAlertSettings(prefs);
 
@@ -528,6 +543,15 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     await prefs.setString(_positionSortKey, _positionSortMode.name);
     await prefs.setString(_snapshotModeKey, _snapshotAutomationMode.name);
     await prefs.setString(_snapshotRetentionKey, _snapshotRetention.name);
+    await prefs.setBool(_priceRefreshOnOpenKey, _refreshPricesOnOpen);
+    await prefs.setBool(
+      _priceRefreshAfterMovementKey,
+      _refreshPricesAfterMovement,
+    );
+    await prefs.setString(
+      _priceRefreshForegroundModeKey,
+      _priceRefreshForegroundMode.name,
+    );
     await prefs.setBool(_darkModeKey, _visualMode == AppVisualMode.dark);
   }
 
@@ -8105,6 +8129,22 @@ AppVisualMode appVisualModeFromName(String? value) {
     if (mode.name == value) return mode;
   }
   return AppVisualMode.system;
+}
+
+enum PriceRefreshForegroundMode {
+  manual,
+  every25Seconds,
+  everyMinute,
+  every15Minutes,
+  daily,
+}
+
+PriceRefreshForegroundMode priceRefreshForegroundModeFromName(String? value) {
+  for (final PriceRefreshForegroundMode mode
+      in PriceRefreshForegroundMode.values) {
+    if (mode.name == value) return mode;
+  }
+  return PriceRefreshForegroundMode.manual;
 }
 
 class AppPalette {
