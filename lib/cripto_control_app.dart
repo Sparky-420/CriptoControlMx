@@ -17,6 +17,36 @@ import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
 
+class CryptoAssetMetadata {
+  const CryptoAssetMetadata({
+    required this.symbol,
+    required this.name,
+    required this.coingeckoId,
+    required this.hasLocalIcon,
+    required this.isActive,
+  });
+
+  final String symbol;
+  final String name;
+  final String coingeckoId;
+  final bool hasLocalIcon;
+  final bool isActive;
+}
+
+const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
+    <String, CryptoAssetMetadata>{
+      'BTC': CryptoAssetMetadata(symbol: 'BTC', name: 'Bitcoin', coingeckoId: 'bitcoin', hasLocalIcon: true, isActive: true),
+      'ETH': CryptoAssetMetadata(symbol: 'ETH', name: 'Ethereum', coingeckoId: 'ethereum', hasLocalIcon: true, isActive: true),
+      'LINK': CryptoAssetMetadata(symbol: 'LINK', name: 'Chainlink', coingeckoId: 'chainlink', hasLocalIcon: true, isActive: true),
+      'LTC': CryptoAssetMetadata(symbol: 'LTC', name: 'Litecoin', coingeckoId: 'litecoin', hasLocalIcon: true, isActive: true),
+      'UNI': CryptoAssetMetadata(symbol: 'UNI', name: 'Uniswap', coingeckoId: 'uniswap', hasLocalIcon: true, isActive: true),
+      'USDT': CryptoAssetMetadata(symbol: 'USDT', name: 'Tether', coingeckoId: 'tether', hasLocalIcon: false, isActive: false),
+      'USDC': CryptoAssetMetadata(symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', hasLocalIcon: false, isActive: false),
+      'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: false, isActive: false),
+      'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: false, isActive: false),
+      'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: false, isActive: false),
+    };
+
 class CriptoControlApp extends StatefulWidget {
   const CriptoControlApp({super.key});
 
