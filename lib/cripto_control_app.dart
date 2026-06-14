@@ -3267,20 +3267,29 @@ class _MovementsTabState extends State<MovementsTab> {
                       ),
                     ],
               ),
-              child: Column(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  InfoLine('Cantidad', crypto(m.quantity)),
-                  InfoLine('Precio', money(m.unitPrice)),
-                  InfoLine('Comisión', money(m.fee)),
-                  InfoLine(
-                    'Total',
-                    money(m.quantity * m.unitPrice),
-                    emphasized: true,
+                  CoinLogo(coin: m.coin, size: 40),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      children: <Widget>[
+                        InfoLine('Cantidad', crypto(m.quantity)),
+                        InfoLine('Precio', money(m.unitPrice)),
+                        InfoLine('Comisión', money(m.fee)),
+                        InfoLine(
+                          'Total',
+                          money(m.quantity * m.unitPrice),
+                          emphasized: true,
+                        ),
+                        if (m.source.isNotEmpty) InfoLine('Plataforma', m.source),
+                        if (m.wallet.isNotEmpty) InfoLine('Cartera', m.wallet),
+                        if (m.network.isNotEmpty) InfoLine('Red', m.network),
+                        if (m.note.isNotEmpty) InfoLine('Nota', m.note),
+                      ],
+                    ),
                   ),
-                  if (m.source.isNotEmpty) InfoLine('Plataforma', m.source),
-                  if (m.wallet.isNotEmpty) InfoLine('Cartera', m.wallet),
-                  if (m.network.isNotEmpty) InfoLine('Red', m.network),
-                  if (m.note.isNotEmpty) InfoLine('Nota', m.note),
                 ],
               ),
             ),
