@@ -5024,7 +5024,7 @@ class PremiumCoinCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        hasPosition ? 'Posición abierta' : 'Sin posición',
+                        hasPosition ? 'Posición abierta' : 'Sin posición activa',
                         style: Theme.of(context).textTheme.labelLarge
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
@@ -5062,7 +5062,7 @@ class PremiumCoinCard extends StatelessWidget {
                 StatusPill(
                   label: hasPosition
                       ? (recovered ? 'Arriba del equilibrio' : 'Vigilar')
-                      : 'Limpia',
+                      : 'Sin posición',
                   positive: !hasPosition || recovered,
                 ),
                 const Spacer(),
@@ -5418,7 +5418,7 @@ class _AlertsTabState extends State<AlertsTab> {
               if (coinsToShow.isEmpty)
                 const EmptyState(
                   icon: Icons.account_balance_wallet_outlined,
-                  title: 'Sin posiciones abiertas',
+                  title: 'No tienes posiciones para recuperación',
                   subtitle: 'Activa el switch para ver monedas sin posición.',
                 )
               else
@@ -5529,7 +5529,7 @@ class RecoveryAlertCoinRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool hasPosition = position.hasPosition;
-    final String pnlText = hasPosition ? pct(position.pnlPercent) : 'Sin posición';
+    final String pnlText = hasPosition ? pct(position.pnlPercent) : 'Sin posición activa';
     final String referenceText = referencePnlPercent == null
         ? 'Sin ref'
         : pct(referencePnlPercent!);
@@ -5570,7 +5570,7 @@ class RecoveryAlertCoinRow extends StatelessWidget {
             children: <Widget>[
               MiniMetric(
                 label: 'P&L no realizado',
-                value: hasPosition ? money(position.unrealizedPnl) : 'Sin posición',
+                value: hasPosition ? money(position.unrealizedPnl) : 'Sin posición activa',
                 color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
               ),
               MiniMetric(label: 'Referencia', value: referenceText),
@@ -5918,7 +5918,7 @@ class ChartsTab extends StatelessWidget {
           child: active.isEmpty
               ? const EmptyState(
                   icon: Icons.pie_chart_outline,
-                  title: 'Sin datos para graficar',
+                  title: 'Sin valor de cartera para graficar',
                   subtitle: 'Carga precios y movimientos para activar una '
                       'lectura visual premium.',
                 )
@@ -5940,7 +5940,7 @@ class ChartsTab extends StatelessWidget {
           title: 'P&L no realizado por moneda',
           subtitle: 'Barras semánticas: ganancias verdes, pérdidas rojas.',
           child: active.isEmpty
-              ? const Text('Sin posiciones abiertas.')
+              ? const Text('Sin valor de posiciones para graficar.')
               : Column(
                   children: active.map((CoinStats stat) {
                     final double maxAbs = active.fold<double>(
