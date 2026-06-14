@@ -384,13 +384,26 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Umbral de recuperación'),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Puntos porcentuales',
-            helperText: 'Predeterminado: 2.0',
-            border: OutlineInputBorder(),
+        content: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: math.min(
+                MediaQuery.of(dialogContext).viewInsets.bottom,
+                24.0,
+              ),
+            ),
+            child: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Puntos porcentuales',
+                helperText: 'Predeterminado: 2.0',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ),
         ),
         actions: <Widget>[
@@ -429,13 +442,26 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Umbral'),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Umbral %',
-            helperText: 'Predeterminado: 2.0',
-            border: OutlineInputBorder(),
+        content: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: math.min(
+                MediaQuery.of(dialogContext).viewInsets.bottom,
+                24.0,
+              ),
+            ),
+            child: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Umbral %',
+                helperText: 'Predeterminado: 2.0',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ),
         ),
         actions: <Widget>[
@@ -820,13 +846,26 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Comisión de salida'),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Porcentaje',
-            helperText: 'Ejemplo: 1.5',
-            border: OutlineInputBorder(),
+        content: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: math.min(
+                MediaQuery.of(dialogContext).viewInsets.bottom,
+                24.0,
+              ),
+            ),
+            child: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Porcentaje',
+                helperText: 'Ejemplo: 1.5',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ),
         ),
         actions: <Widget>[
@@ -859,12 +898,25 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: Text('Precio actual de $coin'),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Precio MXN',
-            border: OutlineInputBorder(),
+        content: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: math.min(
+                MediaQuery.of(dialogContext).viewInsets.bottom,
+                24.0,
+              ),
+            ),
+            child: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Precio MXN',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ),
         ),
         actions: <Widget>[
