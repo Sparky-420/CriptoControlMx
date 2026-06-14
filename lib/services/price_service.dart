@@ -9,6 +9,13 @@ class PriceService {
   static const String pricesKey = 'prices_json';
   static const String pricesUpdatedAtKey = 'prices_updated_at_ms';
   static const Duration cacheTtl = Duration(minutes: 10);
+  static const Map<String, String> futureCoinGeckoIds = <String, String>{
+    'USDT': 'tether',
+    'USDC': 'usd-coin',
+    'XRP': 'ripple',
+    'SOL': 'solana',
+    'ATOM': 'cosmos',
+  };
 
   static const Map<String, String> _coinIds = <String, String>{
     'BTC': 'bitcoin',

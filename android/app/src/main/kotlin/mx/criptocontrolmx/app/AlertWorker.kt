@@ -240,6 +240,13 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         const val notificationChannelId = "cripto_alerts"
         private const val sharedPreferencesName = "FlutterSharedPreferences"
         private val coins = listOf("BTC", "ETH", "LINK", "LTC", "UNI")
+        val futureCoinGeckoIds = mapOf(
+            "USDT" to "tether",
+            "USDC" to "usd-coin",
+            "XRP" to "ripple",
+            "SOL" to "solana",
+            "ATOM" to "cosmos",
+        )
         private const val automaticEnabledKey = "automatic_local_alerts_enabled"
         private const val priceEnabledKey = "price_alerts_enabled"
         private const val priceThresholdKey = "price_alert_threshold_percent"
