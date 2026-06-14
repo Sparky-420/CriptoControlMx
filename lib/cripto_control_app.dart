@@ -5800,10 +5800,10 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
               icon: Icons.show_chart_outlined,
               title: filtered.isEmpty
                   ? 'Sin instantáneas para graficar'
-                  : 'Hace falta otra instantánea',
+                  : 'Hace falta otro punto en este rango',
               subtitle: filtered.isEmpty
                   ? 'Guarda al menos dos instantáneas para ver una línea histórica.'
-                  : 'Con una sola instantánea se muestra el dato, pero se '
+                  : 'Con una sola instantánea en el rango se muestra el dato, pero se '
                       'necesita otra para conectar puntos.',
             )
           else ...<Widget>[
