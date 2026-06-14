@@ -2042,13 +2042,24 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Importar respaldo JSON'),
-        content: TextField(
-          controller: controller,
-          minLines: 8,
-          maxLines: 14,
-          decoration: const InputDecoration(
-            hintText: 'Pega aquí tu respaldo',
-            border: OutlineInputBorder(),
+        content: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: math.min(
+                MediaQuery.of(dialogContext).viewInsets.bottom,
+                24.0,
+              ),
+            ),
+            child: TextField(
+              controller: controller,
+              minLines: 8,
+              maxLines: 14,
+              decoration: const InputDecoration(
+                hintText: 'Pega aquí tu respaldo',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ),
         ),
         actions: <Widget>[
