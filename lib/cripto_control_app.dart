@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -23,7 +24,8 @@ class CriptoControlApp extends StatefulWidget {
   State<CriptoControlApp> createState() => _CriptoControlAppState();
 }
 
-class _CriptoControlAppState extends State<CriptoControlApp> {
+class _CriptoControlAppState extends State<CriptoControlApp>
+    with WidgetsBindingObserver {
   static const List<String> _coins = ['BTC', 'ETH', 'LINK', 'LTC', 'UNI'];
 
   static const String _movementsKey = 'movements_json';
@@ -48,6 +50,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
   final PriceService _priceService = PriceService();
   final PriceAlertService _priceAlertService = PriceAlertService();
+  Timer? _priceRefreshTimer;
 
   final Map<String, double> _currentPrices = <String, double>{
     'BTC': 0.0,
@@ -90,8 +93,25 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _priceAlertService.initialize();
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _cancelPriceRefreshTimer();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _restartPriceRefreshTimer();
+    } else {
+      _cancelPriceRefreshTimer();
+    }
   }
 
   Future<void> _loadData() async {
@@ -179,6 +199,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     await _captureAutomaticSnapshotIfNeeded(SnapshotTrigger.appOpen);
 
     await _refreshPricesIfNeeded(prefs);
+    if (mounted) _restartPriceRefreshTimer();
   }
 
   void _applyPriceCache(PriceCache cache) {
@@ -526,6 +547,49 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
     }
   }
 
+  Future<void> _refreshPricesSilently() async {
+    if (_isRefreshingPrices || !mounted) return;
+
+    setState(() => _isRefreshingPrices = true);
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final PriceCache priceCache = await _priceService.fetchAndCachePrices(
+        prefs,
+      );
+      if (!mounted) return;
+
+      _applyPriceCache(priceCache);
+      setState(() {});
+    } catch (_) {
+      // Foreground auto refresh is intentionally quiet.
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshingPrices = false);
+      }
+    }
+  }
+
+  bool get _isForeground {
+    final AppLifecycleState? state = WidgetsBinding.instance.lifecycleState;
+    return state == null || state == AppLifecycleState.resumed;
+  }
+
+  void _restartPriceRefreshTimer() {
+    _cancelPriceRefreshTimer();
+    final Duration? interval = _priceRefreshForegroundMode.interval;
+    if (interval == null || !_isForeground) return;
+
+    _priceRefreshTimer = Timer.periodic(interval, (_) {
+      if (!_isForeground || _isRefreshingPrices) return;
+      unawaited(_refreshPricesSilently());
+    });
+  }
+
+  void _cancelPriceRefreshTimer() {
+    _priceRefreshTimer?.cancel();
+    _priceRefreshTimer = null;
+  }
+
   Future<void> _saveData() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
 
@@ -734,6 +798,7 @@ class _CriptoControlAppState extends State<CriptoControlApp> {
   void _changePriceRefreshForegroundMode(PriceRefreshForegroundMode value) {
     setState(() => _priceRefreshForegroundMode = value);
     _saveData();
+    _restartPriceRefreshTimer();
   }
 
   void _openSimulationMode(SimulationMode mode) {
@@ -8246,6 +8311,14 @@ extension PriceRefreshForegroundModeLabel on PriceRefreshForegroundMode {
         PriceRefreshForegroundMode.everyMinute => '1 min',
         PriceRefreshForegroundMode.every15Minutes => '15 min',
         PriceRefreshForegroundMode.daily => 'Diario',
+      };
+
+  Duration? get interval => switch (this) {
+        PriceRefreshForegroundMode.manual => null,
+        PriceRefreshForegroundMode.every25Seconds => const Duration(seconds: 25),
+        PriceRefreshForegroundMode.everyMinute => const Duration(minutes: 1),
+        PriceRefreshForegroundMode.every15Minutes => const Duration(minutes: 15),
+        PriceRefreshForegroundMode.daily => const Duration(days: 1),
       };
 }
 
