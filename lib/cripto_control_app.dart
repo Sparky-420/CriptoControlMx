@@ -198,7 +198,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     await _captureAutomaticSnapshotIfNeeded(SnapshotTrigger.appOpen);
 
-    await _refreshPricesIfNeeded(prefs);
+    if (_refreshPricesOnOpen) {
+      await _refreshPricesIfNeeded(prefs);
+    }
     if (mounted) _restartPriceRefreshTimer();
   }
 
