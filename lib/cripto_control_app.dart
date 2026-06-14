@@ -40,11 +40,11 @@ const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
       'LINK': CryptoAssetMetadata(symbol: 'LINK', name: 'Chainlink', coingeckoId: 'chainlink', hasLocalIcon: true, isActive: true),
       'LTC': CryptoAssetMetadata(symbol: 'LTC', name: 'Litecoin', coingeckoId: 'litecoin', hasLocalIcon: true, isActive: true),
       'UNI': CryptoAssetMetadata(symbol: 'UNI', name: 'Uniswap', coingeckoId: 'uniswap', hasLocalIcon: true, isActive: true),
-      'USDT': CryptoAssetMetadata(symbol: 'USDT', name: 'Tether', coingeckoId: 'tether', hasLocalIcon: true, isActive: false),
-      'USDC': CryptoAssetMetadata(symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', hasLocalIcon: true, isActive: false),
-      'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: false),
-      'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: false),
-      'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: false),
+      'USDT': CryptoAssetMetadata(symbol: 'USDT', name: 'Tether', coingeckoId: 'tether', hasLocalIcon: true, isActive: true),
+      'USDC': CryptoAssetMetadata(symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', hasLocalIcon: true, isActive: true),
+      'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: true),
+      'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: true),
+      'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: true),
     };
 
 class CriptoControlApp extends StatefulWidget {
@@ -56,7 +56,18 @@ class CriptoControlApp extends StatefulWidget {
 
 class _CriptoControlAppState extends State<CriptoControlApp>
     with WidgetsBindingObserver {
-  static const List<String> _coins = ['BTC', 'ETH', 'LINK', 'LTC', 'UNI'];
+  static const List<String> _coins = [
+    'BTC',
+    'ETH',
+    'LINK',
+    'LTC',
+    'UNI',
+    'USDT',
+    'USDC',
+    'XRP',
+    'SOL',
+    'ATOM',
+  ];
 
   static const String _movementsKey = 'movements_json';
   static const String _pricesKey = PriceService.pricesKey;
@@ -88,6 +99,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     'LINK': 0.0,
     'LTC': 0.0,
     'UNI': 0.0,
+    'USDT': 0.0,
+    'USDC': 0.0,
+    'XRP': 0.0,
+    'SOL': 0.0,
+    'ATOM': 0.0,
   };
 
   int _currentIndex = 0;
