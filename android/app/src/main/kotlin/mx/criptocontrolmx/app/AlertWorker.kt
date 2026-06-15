@@ -172,7 +172,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
     }
 
     private fun fetchPrices(): Map<String, Double> {
-        val url = URL("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,chainlink,litecoin,uniswap&vs_currencies=mxn")
+        val url = URL("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,chainlink,litecoin,uniswap,tether,usd-coin,ripple,solana,cosmos&vs_currencies=mxn")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 10_000
@@ -189,6 +189,11 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
                 put("LINK", json.getJSONObject("chainlink").getDouble("mxn"))
                 put("LTC", json.getJSONObject("litecoin").getDouble("mxn"))
                 put("UNI", json.getJSONObject("uniswap").getDouble("mxn"))
+                put("USDT", json.getJSONObject("tether").getDouble("mxn"))
+                put("USDC", json.getJSONObject("usd-coin").getDouble("mxn"))
+                put("XRP", json.getJSONObject("ripple").getDouble("mxn"))
+                put("SOL", json.getJSONObject("solana").getDouble("mxn"))
+                put("ATOM", json.getJSONObject("cosmos").getDouble("mxn"))
             }
         } catch (_: Exception) {
             emptyMap()
@@ -239,7 +244,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
     companion object {
         const val notificationChannelId = "cripto_alerts"
         private const val sharedPreferencesName = "FlutterSharedPreferences"
-        private val coins = listOf("BTC", "ETH", "LINK", "LTC", "UNI")
+        private val coins = listOf("BTC", "ETH", "LINK", "LTC", "UNI", "USDT", "USDC", "XRP", "SOL", "ATOM")
         val futureCoinGeckoIds = mapOf(
             "USDT" to "tether",
             "USDC" to "usd-coin",
