@@ -45,6 +45,7 @@ const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
       'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: true),
       'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: true),
       'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: true),
+      'EURC': CryptoAssetMetadata(symbol: 'EURC', name: 'EURC', coingeckoId: 'eurc', hasLocalIcon: true, isActive: false),
     };
 
 class CriptoControlApp extends StatefulWidget {
@@ -2862,6 +2863,7 @@ class CoinLogo extends StatelessWidget {
     'XRP',
     'SOL',
     'ATOM',
+    'EURC',
   };
 
   @override
