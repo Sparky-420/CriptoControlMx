@@ -1564,6 +1564,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'settings': <String, double>{'sellFeePercent': _sellFeePercent},
       'currentPrices': _currentPrices,
       'movements': _movements.map((Movement m) => m.toJson()).toList(),
+      'snapshots': _snapshots.map((PortfolioSnapshot s) => s.toJson()).toList(),
     };
 
     return const JsonEncoder.withIndent('  ').convert(backup);
@@ -2104,8 +2105,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final dynamic movementsRaw = decoded['movements'];
     final dynamic pricesRaw = decoded['currentPrices'];
     final dynamic settingsRaw = decoded['settings'];
+    final bool hasSnapshots = decoded.containsKey('snapshots');
+    final dynamic snapshotsRaw = decoded['snapshots'];
 
-    if (movementsRaw is! List || pricesRaw is! Map) {
+    if (movementsRaw is! List ||
+        pricesRaw is! Map ||
+        (hasSnapshots && snapshotsRaw is! List)) {
       throw const FormatException();
     }
 
@@ -2115,6 +2120,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         )
         .toList();
     final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
+    final List<PortfolioSnapshot>? importedSnapshots = hasSnapshots
+        ? (snapshotsRaw as List)
+            .map(
+              (dynamic e) => PortfolioSnapshot.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList()
+        : null;
 
     setState(() {
       _movements
@@ -2128,9 +2142,24 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (settingsRaw is Map && settingsRaw['sellFeePercent'] is num) {
         _sellFeePercent = (settingsRaw['sellFeePercent'] as num).toDouble();
       }
+
+      if (importedSnapshots != null) {
+        _snapshots
+          ..clear()
+          ..addAll(importedSnapshots);
+        _snapshots.sort(
+          (PortfolioSnapshot a, PortfolioSnapshot b) =>
+              b.createdAt.compareTo(a.createdAt),
+        );
+        _enforceSnapshotRetention();
+      }
     });
 
-    await _saveData();
+    if (importedSnapshots == null) {
+      await _saveData();
+    } else {
+      await _saveSnapshots();
+    }
   }
 
   Future<void> _importBackup(BuildContext pageContext) async {
