@@ -251,6 +251,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             "XRP" to "ripple",
             "SOL" to "solana",
             "ATOM" to "cosmos",
+            "EURC" to "eurc",
         )
         private const val automaticEnabledKey = "automatic_local_alerts_enabled"
         private const val priceEnabledKey = "price_alerts_enabled"
