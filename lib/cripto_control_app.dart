@@ -45,7 +45,7 @@ const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
       'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: true),
       'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: true),
       'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: true),
-      'EURC': CryptoAssetMetadata(symbol: 'EURC', name: 'EURC', coingeckoId: 'eurc', hasLocalIcon: true, isActive: false),
+      'EURC': CryptoAssetMetadata(symbol: 'EURC', name: 'EURC', coingeckoId: 'eurc', hasLocalIcon: true, isActive: true),
     };
 
 class CriptoControlApp extends StatefulWidget {
@@ -68,6 +68,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     'XRP',
     'SOL',
     'ATOM',
+    'EURC',
   ];
 
   static const String _movementsKey = 'movements_json';
@@ -105,6 +106,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     'XRP': 0.0,
     'SOL': 0.0,
     'ATOM': 0.0,
+    'EURC': 0.0,
   };
 
   int _currentIndex = 0;
