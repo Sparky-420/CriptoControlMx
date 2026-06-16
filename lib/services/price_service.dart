@@ -63,7 +63,18 @@ class PriceService {
   }
 
   Future<PriceCache> fetchAndCachePrices(SharedPreferences prefs) async {
-    final Map<String, double> prices = await _fetchMxnPrices();
+    final PriceCache cached = await loadCachedPrices(prefs);
+    final Map<String, double> freshPrices = await _fetchMxnPrices();
+    if (freshPrices.isEmpty) {
+      throw const FormatException('No valid coin prices');
+    }
+
+    final Map<String, double> prices = Map<String, double>.from(cached.prices)
+      ..addAll(freshPrices);
+    for (final String coin in _coinIds.keys) {
+      prices.putIfAbsent(coin, () => 0.0);
+    }
+
     final DateTime updatedAt = DateTime.now();
 
     await prefs.setString(pricesKey, jsonEncode(prices));
@@ -115,20 +126,20 @@ class PriceService {
       final Map<String, dynamic> decoded = Map<String, dynamic>.from(
         jsonDecode(body) as Map,
       );
-      final Map<String, double> prices = _emptyPrices();
+      final Map<String, double> prices = <String, double>{};
 
       for (final MapEntry<String, String> entry in _coinIds.entries) {
         final dynamic coinData = decoded[entry.value];
-        if (coinData is! Map) {
-          throw const FormatException('Missing coin price');
-        }
+        if (coinData is! Map) continue;
 
         final dynamic mxn = Map<String, dynamic>.from(coinData)['mxn'];
-        if (mxn is! num) {
-          throw const FormatException('Missing MXN price');
-        }
+        if (mxn is! num) continue;
 
         prices[entry.key] = mxn.toDouble();
+      }
+
+      if (prices.isEmpty) {
+        throw const FormatException('No valid coin prices');
       }
 
       return prices;
