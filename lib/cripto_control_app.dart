@@ -6479,6 +6479,13 @@ class MoreTab extends StatelessWidget {
           title: 'Herramientas',
           children: <Widget>[
             _CommandCard(
+              icon: Icons.info_outline,
+              title: 'Acerca de CriptoControlMx',
+              subtitle: 'Información, privacidad local y aviso financiero.',
+              badge: 'Local',
+              onTap: () => _showAboutApp(context),
+            ),
+            _CommandCard(
               icon: Icons.health_and_safety_outlined,
               title: 'Diagnóstico',
               subtitle: 'Datos locales, instantáneas y fuente de precios',
@@ -6825,6 +6832,61 @@ class MoreTab extends StatelessWidget {
                 onPressed: onResetPriceAlertReferences,
                 icon: const Icon(Icons.restart_alt_outlined),
                 label: const Text('Reiniciar referencias de alertas'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAboutApp(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewPaddingOf(context).bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Acerca de CriptoControlMx',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'CriptoControlMx es una herramienta local para registrar movimientos, revisar cartera, consultar precios, generar instantáneas y exportar reportes.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 20),
+              InfoLine('Estado', 'Fase 1'),
+              InfoLine('Datos', 'Guardados localmente en este dispositivo'),
+              InfoLine('Fuente de precios', 'CoinGecko'),
+              InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
+              InfoLine('Respaldo', 'Importación y exportación JSON disponibles'),
+              InfoLine('Aviso', 'No es asesoría financiera'),
+              const SizedBox(height: 12),
+              Text(
+                'Las cifras dependen de los movimientos registrados, precios disponibles y comisiones configuradas.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Esta app no sustituye análisis financiero profesional ni garantiza rendimientos.',
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
           ),
