@@ -6643,23 +6643,36 @@ class MoreTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Diagnóstico',
+                'Estado del sistema',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                'Resumen local de cartera, precios, instantáneas y alertas.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(height: 12),
-              InfoLine('Total de movimientos', movementCount.toString()),
-              InfoLine('Total de instantáneas', snapshotCount.toString()),
+              Text('Actividad local', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              InfoLine('Movimientos totales', movementCount.toString()),
+              InfoLine('Instantáneas guardadas', snapshotCount.toString()),
               InfoLine(
-                'Última instantánea',
+                'Última instantánea guardada',
                 latestSnapshot == null ? 'Sin instantáneas' : longDate(latestSnapshot!),
               ),
-              InfoLine('Última actualización de precios', priceUpdatedLabel(pricesUpdatedAt)),
+              const Divider(height: 20),
+              Text('Precios', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
               InfoLine('Monedas activas', activeCoins.toString()),
-              InfoLine('Errores detectados', financialErrors.length.toString()),
-              InfoLine('Estado de JSON', 'Local compatible'),
               InfoLine('Fuente de precios', _priceSource),
+              const Divider(height: 20),
+              Text('Salud', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              InfoLine('Errores detectados', financialErrors.length.toString()),
+              InfoLine('Respaldo JSON', 'Local compatible'),
               if (financialErrors.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
                 ...financialErrors.take(6).map(
