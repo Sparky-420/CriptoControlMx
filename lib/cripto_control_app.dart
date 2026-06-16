@@ -2507,6 +2507,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               financialErrors: _financialDiagnostics(),
               snapshotAutomationMode: _snapshotAutomationMode,
               snapshotRetention: _snapshotRetention,
+              pricesAvailableCount: _coins
+                  .where((String coin) => (_currentPrices[coin] ?? 0.0) > 0.0)
+                  .length,
+              pricesTotalCount: _coins.length,
+              missingPriceCoins: _coins
+                  .where((String coin) => (_currentPrices[coin] ?? 0.0) <= 0.0)
+                  .toList(),
               refreshPricesOnOpen: _refreshPricesOnOpen,
               refreshPricesAfterMovement: _refreshPricesAfterMovement,
               priceRefreshForegroundMode: _priceRefreshForegroundMode,
@@ -6233,6 +6240,9 @@ class MoreTab extends StatelessWidget {
   final List<String> financialErrors;
   final SnapshotAutomationMode snapshotAutomationMode;
   final SnapshotRetention snapshotRetention;
+  final int pricesAvailableCount;
+  final int pricesTotalCount;
+  final List<String> missingPriceCoins;
   final bool refreshPricesOnOpen;
   final bool refreshPricesAfterMovement;
   final PriceRefreshForegroundMode priceRefreshForegroundMode;
@@ -6277,6 +6287,9 @@ class MoreTab extends StatelessWidget {
     required this.financialErrors,
     required this.snapshotAutomationMode,
     required this.snapshotRetention,
+    required this.pricesAvailableCount,
+    required this.pricesTotalCount,
+    required this.missingPriceCoins,
     required this.refreshPricesOnOpen,
     required this.refreshPricesAfterMovement,
     required this.priceRefreshForegroundMode,
@@ -6715,7 +6728,20 @@ class MoreTab extends StatelessWidget {
               Text('Precios', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
-              InfoLine('Estado de precios', isRefreshingPrices ? 'Actualizando' : 'En reposo'),
+              InfoLine('Precios disponibles', '$pricesAvailableCount/$pricesTotalCount'),
+              InfoLine(
+                'Sin precio',
+                missingPriceCoins.isEmpty ? 'Ninguna' : missingPriceCoins.join(', '),
+              ),
+              InfoLine(
+                'Estado de precios',
+                pricesAvailableCount == 0
+                    ? 'Sin precios'
+                    : pricesAvailableCount == pricesTotalCount
+                        ? 'Completo'
+                        : 'Parcial',
+              ),
+              InfoLine('Estado de actualización', isRefreshingPrices ? 'Actualizando' : 'En reposo'),
               InfoLine('Al abrir app', refreshPricesOnOpen ? 'Activado' : 'Desactivado'),
               InfoLine('Después de movimiento', refreshPricesAfterMovement ? 'Activado' : 'Desactivado'),
               InfoLine('En pantalla', priceRefreshForegroundMode.label),
