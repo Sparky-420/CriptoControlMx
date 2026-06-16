@@ -2444,6 +2444,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               positionSortMode: _positionSortMode,
               latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first,
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
+              onAddMovement: () => _showAddMovementSheet(pageContext),
+              onImportBackup: () => _importBackup(pageContext),
+              onRefreshPrices: () => _refreshPricesNow(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onViewSnapshotEvolution: () =>
@@ -2641,6 +2644,9 @@ class SummaryTab extends StatelessWidget {
   final PositionSortMode positionSortMode;
   final PortfolioSnapshot? latestSnapshot;
   final void Function(CoinStats stats) onDetails;
+  final VoidCallback onAddMovement;
+  final VoidCallback onImportBackup;
+  final VoidCallback onRefreshPrices;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final VoidCallback onViewSnapshotEvolution;
@@ -2655,6 +2661,9 @@ class SummaryTab extends StatelessWidget {
     required this.positionSortMode,
     required this.latestSnapshot,
     required this.onDetails,
+    required this.onAddMovement,
+    required this.onImportBackup,
+    required this.onRefreshPrices,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onViewSnapshotEvolution,
@@ -2764,6 +2773,52 @@ class SummaryTab extends StatelessWidget {
             ),
           ],
         ),
+        if (!hasMovements)
+          CardPanel(
+            title: 'Bienvenido a CriptoControlMx',
+            subtitle:
+                'Empieza con tu primer movimiento o importa un respaldo JSON. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Icon(Icons.tips_and_updates_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '1. Registra una compra, venta, entrada o salida.\n2. Actualiza precios para valorar tu cartera.\n3. Guarda instantáneas para construir historial y gráficas.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    FilledButton.icon(
+                      onPressed: onAddMovement,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Agregar movimiento'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onImportBackup,
+                      icon: const Icon(Icons.upload_file_outlined),
+                      label: const Text('Importar respaldo'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onRefreshPrices,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Actualizar precios'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         const SizedBox(height: 18),
         LatestSnapshotCard(
           snapshot: latestSnapshot,
