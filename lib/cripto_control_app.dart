@@ -7804,7 +7804,18 @@ class SnapshotLineChartPainter extends CustomPainter {
         ((value - minValue) / (maxValue - minValue)).clamp(0.0, 1.0) *
             chart.height;
 
-    for (final SnapshotChartSeries item in series) {
+    if (includeZero && minValue < 0 && maxValue > 0) {
+      canvas.drawLine(
+        Offset(chart.left, yFor(0)),
+        Offset(chart.right, yFor(0)),
+        Paint()
+          ..color = axisColor.withValues(alpha: 0.9)
+          ..strokeWidth = 1.5,
+      );
+    }
+
+    for (int seriesIndex = 0; seriesIndex < series.length; seriesIndex++) {
+      final SnapshotChartSeries item = series[seriesIndex];
       if (item.values.length != pointCount) continue;
 
       final Path path = Path();
@@ -7829,6 +7840,21 @@ class SnapshotLineChartPainter extends CustomPainter {
       for (int i = 0; i < pointCount; i++) {
         canvas.drawCircle(Offset(xFor(i), yFor(item.values[i])), 3.5, dotPaint);
       }
+
+      final Offset lastPoint = Offset(xFor(pointCount - 1), yFor(item.values.last));
+      canvas.drawCircle(
+        lastPoint,
+        7.0,
+        Paint()..color = item.color.withValues(alpha: 0.16),
+      );
+      canvas.drawCircle(lastPoint, 4.8, dotPaint);
+      _drawValueTag(
+        canvas,
+        item.valueFormatter?.call(item.values.last) ?? moneyShort(item.values.last),
+        lastPoint.translate(10, -12 - (seriesIndex * 16.0)),
+        chart,
+        item.color,
+      );
     }
 
     _drawLabel(
@@ -7855,6 +7881,57 @@ class SnapshotLineChartPainter extends CustomPainter {
       maxLines: 1,
     )..layout(maxWidth: 90);
     painter.paint(canvas, offset);
+  }
+
+  void _drawValueTag(
+    Canvas canvas,
+    String text,
+    Offset anchor,
+    Rect chart,
+    Color color,
+  ) {
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: labelColor,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: math.min(120, chart.width * 0.45));
+    const double padX = 6;
+    const double padY = 4;
+    double x = anchor.dx;
+    double y = anchor.dy;
+    if (x + painter.width + padX * 2 > chart.right) {
+      x = anchor.dx - painter.width - padX * 2 - 20;
+    }
+    if (x < chart.left) x = chart.left + 4;
+    if (y < chart.top) y = anchor.dy + 14;
+    if (y + painter.height + padY * 2 > chart.bottom) {
+      y = chart.bottom - painter.height - padY * 2 - 4;
+    }
+    final Rect background = Rect.fromLTWH(
+      x,
+      y,
+      painter.width + padX * 2,
+      painter.height + padY * 2,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(background, const Radius.circular(6)),
+      Paint()..color = color.withValues(alpha: 0.14),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(background, const Radius.circular(6)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = color.withValues(alpha: 0.45),
+    );
+    painter.paint(canvas, Offset(x + padX, y + padY));
   }
 
   @override
