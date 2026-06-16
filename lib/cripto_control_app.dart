@@ -5887,7 +5887,17 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
               if (value != null) setState(() => _metric = value);
             },
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
+          Text(
+            'Lectura histórica',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'La línea aparece con 2 o más instantáneas.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
           if (filtered.length < 2)
             EmptyState(
               icon: Icons.show_chart_outlined,
@@ -5984,7 +5994,7 @@ class ChartsTab extends StatelessWidget {
         const Text(
           'Vista histórica sobre instantáneas guardadas. Ajusta rango y métrica para leer una serie a la vez.',
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         AnalyticsControlPanel(snapshots: snapshots),
         const SizedBox(height: 12),
         _CommandSection(
@@ -7566,6 +7576,16 @@ class SnapshotTrendPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          Text(
+            'Vista comparativa',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Las leyendas agrupan las series activas del histórico.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
           if (ordered.length >= 2) ...<Widget>[
             SnapshotLineChart(
               snapshots: ordered,
@@ -7627,6 +7647,8 @@ class SnapshotTrendPanel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+            const Divider(height: 20),
+            const SizedBox(height: 4),
           ],
           if (ordered.length >= 2) ...<Widget>[
             Wrap(
