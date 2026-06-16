@@ -5852,8 +5852,8 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
         : latestValue - firstValue;
 
     return CardPanel(
-      title: 'Evolución por instantáneas',
-      subtitle: 'Filtro temporal y métrica principal con línea y puntos.',
+      title: 'Evolución histórica',
+      subtitle: 'El rango filtra instantáneas y la métrica define la serie visible.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -5872,7 +5872,7 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
           DropdownButtonFormField<SnapshotMetric>(
             value: _metric,
             decoration: const InputDecoration(
-              labelText: 'Métrica',
+              labelText: 'Métrica principal',
               border: OutlineInputBorder(),
             ),
             items: SnapshotMetric.values
@@ -5892,12 +5892,11 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
             EmptyState(
               icon: Icons.show_chart_outlined,
               title: filtered.isEmpty
-                  ? 'Sin instantáneas para graficar'
-                  : 'Hace falta otro punto en este rango',
+                  ? 'Sin instantáneas para esta métrica'
+                  : 'Solo hay un punto en este rango',
               subtitle: filtered.isEmpty
-                  ? 'Guarda al menos dos instantáneas para ver una línea histórica.'
-                  : 'Con una sola instantánea en el rango se muestra el dato, pero se '
-                      'necesita otra para conectar puntos.',
+                  ? 'Guarda al menos dos instantáneas para dibujar la línea histórica.'
+                  : 'Con una sola instantánea solo verás el valor actual; hace falta otra para trazar tendencia.',
             )
           else ...<Widget>[
             SnapshotLineChart(
@@ -5976,14 +5975,14 @@ class ChartsTab extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: <Widget>[
         Text(
-          'Gráficas',
+          'Gráficas premium',
           style: Theme.of(
             context,
           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         const Text(
-          'Analítica limpia con filtros de tiempo, métricas semánticas e instantáneas.',
+          'Lecturas históricas sobre instantáneas, con un rango temporal y una métrica principal a la vez.',
         ),
         const SizedBox(height: 12),
         AnalyticsControlPanel(snapshots: snapshots),
@@ -7559,7 +7558,7 @@ class SnapshotTrendPanel extends StatelessWidget {
     final double plChange = latest.totalUnrealizedPL - first.totalUnrealizedPL;
 
     return CardPanel(
-      title: 'Evolución por instantáneas',
+      title: 'Evolución histórica',
       subtitle: ordered.length < 2
           ? 'Guarda otra instantánea para ver líneas comparativas.'
           : '${ordered.length} instantáneas entre '
