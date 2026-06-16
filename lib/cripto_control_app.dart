@@ -5853,7 +5853,7 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
 
     return CardPanel(
       title: 'Evolución histórica',
-      subtitle: 'El rango filtra instantáneas y la métrica define la serie visible.',
+      subtitle: 'Filtra instantáneas por rango y elige la métrica que quieres leer.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -5872,7 +5872,7 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
           DropdownButtonFormField<SnapshotMetric>(
             value: _metric,
             decoration: const InputDecoration(
-              labelText: 'Métrica principal',
+              labelText: 'Métrica a mostrar',
               border: OutlineInputBorder(),
             ),
             items: SnapshotMetric.values
@@ -5892,11 +5892,11 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
             EmptyState(
               icon: Icons.show_chart_outlined,
               title: filtered.isEmpty
-                  ? 'Sin instantáneas para esta métrica'
+                  ? 'Sin instantáneas en este rango'
                   : 'Solo hay un punto en este rango',
               subtitle: filtered.isEmpty
-                  ? 'Guarda al menos dos instantáneas para dibujar la línea histórica.'
-                  : 'Con una sola instantánea solo verás el valor actual; hace falta otra para trazar tendencia.',
+                  ? 'Guarda al menos dos instantáneas para dibujar una línea histórica.'
+                  : 'Con una sola instantánea solo verás una lectura; agrega otra para trazar la tendencia.',
             )
           else ...<Widget>[
             SnapshotLineChart(
@@ -5982,7 +5982,7 @@ class ChartsTab extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Lecturas históricas sobre instantáneas, con un rango temporal y una métrica principal a la vez.',
+          'Vista histórica sobre instantáneas guardadas. Ajusta rango y métrica para leer una serie a la vez.',
         ),
         const SizedBox(height: 12),
         AnalyticsControlPanel(snapshots: snapshots),
@@ -6062,7 +6062,7 @@ class ChartsTab extends StatelessWidget {
         if (snapshots.isEmpty)
           CardPanel(
             title: 'Histórico de instantáneas',
-            subtitle: 'Aún no hay instantáneas guardadas. Crea una instantánea manual para iniciar el historial.',
+            subtitle: 'Aún no hay instantáneas guardadas. Crea una manual para comenzar el histórico.',
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -7560,7 +7560,7 @@ class SnapshotTrendPanel extends StatelessWidget {
     return CardPanel(
       title: 'Evolución histórica',
       subtitle: ordered.length < 2
-          ? 'Guarda otra instantánea para ver líneas comparativas.'
+          ? 'Necesitas otra instantánea para comparar la evolución.'
           : '${ordered.length} instantáneas entre '
               '${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
       child: Column(
@@ -7573,14 +7573,14 @@ class SnapshotTrendPanel extends StatelessWidget {
               includeZero: true,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
-                  label: 'Valor de cartera',
+                  label: 'Valor actual',
                   color: colors.primary,
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalCurrentValue)
                       .toList(),
                 ),
                 SnapshotChartSeries(
-                  label: 'Invertido',
+                  label: 'Capital invertido',
                   color: colors.tertiary,
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalCostBase)
@@ -7595,14 +7595,14 @@ class SnapshotTrendPanel extends StatelessWidget {
               includeZero: true,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
-                  label: 'P&L no realizado',
+                  label: 'P&L flotante',
                   color: pnlColor(latest.totalUnrealizedPL),
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalUnrealizedPL)
                       .toList(),
                 ),
                 SnapshotChartSeries(
-                  label: 'P&L realizado',
+                  label: 'P&L cerrado',
                   color: colors.secondary,
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalRealizedPL)
@@ -7633,14 +7633,14 @@ class SnapshotTrendPanel extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[
-                ChartLegendDot(label: 'Valor de cartera', color: colors.primary),
-                ChartLegendDot(label: 'Invertido', color: colors.tertiary),
+                ChartLegendDot(label: 'Valor actual', color: colors.primary),
+                ChartLegendDot(label: 'Capital invertido', color: colors.tertiary),
                 ChartLegendDot(
-                  label: 'P&L no realizado',
+                  label: 'P&L flotante',
                   color: pnlColor(latest.totalUnrealizedPL),
                 ),
                 ChartLegendDot(
-                  label: 'P&L realizado',
+                  label: 'P&L cerrado',
                   color: colors.secondary,
                 ),
                 const ChartLegendDot(
@@ -7651,13 +7651,13 @@ class SnapshotTrendPanel extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             InfoLine(
-              'Cambio en valor',
+              'Variación de cartera',
               money(valueChange),
               valueColor: pnlColor(valueChange),
               emphasized: true,
             ),
             InfoLine(
-              'Cambio en P&L no realizado',
+              'Variación de P&L flotante',
               money(plChange),
               valueColor: pnlColor(plChange),
             ),
