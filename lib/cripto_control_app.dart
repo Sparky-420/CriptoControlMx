@@ -2480,6 +2480,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               financialErrors: _financialDiagnostics(),
               snapshotAutomationMode: _snapshotAutomationMode,
               snapshotRetention: _snapshotRetention,
+              refreshPricesOnOpen: _refreshPricesOnOpen,
+              refreshPricesAfterMovement: _refreshPricesAfterMovement,
+              priceRefreshForegroundMode: _priceRefreshForegroundMode,
+              automaticLocalAlertsEnabled: _automaticLocalAlertsEnabled,
+              automaticLocalAlertsIntervalMinutes:
+                  _automaticLocalAlertsIntervalMinutes,
+              notificationsAllowed: _notificationsAllowed,
+              isRefreshingPrices: _isRefreshingPrices,
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
                   .length,
@@ -6198,6 +6206,13 @@ class MoreTab extends StatelessWidget {
   final List<String> financialErrors;
   final SnapshotAutomationMode snapshotAutomationMode;
   final SnapshotRetention snapshotRetention;
+  final bool refreshPricesOnOpen;
+  final bool refreshPricesAfterMovement;
+  final PriceRefreshForegroundMode priceRefreshForegroundMode;
+  final bool automaticLocalAlertsEnabled;
+  final int automaticLocalAlertsIntervalMinutes;
+  final bool notificationsAllowed;
+  final bool isRefreshingPrices;
   final int chartDataCount;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
@@ -6235,6 +6250,13 @@ class MoreTab extends StatelessWidget {
     required this.financialErrors,
     required this.snapshotAutomationMode,
     required this.snapshotRetention,
+    required this.refreshPricesOnOpen,
+    required this.refreshPricesAfterMovement,
+    required this.priceRefreshForegroundMode,
+    required this.automaticLocalAlertsEnabled,
+    required this.automaticLocalAlertsIntervalMinutes,
+    required this.notificationsAllowed,
+    required this.isRefreshingPrices,
     required this.chartDataCount,
     required this.onOpenCharts,
     required this.onOpenMovements,
@@ -6666,6 +6688,10 @@ class MoreTab extends StatelessWidget {
               Text('Precios', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
+              InfoLine('Estado de precios', isRefreshingPrices ? 'Actualizando' : 'En reposo'),
+              InfoLine('Al abrir app', refreshPricesOnOpen ? 'Activado' : 'Desactivado'),
+              InfoLine('Después de movimiento', refreshPricesAfterMovement ? 'Activado' : 'Desactivado'),
+              InfoLine('En pantalla', priceRefreshForegroundMode.label),
               InfoLine('Monedas activas', activeCoins.toString()),
               InfoLine('Fuente de precios', _priceSource),
               const Divider(height: 20),
@@ -6673,6 +6699,11 @@ class MoreTab extends StatelessWidget {
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
               InfoLine('Respaldo JSON', 'Local compatible'),
+              InfoLine('Alertas automáticas', automaticLocalAlertsEnabled ? 'Activadas' : 'Desactivadas'),
+              InfoLine('Intervalo de alertas', intervalLabel(automaticLocalAlertsIntervalMinutes)),
+              InfoLine('Permisos', notificationsAllowed ? 'Notificaciones permitidas' : 'Notificaciones no permitidas'),
+              InfoLine('Instantáneas automáticas', snapshotAutomationMode.label),
+              InfoLine('Retención de instantáneas', snapshotRetention.label),
               if (financialErrors.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
                 ...financialErrors.take(6).map(
