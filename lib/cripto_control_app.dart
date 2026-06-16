@@ -138,6 +138,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   double _recoveryAlertThresholdPoints =
       PriceAlertService.defaultRecoveryThresholdPoints;
   Map<String, double> _recoveryAlertReferences = <String, double>{};
+  bool _bootstrapped = false;
 
   @override
   void initState() {
@@ -164,93 +165,101 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<void> _loadData() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
 
-    final String? movementsRaw = prefs.getString(_movementsKey);
-    if (movementsRaw != null && movementsRaw.trim().isNotEmpty) {
-      try {
-        final dynamic decoded = jsonDecode(movementsRaw);
-        if (decoded is List) {
-          _movements
-            ..clear()
-            ..addAll(
-              decoded.map(
-                (dynamic e) =>
-                    Movement.fromJson(Map<String, dynamic>.from(e as Map)),
-              ),
-            );
-        }
-      } catch (_) {}
-    }
-
-    final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
-    _applyPriceCache(priceCache);
-
-    final String? snapshotsRaw = prefs.getString(_snapshotsKey);
-    if (snapshotsRaw != null && snapshotsRaw.trim().isNotEmpty) {
-      try {
-        final dynamic decoded = jsonDecode(snapshotsRaw);
-        if (decoded is List) {
-          _snapshots
-            ..clear()
-            ..addAll(
-              decoded.map(
-                (dynamic e) => PortfolioSnapshot.fromJson(
-                  Map<String, dynamic>.from(e as Map),
+      final String? movementsRaw = prefs.getString(_movementsKey);
+      if (movementsRaw != null && movementsRaw.trim().isNotEmpty) {
+        try {
+          final dynamic decoded = jsonDecode(movementsRaw);
+          if (decoded is List) {
+            _movements
+              ..clear()
+              ..addAll(
+                decoded.map(
+                  (dynamic e) =>
+                      Movement.fromJson(Map<String, dynamic>.from(e as Map)),
                 ),
-              ),
+              );
+          }
+        } catch (_) {}
+      }
+
+      final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
+      _applyPriceCache(priceCache);
+
+      final String? snapshotsRaw = prefs.getString(_snapshotsKey);
+      if (snapshotsRaw != null && snapshotsRaw.trim().isNotEmpty) {
+        try {
+          final dynamic decoded = jsonDecode(snapshotsRaw);
+          if (decoded is List) {
+            _snapshots
+              ..clear()
+              ..addAll(
+                decoded.map(
+                  (dynamic e) => PortfolioSnapshot.fromJson(
+                    Map<String, dynamic>.from(e as Map),
+                  ),
+                ),
+              );
+            _snapshots.sort(
+              (PortfolioSnapshot a, PortfolioSnapshot b) =>
+                  b.createdAt.compareTo(a.createdAt),
             );
-          _snapshots.sort(
-            (PortfolioSnapshot a, PortfolioSnapshot b) =>
-                b.createdAt.compareTo(a.createdAt),
-          );
-        }
-      } catch (_) {}
+          }
+        } catch (_) {}
+      }
+
+      _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ??
+          FinancialEngine.defaultExitFeePercent;
+      final String? savedVisualMode = prefs.getString(_themeModeKey);
+      if (savedVisualMode != null) {
+        _visualMode = appVisualModeFromName(savedVisualMode);
+      } else if (prefs.containsKey(_darkModeKey)) {
+        _visualMode = (prefs.getBool(_darkModeKey) ?? false)
+            ? AppVisualMode.dark
+            : AppVisualMode.light;
+      } else {
+        _visualMode = AppVisualMode.system;
+      }
+      _themeStyle = appThemeStyleFromName(
+        prefs.getString(_themeStyleKey) ?? prefs.getString(_accentColorKey),
+      );
+      _visiblePositions = visiblePositionsFromName(
+        prefs.getString(_visiblePositionsKey),
+      );
+      _positionSortMode = positionSortModeFromName(
+        prefs.getString(_positionSortKey),
+      );
+      _snapshotAutomationMode = snapshotAutomationModeFromName(
+        prefs.getString(_snapshotModeKey),
+      );
+      _snapshotRetention = snapshotRetentionFromName(
+        prefs.getString(_snapshotRetentionKey),
+      );
+      _refreshPricesOnOpen = prefs.getBool(_priceRefreshOnOpenKey) ?? true;
+      _refreshPricesAfterMovement =
+          prefs.getBool(_priceRefreshAfterMovementKey) ?? false;
+      _priceRefreshForegroundMode = priceRefreshForegroundModeFromName(
+        prefs.getString(_priceRefreshForegroundModeKey),
+      );
+      await _loadPriceAlertSettings(prefs);
+
+      if (mounted) setState(() => _bootstrapped = true);
+
+      await _captureAutomaticSnapshotIfNeeded(SnapshotTrigger.appOpen);
+
+      if (_refreshPricesOnOpen) {
+        await _refreshPricesIfNeeded(prefs);
+      }
+      if (mounted) _restartPriceRefreshTimer();
+    } finally {
+      if (mounted && !_bootstrapped) {
+        setState(() => _bootstrapped = true);
+      } else {
+        _bootstrapped = true;
+      }
     }
-
-    _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ??
-        FinancialEngine.defaultExitFeePercent;
-    final String? savedVisualMode = prefs.getString(_themeModeKey);
-    if (savedVisualMode != null) {
-      _visualMode = appVisualModeFromName(savedVisualMode);
-    } else if (prefs.containsKey(_darkModeKey)) {
-      _visualMode = (prefs.getBool(_darkModeKey) ?? false)
-          ? AppVisualMode.dark
-          : AppVisualMode.light;
-    } else {
-      _visualMode = AppVisualMode.system;
-    }
-    _themeStyle = appThemeStyleFromName(
-      prefs.getString(_themeStyleKey) ?? prefs.getString(_accentColorKey),
-    );
-    _visiblePositions = visiblePositionsFromName(
-      prefs.getString(_visiblePositionsKey),
-    );
-    _positionSortMode = positionSortModeFromName(
-      prefs.getString(_positionSortKey),
-    );
-    _snapshotAutomationMode = snapshotAutomationModeFromName(
-      prefs.getString(_snapshotModeKey),
-    );
-    _snapshotRetention = snapshotRetentionFromName(
-      prefs.getString(_snapshotRetentionKey),
-    );
-    _refreshPricesOnOpen = prefs.getBool(_priceRefreshOnOpenKey) ?? true;
-    _refreshPricesAfterMovement =
-        prefs.getBool(_priceRefreshAfterMovementKey) ?? false;
-    _priceRefreshForegroundMode = priceRefreshForegroundModeFromName(
-      prefs.getString(_priceRefreshForegroundModeKey),
-    );
-    await _loadPriceAlertSettings(prefs);
-
-    if (mounted) setState(() {});
-
-    await _captureAutomaticSnapshotIfNeeded(SnapshotTrigger.appOpen);
-
-    if (_refreshPricesOnOpen) {
-      await _refreshPricesIfNeeded(prefs);
-    }
-    if (mounted) _restartPriceRefreshTimer();
   }
 
   void _applyPriceCache(PriceCache cache) {
@@ -2263,6 +2272,24 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   @override
   Widget build(BuildContext context) {
+    if (!_bootstrapped) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'CriptoControlMx',
+        theme: ThemeData.light(useMaterial3: true),
+        home: const Scaffold(
+          backgroundColor: Color(0xFFF6F7FB),
+          body: Center(
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+      );
+    }
+
     final Map<String, CoinStats> stats = _computeStats();
     final PortfolioTotals totals = _totals(stats);
 
