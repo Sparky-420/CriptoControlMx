@@ -62,6 +62,7 @@ Incluye copias de frontera para:
 Agregado:
 
 - `lib/domain/portfolio_math.dart`
+- `lib/domain/portfolio_state.dart`
 
 Incluye copias de frontera para:
 
@@ -69,6 +70,7 @@ Incluye copias de frontera para:
 - `auditCoin`
 - `totals`
 - `wouldCreateInvalidPosition`
+- proyeccion `PortfolioState.fromInputs`
 
 La logica se copio sin cambiar formulas respecto al archivo monolitico.
 
@@ -77,6 +79,7 @@ La logica se copio sin cambiar formulas respecto al archivo monolitico.
 Agregado:
 
 - `lib/ui/tabs/app_tab_registry.dart`
+- `lib/ui/navigation/main_navigation_bar.dart`
 
 Centraliza etiquetas e iconos de las tabs:
 
@@ -85,6 +88,21 @@ Centraliza etiquetas e iconos de las tabs:
 - Simular
 - Monedas
 - Ajustes
+
+## Pruebas agregadas
+
+Agregado:
+
+- `test/portfolio_math_test.dart`
+- `test/portfolio_state_test.dart`
+
+Cubren:
+
+- venta con costo promedio
+- resultado realizado
+- valor actual
+- bloqueo de venta mayor a la posicion disponible
+- totales proyectados desde `PortfolioState`
 
 ## Estado tecnico
 
@@ -95,9 +113,10 @@ Motivo: evitar un cambio masivo que pueda romper la APK funcional.
 ## Proximo corte seguro
 
 1. Correr `flutter analyze`.
-2. Conectar primero solo `AppTabRegistry` porque es de bajo riesgo.
-3. Conectar `premium_panels.dart` componente por componente.
-4. Conectar modelos y `PortfolioMath` solo despues de comparar outputs con la implementacion actual.
+2. Correr `flutter test`.
+3. Conectar primero solo `MainNavigationBar` porque es de bajo riesgo.
+4. Conectar `premium_panels.dart` componente por componente.
+5. Conectar modelos y `PortfolioMath` solo despues de comparar outputs con la implementacion actual.
 
 ## Garantia de rollback
 
