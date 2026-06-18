@@ -2109,12 +2109,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _exportBackup(BuildContext pageContext) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
-    await Clipboard.setData(ClipboardData(text: _buildBackupJson()));
-    if (mounted) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Respaldo JSON copiado')),
-      );
-    }
+    await _shareDataFile(
+      messenger: messenger,
+      fileName: 'criptocontrolmx_respaldo.json',
+      mimeType: 'application/json',
+      bytes: utf8.encode(_buildBackupJson()),
+      successMessage: 'Respaldo JSON listo para compartir',
+    );
   }
 
   Future<void> _applyBackupJson(String rawJson) async {
@@ -6433,7 +6434,7 @@ class MoreTab extends StatelessWidget {
             _CommandCard(
               icon: Icons.backup_outlined,
               title: 'Copia de seguridad',
-              subtitle: 'Copiar JSON completo sin cambiar estructura',
+              subtitle: 'Exporta un JSON para guardarlo fuera de la app',
               onTap: onExportBackup,
             ),
             _CommandCard(
@@ -6732,7 +6733,7 @@ class MoreTab extends StatelessWidget {
           _SheetAction(
             icon: Icons.data_object_outlined,
             title: 'JSON respaldo',
-            subtitle: 'Copia completa compatible',
+            subtitle: 'Compartir respaldo completo para guardarlo fuera de la app',
             onTap: onExportBackup,
           ),
           _SheetAction(
