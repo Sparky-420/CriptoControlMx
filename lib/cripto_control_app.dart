@@ -6649,10 +6649,14 @@ class MoreTab extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Retención',
+                    'Retención de instantáneas',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Define cuántas instantáneas históricas conserva la app para gráficas. No afecta movimientos ni cartera.',
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -6845,7 +6849,10 @@ class MoreTab extends StatelessWidget {
               InfoLine('Intervalo de alertas', intervalLabel(automaticLocalAlertsIntervalMinutes)),
               InfoLine('Permisos', notificationsAllowed ? 'Notificaciones permitidas' : 'Notificaciones no permitidas'),
               InfoLine('Instantáneas automáticas', snapshotAutomationMode.label),
-              InfoLine('Retención de instantáneas', snapshotRetention.label),
+              InfoLine(
+                'Retención de instantáneas',
+                snapshotRetention.label,
+              ),
               if (financialErrors.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
                 ...financialErrors.take(6).map(
@@ -9192,11 +9199,11 @@ extension SnapshotRetentionDetails on SnapshotRetention {
   String get label {
     switch (this) {
       case SnapshotRetention.last30:
-        return 'Últimos 30';
+        return 'Últimas 30 instantáneas';
       case SnapshotRetention.last90:
-        return 'Últimos 90';
+        return 'Últimas 90 instantáneas';
       case SnapshotRetention.unlimited:
-        return 'Ilimitado';
+        return 'Sin límite';
     }
   }
 
