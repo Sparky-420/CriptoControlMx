@@ -3611,7 +3611,7 @@ class _SimulationTabState extends State<SimulationTab> {
     SimulationMode.operation => _operationMode == OperationSimulationMode.buy
         ? moneyShort(_parseInput(_buyGrossAmountController))
         : _sellMethod == SimulationSellMethod.percent
-            ? '${_sellPercentController.text.trim()}% posición'
+            ? '${_sellPercentController.text.trim()}% de posición'
             : _sellMethod == SimulationSellMethod.quantity
                 ? '${_sellQuantityController.text.trim()} cripto'
                 : moneyShort(_parseInput(_sellGrossController)),
@@ -3836,7 +3836,7 @@ class _SimulationTabState extends State<SimulationTab> {
               ),
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
-                labelText: 'Comisión venta %',
+                labelText: 'Comisión estimada de salida %',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -3975,15 +3975,15 @@ class _SimulationTabState extends State<SimulationTab> {
               segments: const <ButtonSegment<SimulationSellMethod>>[
                 ButtonSegment<SimulationSellMethod>(
                   value: SimulationSellMethod.percent,
-                  label: Text('% posición'),
+                  label: Text('%'),
                 ),
                 ButtonSegment<SimulationSellMethod>(
                   value: SimulationSellMethod.quantity,
-                  label: Text('Cantidad'),
+                  label: Text('Cripto'),
                 ),
                 ButtonSegment<SimulationSellMethod>(
                   value: SimulationSellMethod.grossAmount,
-                  label: Text('Monto MXN'),
+                  label: Text('MXN'),
                 ),
               ],
               selected: <SimulationSellMethod>{_sellMethod},
@@ -4274,15 +4274,15 @@ class _SimulationTabState extends State<SimulationTab> {
               segments: const <ButtonSegment<SimulationRotationMethod>>[
                 ButtonSegment<SimulationRotationMethod>(
                   value: SimulationRotationMethod.percent,
-                  label: Text('% origen'),
+                  label: Text('%'),
                 ),
                 ButtonSegment<SimulationRotationMethod>(
                   value: SimulationRotationMethod.quantity,
-                  label: Text('Cantidad'),
+                  label: Text('Cripto'),
                 ),
                 ButtonSegment<SimulationRotationMethod>(
                   value: SimulationRotationMethod.grossAmount,
-                  label: Text('Monto MXN'),
+                  label: Text('MXN'),
                 ),
               ],
               selected: <SimulationRotationMethod>{_rotationMethod},
@@ -4938,12 +4938,12 @@ class _SimulationTabState extends State<SimulationTab> {
   }
 
   static const List<double> _quickAmountValues = <double>[
+    100,
+    250,
     500,
     1000,
     3000,
     5000,
-    8000,
-    15000,
   ];
 
   static const List<double> _quickPercentValues = <double>[25, 50, 75, 100];
