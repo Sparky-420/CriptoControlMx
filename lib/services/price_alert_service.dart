@@ -28,8 +28,8 @@ class PriceAlertService {
 
   static const int defaultAutomaticIntervalMinutes = 30;
   static const List<int> automaticIntervalOptions = <int>[15, 30, 60, 360, 1440];
-  static const double defaultThresholdPercent = 2.0;
-  static const double defaultRecoveryThresholdPoints = 2.0;
+  static const double defaultThresholdPercent = 0.0;
+  static const double defaultRecoveryThresholdPoints = 0.0;
   static const String _channelName = 'mx.criptocontrolmx.app/price_alerts';
 
   final MethodChannel _channel;

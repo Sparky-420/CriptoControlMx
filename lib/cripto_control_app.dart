@@ -2431,7 +2431,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               ),
               coins: _coins,
               stats: stats,
-              defaultFeePercent: _sellFeePercent == 0 ? 1.5 : _sellFeePercent,
+              defaultFeePercent: _sellFeePercent,
               targetExitFeePercent: _sellFeePercent,
               initialMode: _requestedSimulationMode,
             ),
@@ -3510,17 +3510,17 @@ class _SimulationTabState extends State<SimulationTab> {
   );
   final TextEditingController _buyPriceController = TextEditingController();
   final TextEditingController _buyFeeController = TextEditingController(
-    text: '1.5',
+    text: '0',
   );
   final TextEditingController _buySellFeeController = TextEditingController(
-    text: '1.5',
+    text: '0',
   );
 
   String _sellCoin = 'LINK';
   SimulationSellMethod _sellMethod = SimulationSellMethod.percent;
   final TextEditingController _sellPriceController = TextEditingController();
   final TextEditingController _sellFeeController = TextEditingController(
-    text: '1.5',
+    text: '0',
   );
   final TextEditingController _sellPercentController = TextEditingController(
     text: '50',
@@ -3538,9 +3538,9 @@ class _SimulationTabState extends State<SimulationTab> {
   final TextEditingController _rotationTargetPriceController =
       TextEditingController();
   final TextEditingController _rotationSellFeeController =
-      TextEditingController(text: '1.5');
+      TextEditingController(text: '0');
   final TextEditingController _rotationBuyFeeController = TextEditingController(
-    text: '1.5',
+    text: '0',
   );
   final TextEditingController _rotationPercentController =
       TextEditingController(text: '100');
@@ -9265,7 +9265,7 @@ MovementType movementTypeFromAny(dynamic value) {
 
 
 class FinancialEngine {
-  static const double defaultExitFeePercent = 1.5;
+  static const double defaultExitFeePercent = 0.0;
 
   const FinancialEngine._();
 
