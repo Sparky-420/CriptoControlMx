@@ -9,7 +9,7 @@ import 'package:cripto_control_mx/ui/premium_boot_gate.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(
-    const PremiumBootGate(beforeLaunch: _seedFromBundledBackupIfNeeded),
+    PremiumBootGate(beforeLaunch: _seedFromBundledBackupIfNeeded),
   );
 }
 
