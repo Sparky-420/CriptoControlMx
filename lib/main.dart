@@ -1,15 +1,16 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:cripto_control_mx/cripto_control_app.dart' as app;
+import 'package:cripto_control_mx/ui/premium_boot_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await _seedFromBundledBackupIfNeeded();
-  app.main();
+  runApp(
+    const PremiumBootGate(beforeLaunch: _seedFromBundledBackupIfNeeded),
+  );
 }
 
 Future<void> _seedFromBundledBackupIfNeeded() async {
