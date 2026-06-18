@@ -2,9 +2,14 @@ name: Flutter V2 Check
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
+      - ui-premium-sin-tocar-matematica
+      - refactor-ui-matematica-segura
   pull_request:
-    branches: [ master ]
+    branches:
+      - master
+      - ui-premium-sin-tocar-matematica
   workflow_dispatch:
 
 jobs:
@@ -26,6 +31,9 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
+      - name: Safe refactor guard
+        run: dart run tool/refactor_guard.dart
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
@@ -34,3 +42,10 @@ jobs:
 
       - name: Build debug APK
         run: flutter build apk --debug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CriptoControlMx-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
