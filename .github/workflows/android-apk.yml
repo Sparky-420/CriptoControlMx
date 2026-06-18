@@ -2,16 +2,18 @@ name: Build experimental debug APK
 
 on:
   push:
-    branches: [experimental]
+    branches: [experimental, fase-1-v2]
   pull_request:
-    branches: [experimental]
+    branches: [experimental, fase-1-v2]
   workflow_dispatch:
 
 jobs:
   build-apk:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/experimental') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/fase-1-v2') ||
       (github.event_name == 'pull_request' && github.base_ref == 'experimental') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'fase-1-v2') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/experimental')
     runs-on: ubuntu-latest
 
