@@ -7,7 +7,6 @@ import 'package:excel/excel.dart' as xl;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -1988,7 +1987,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return pdf.save();
   }
 
-  Future<void> _shareDataFile({
+  Future<bool> _shareDataFile({
     required ScaffoldMessengerState messenger,
     required String fileName,
     required String mimeType,
@@ -2013,12 +2012,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text(successMessage)));
       }
+      return true;
     } catch (_) {
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo exportar el archivo')),
         );
       }
+      return false;
     }
   }
 
@@ -2107,9 +2108,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     );
   }
 
-  Future<void> _exportBackup(BuildContext pageContext) async {
+  Future<bool> _exportBackup(BuildContext pageContext) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
-    await _shareDataFile(
+    return _shareDataFile(
       messenger: messenger,
       fileName: 'criptocontrolmx_respaldo.json',
       mimeType: 'application/json',
@@ -2271,6 +2272,187 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           const SnackBar(content: Text('No se pudo importar el archivo JSON. Verifica que sea un respaldo válido.')),
         );
       }
+    }
+  }
+
+  Future<void> _performFinancialReset(ScaffoldMessengerState messenger) async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await _priceAlertService.configureAutomaticAlerts(
+        enabled: false,
+        intervalMinutes: _automaticLocalAlertsIntervalMinutes,
+      );
+      for (final String key in <String>[
+        _movementsKey,
+        _pricesKey,
+        PriceService.pricesUpdatedAtKey,
+        _sellFeePercentKey,
+        _snapshotsKey,
+        _snapshotModeKey,
+        _snapshotRetentionKey,
+        _priceRefreshOnOpenKey,
+        _priceRefreshAfterMovementKey,
+        _priceRefreshForegroundModeKey,
+        PriceAlertService.enabledKey,
+        PriceAlertService.thresholdPercentKey,
+        PriceAlertService.referencePricesKey,
+        PriceAlertService.lastNotifiedAtKey,
+        PriceAlertService.lastNotifiedPricesKey,
+        PriceAlertService.recoveryEnabledKey,
+        PriceAlertService.recoveryThresholdPointsKey,
+        PriceAlertService.recoveryReferencePnlKey,
+        PriceAlertService.recoveryLastNotifiedAtKey,
+        PriceAlertService.automaticAlertsEnabledKey,
+        PriceAlertService.automaticAlertsIntervalMinutesKey,
+      ]) {
+        await prefs.remove(key);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _movements.clear();
+        _snapshots.clear();
+        for (final String coin in _coins) {
+          _currentPrices[coin] = 0.0;
+        }
+        _pricesUpdatedAt = null;
+        _sellFeePercent = FinancialEngine.defaultExitFeePercent;
+        _snapshotAutomationMode = SnapshotAutomationMode.manual;
+        _snapshotRetention = SnapshotRetention.last30;
+        _refreshPricesOnOpen = true;
+        _refreshPricesAfterMovement = false;
+        _priceRefreshForegroundMode = PriceRefreshForegroundMode.manual;
+        _priceAlertsEnabled = false;
+        _priceAlertThresholdPercent = PriceAlertService.defaultThresholdPercent;
+        _priceAlertReferences = <String, double>{};
+        _recoveryAlertsEnabled = false;
+        _recoveryAlertThresholdPoints =
+            PriceAlertService.defaultRecoveryThresholdPoints;
+        _recoveryAlertReferences = <String, double>{};
+        _automaticLocalAlertsEnabled = false;
+        _automaticLocalAlertsIntervalMinutes =
+            PriceAlertService.defaultAutomaticIntervalMinutes;
+      });
+      _restartPriceRefreshTimer();
+
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Datos financieros restablecidos')),
+      );
+    } catch (_) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No se pudo restablecer la app')),
+        );
+      }
+    }
+  }
+
+  Future<void> _resetFinancialData(BuildContext pageContext) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    final TextEditingController confirmationController = TextEditingController();
+    bool backupReady = false;
+
+    try {
+      final bool? shouldReset = await showModalBottomSheet<bool>(
+        context: pageContext,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (BuildContext sheetContext) => StatefulBuilder(
+          builder:
+              (BuildContext context, void Function(void Function()) setModalState) {
+            Future<void> generateBackup() async {
+              final bool ok = await _exportBackup(pageContext);
+              if (!mounted) return;
+              setModalState(() {
+                backupReady = ok;
+              });
+            }
+
+            final ThemeData theme = Theme.of(context);
+            final bool canReset =
+                backupReady &&
+                confirmationController.text.trim() == 'RESTABLECER';
+
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                MediaQuery.viewInsetsOf(context).bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Restablecer datos financieros',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Borra cartera, precios, instantáneas y alertas. Conserva tema y preferencias visuales.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(height: 20),
+                  const InfoLine('Se borra', 'Movimientos, precios, snapshots y alertas'),
+                  const InfoLine('Se conserva', 'Tema y preferencias visuales'),
+                  const InfoLine('Paso 1', 'Genera un respaldo JSON antes de continuar'),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: backupReady ? null : generateBackup,
+                    icon: const Icon(Icons.backup_outlined),
+                    label: const Text('Generar respaldo JSON'),
+                  ),
+                  if (backupReady) ...<Widget>[
+                    const SizedBox(height: 8),
+                    const InfoLine('Respaldo', 'Generado en esta sesión'),
+                  ],
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: confirmationController,
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) => setModalState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Escribe RESTABLECER',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(sheetContext).pop(false),
+                          child: const Text('Cancelar'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: canReset
+                              ? () => Navigator.of(sheetContext).pop(true)
+                              : null,
+                          child: const Text('Restablecer'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+      if (shouldReset != true) return;
+      if (!mounted) return;
+      await _performFinancialReset(messenger);
+    } finally {
+      confirmationController.dispose();
     }
   }
 
@@ -2446,7 +2628,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
             onExportXlsx: () => _exportXlsx(pageContext),
             onExportPdf: () => _exportPdf(pageContext),
-            onExportBackup: () => _exportBackup(pageContext),
+            onExportBackup: () {
+              _exportBackup(pageContext);
+            },
           );
 
           final List<Widget> pages = <Widget>[
@@ -2591,7 +2775,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onExportPortfolioSummaryJson: () => _exportPortfolioSummaryJson(pageContext),
               onExportXlsx: () => _exportXlsx(pageContext),
               onExportPdf: () => _exportPdf(pageContext),
-              onExportBackup: () => _exportBackup(pageContext),
+              onExportBackup: () {
+                _exportBackup(pageContext);
+              },
               onImportBackup: () => _importBackup(pageContext),
               onImportBackupFile: () => _importBackupFile(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
@@ -2600,6 +2786,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onSnapshotRetentionChanged: _changeSnapshotRetention,
               onResetPriceAlertReferences: () =>
                   _resetPriceAlertReferences(pageContext),
+              onOpenFinancialReset: () => _resetFinancialData(pageContext),
             ),
           ];
 
@@ -6356,6 +6543,7 @@ class MoreTab extends StatelessWidget {
   final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
   final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final VoidCallback onResetPriceAlertReferences;
+  final VoidCallback onOpenFinancialReset;
 
   const MoreTab({
     super.key,
@@ -6403,6 +6591,7 @@ class MoreTab extends StatelessWidget {
     required this.onSnapshotAutomationModeChanged,
     required this.onSnapshotRetentionChanged,
     required this.onResetPriceAlertReferences,
+    required this.onOpenFinancialReset,
   });
 
   static const String _priceSource = 'CoinGecko';
@@ -6467,6 +6656,19 @@ class MoreTab extends StatelessWidget {
                   ? '1 instantánea guardada · evolución y controles'
                   : '$snapshotCount instantáneas guardadas · evolución y controles',
               onTap: () => _showSnapshotActions(context),
+            ),
+          ],
+        ),
+        _CommandSection(
+          title: 'Seguridad y datos',
+          children: <Widget>[
+            _CommandCard(
+              icon: Icons.restart_alt_outlined,
+              title: 'Restablecer datos financieros',
+              subtitle:
+                  'Borra cartera, precios, instantáneas y alertas. Requiere respaldo previo.',
+              badge: 'Peligroso',
+              onTap: onOpenFinancialReset,
             ),
           ],
         ),
