@@ -49,7 +49,14 @@ const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
     };
 
 class CriptoControlApp extends StatefulWidget {
-  const CriptoControlApp({super.key});
+  const CriptoControlApp({
+    super.key,
+    this.initialThemeModeName,
+    this.initialThemeStyleName,
+  });
+
+  final String? initialThemeModeName;
+  final String? initialThemeStyleName;
 
   @override
   State<CriptoControlApp> createState() => _CriptoControlAppState();
@@ -145,6 +152,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _priceAlertService.initialize();
+    _visualMode = appVisualModeFromName(widget.initialThemeModeName);
+    _themeStyle = appThemeStyleFromName(widget.initialThemeStyleName);
     _loadData();
   }
 
@@ -2272,18 +2281,36 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxThemeStyle themeStyle =
+        ccmx.CcmxThemeStyle.values.byName(_themeStyle.name);
+
     if (!_bootstrapped) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'CriptoControlMx',
-        theme: ThemeData.light(useMaterial3: true),
-        home: const Scaffold(
-          backgroundColor: Color(0xFFF6F7FB),
-          body: Center(
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
+        themeMode: _visualMode.themeMode,
+        theme: ccmx.CcmxAppTheme.build(
+          style: themeStyle,
+          brightness: Brightness.light,
+        ),
+        darkTheme: ccmx.CcmxAppTheme.build(
+          style: themeStyle,
+          brightness: Brightness.dark,
+        ),
+        home: Builder(
+          builder: (BuildContext context) => Scaffold(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            body: Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -2292,9 +2319,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     final Map<String, CoinStats> stats = _computeStats();
     final PortfolioTotals totals = _totals(stats);
-
-    final ccmx.CcmxThemeStyle themeStyle =
-        ccmx.CcmxThemeStyle.values.byName(_themeStyle.name);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
