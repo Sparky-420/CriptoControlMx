@@ -2,9 +2,14 @@ name: Flutter V2 Check
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
+      - ui-premium-sin-tocar-matematica
+      - refactor-ui-matematica-segura
   pull_request:
-    branches: [ master ]
+    branches:
+      - master
+      - ui-premium-sin-tocar-matematica
   workflow_dispatch:
 
 jobs:
