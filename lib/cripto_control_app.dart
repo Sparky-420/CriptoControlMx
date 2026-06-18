@@ -560,7 +560,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     if (pageContext.mounted) {
       ScaffoldMessenger.of(pageContext).showSnackBar(
-        const SnackBar(content: Text('Referencias reiniciadas')),
+        const SnackBar(content: Text('Precios base reiniciados')),
       );
     }
   }
@@ -584,7 +584,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (pageContext.mounted) {
       ScaffoldMessenger.of(pageContext).showSnackBar(
         const SnackBar(
-          content: Text('Referencias de recuperación reiniciadas'),
+          content: Text('Base de recuperación reiniciada'),
         ),
       );
     }
@@ -5520,7 +5520,7 @@ class _AlertsTabState extends State<AlertsTab> {
                   ),
                   FilledButton.tonal(
                     onPressed: widget.onResetPriceAlertReferences,
-                    child: const Text('Reiniciar referencias'),
+                    child: const Text('Reiniciar precios base'),
                   ),
                 ],
               ),
@@ -5567,7 +5567,8 @@ class _AlertsTabState extends State<AlertsTab> {
       children: <Widget>[
         CardPanel(
           title: 'Alertas internas de recuperación',
-          subtitle: 'Avance hacia punto de equilibrio.',
+          subtitle:
+              'Compara el P&L actual contra una base guardada y estima cuánto falta para volver al equilibrio.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -5583,7 +5584,9 @@ class _AlertsTabState extends State<AlertsTab> {
                 'Umbral actual',
                 '${widget.recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
               ),
-              const Text('Avance hacia punto de equilibrio por P&L no realizado.'),
+              const Text(
+                'P&L base guardado para comparar la recuperación. Cambio vs base: diferencia entre el P&L actual y la base, en puntos porcentuales. Falta para equilibrio: monto estimado que falta para volver al punto de equilibrio.',
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -5595,7 +5598,7 @@ class _AlertsTabState extends State<AlertsTab> {
                   ),
                   FilledButton.tonal(
                     onPressed: widget.onResetRecoveryAlertReferences,
-                    child: const Text('Reiniciar referencias'),
+                    child: const Text('Reiniciar base de recuperación'),
                   ),
                 ],
               ),
@@ -5774,10 +5777,10 @@ class RecoveryAlertCoinRow extends StatelessWidget {
                 value: hasPosition ? money(position.unrealizedPnl) : 'Sin posición activa',
                 color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
               ),
-              MiniMetric(label: 'Referencia', value: referenceText),
-              MiniMetric(label: 'Delta', value: deltaText),
+              MiniMetric(label: 'P&L base', value: referenceText),
+              MiniMetric(label: 'Cambio vs base', value: deltaText),
               MiniMetric(
-                label: 'Falta BE',
+                label: 'Falta para equilibrio',
                 value: position.missingToBreakEven > 0
                     ? money(position.missingToBreakEven)
                     : 'Listo',
@@ -6831,7 +6834,7 @@ class MoreTab extends StatelessWidget {
               FilledButton.tonalIcon(
                 onPressed: onResetPriceAlertReferences,
                 icon: const Icon(Icons.restart_alt_outlined),
-                label: const Text('Reiniciar referencias de alertas'),
+                label: const Text('Reiniciar precios base'),
               ),
             ],
           ),
