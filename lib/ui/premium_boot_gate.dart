@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:cripto_control_mx/cripto_control_app.dart' as app;
+import 'package:cripto_control_mx/ui/premium_colors.dart';
 
 class PremiumBootGate extends StatefulWidget {
   final Future<void> Function() beforeLaunch;
@@ -35,7 +36,7 @@ class _PremiumBootGateState extends State<PremiumBootGate> {
       value: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
-        systemNavigationBarColor: Color(0xFF071116),
+        systemNavigationBarColor: PremiumColors.bootBackground,
         systemNavigationBarIconBrightness: Brightness.light,
       ),
       child: MaterialApp(
@@ -45,11 +46,11 @@ class _PremiumBootGateState extends State<PremiumBootGate> {
           useMaterial3: true,
           brightness: Brightness.dark,
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF36D399),
+            seedColor: PremiumColors.primary,
             brightness: Brightness.dark,
-            surface: const Color(0xFF0B151A),
+            surface: const Color.fromARGB(255, 11, 21, 26),
           ),
-          scaffoldBackgroundColor: const Color(0xFF071116),
+          scaffoldBackgroundColor: PremiumColors.bootBackground,
         ),
         home: const _PremiumBootScreen(),
       ),
@@ -71,9 +72,9 @@ class _PremiumBootScreen extends StatelessWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: <Color>[
-              Color(0xFF071116),
-              Color(0xFF0B1D20),
-              Color(0xFF10141C),
+              PremiumColors.bootBackground,
+              PremiumColors.bootBackgroundAlt,
+              PremiumColors.bootSurface,
             ],
           ),
         ),
@@ -109,7 +110,7 @@ class _PremiumBootScreen extends StatelessWidget {
                   child: const Icon(
                     Icons.currency_bitcoin,
                     size: 38,
-                    color: Color(0xFF36D399),
+                    color: PremiumColors.primary,
                   ),
                 ),
                 const SizedBox(height: 26),
@@ -161,13 +162,13 @@ class _PremiumBootScreen extends StatelessWidget {
                       Icon(
                         Icons.lock_outline,
                         size: 16,
-                        color: Color(0xFFB8C7C1),
+                        color: PremiumColors.mutedText,
                       ),
                       SizedBox(width: 8),
                       Text(
                         'Fórmulas intactas',
                         style: TextStyle(
-                          color: Color(0xFFB8C7C1),
+                          color: PremiumColors.mutedText,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
