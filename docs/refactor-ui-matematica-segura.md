@@ -95,6 +95,7 @@ Agregado:
 
 - `test/portfolio_math_test.dart`
 - `test/portfolio_state_test.dart`
+- `test/portfolio_models_test.dart`
 
 Cubren:
 
@@ -103,6 +104,21 @@ Cubren:
 - valor actual
 - bloqueo de venta mayor a la posicion disponible
 - totales proyectados desde `PortfolioState`
+- compatibilidad JSON con aliases legacy y en español
+- formulas de break-even neto en `CoinStats`
+
+## Guardrails agregados
+
+Agregado:
+
+- `tool/refactor_guard.dart`
+
+El workflow ejecuta:
+
+- `dart run tool/refactor_guard.dart`
+- `flutter analyze --no-fatal-infos --no-fatal-warnings`
+- `flutter test`
+- `flutter build apk --debug`
 
 ## Estado tecnico
 
