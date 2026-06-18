@@ -31,6 +31,9 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
+      - name: Safe refactor guard
+        run: dart run tool/refactor_guard.dart
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
