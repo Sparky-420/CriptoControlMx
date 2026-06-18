@@ -96,6 +96,8 @@ Agregado:
 - `test/portfolio_math_test.dart`
 - `test/portfolio_state_test.dart`
 - `test/portfolio_models_test.dart`
+- `test/formatters_test.dart`
+- `test/main_navigation_bar_test.dart`
 
 Cubren:
 
@@ -106,6 +108,8 @@ Cubren:
 - totales proyectados desde `PortfolioState`
 - compatibilidad JSON con aliases legacy y en español
 - formulas de break-even neto en `CoinStats`
+- formatos monetarios, cripto, fechas y CSV
+- render y seleccion de tabs en `MainNavigationBar`
 
 ## Guardrails agregados
 
