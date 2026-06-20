@@ -2737,6 +2737,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
                   .length,
+              motorCoins: _coins,
+              motorSellFeePercent: _sellFeePercent,
               onOpenCharts: () => openMorePage(
                 'Gráficas',
                 (VoidCallback refresh) => buildChartsTab(refresh: refresh),
@@ -6521,6 +6523,8 @@ class MoreTab extends StatelessWidget {
   final bool notificationsAllowed;
   final bool isRefreshingPrices;
   final int chartDataCount;
+  final List<String> motorCoins;
+  final double motorSellFeePercent;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
   final VoidCallback onOpenPriceSettings;
@@ -6569,6 +6573,8 @@ class MoreTab extends StatelessWidget {
     required this.notificationsAllowed,
     required this.isRefreshingPrices,
     required this.chartDataCount,
+    required this.motorCoins,
+    required this.motorSellFeePercent,
     required this.onOpenCharts,
     required this.onOpenMovements,
     required this.onOpenPriceSettings,
@@ -7070,6 +7076,12 @@ class MoreTab extends StatelessWidget {
                 icon: const Icon(Icons.restart_alt_outlined),
                 label: const Text('Reiniciar precios base'),
               ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => _showMotorVerification(context),
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text('Verificación motor financiero'),
+              ),
             ],
           ),
         ),
@@ -7131,6 +7143,223 @@ class MoreTab extends StatelessWidget {
       ),
     );
   }
+
+  void _showMotorVerification(BuildContext context) {
+    final List<_MotorVerificationItem> items = _buildMotorVerificationItems();
+    final int okCount = items.where((item) => item.passed).length;
+    final int failCount = items.length - okCount;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewPaddingOf(context).bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Verificación motor financiero',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Escenarios controlados contra el motor actual. No modifica datos.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              InfoLine(
+                'Escenarios ejecutados',
+                '${items.length} · $okCount OK · $failCount FAIL',
+                emphasized: true,
+              ),
+              const Divider(height: 20),
+              ...items.map(
+                (item) => InfoLine(
+                  item.name,
+                  item.passed
+                      ? 'OK · ${item.actual}'
+                      : 'FAIL · esp ${item.expected} · act ${item.actual}',
+                  valueColor: item.passed ? Colors.green : Colors.red,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<_MotorVerificationItem> _buildMotorVerificationItems() {
+    final List<String> coins = motorCoins;
+    final DateTime stamp = DateTime.utc(2024, 1, 2, 12);
+
+    Map<String, double> prices(String coin, double price) => <String, double>{
+      for (final String c in coins) c: 0.0,
+      coin: price,
+    };
+
+    CoinStats stat(List<Movement> movements, Map<String, double> currentPrices, String coin) {
+      return FinancialEngine.computeStats(
+        coins: coins,
+        movements: movements,
+        currentPrices: currentPrices,
+      )[coin]!;
+    }
+
+    String summary(CoinStats s) {
+      return 'q=${s.quantity.toStringAsFixed(8)}, cost=${s.costBase.toStringAsFixed(2)}, avg=${s.avgPrice.toStringAsFixed(2)}, '
+          'price=${s.currentPrice.toStringAsFixed(2)}, value=${s.currentValue.toStringAsFixed(2)}, '
+          'uPL=${s.unrealizedPL.toStringAsFixed(2)}, rPL=${s.realizedPL.toStringAsFixed(2)}, '
+          'fees=${s.feesPaid.toStringAsFixed(2)}, be=${s.netBreakEvenPrice(motorSellFeePercent).toStringAsFixed(2)}';
+    }
+
+    bool close(double a, double b, [double tolerance = 0.000001]) =>
+        (a - b).abs() <= tolerance;
+
+    bool sameStats(CoinStats actual, CoinStats expected) {
+      return close(actual.quantity, expected.quantity) &&
+          close(actual.costBase, expected.costBase) &&
+          close(actual.currentPrice, expected.currentPrice) &&
+          close(actual.avgPrice, expected.avgPrice) &&
+          close(actual.currentValue, expected.currentValue) &&
+          close(actual.unrealizedPL, expected.unrealizedPL) &&
+          close(actual.realizedPL, expected.realizedPL) &&
+          close(actual.feesPaid, expected.feesPaid) &&
+          close(actual.totalInvested, expected.totalInvested) &&
+          close(
+            actual.netBreakEvenPrice(motorSellFeePercent),
+            expected.netBreakEvenPrice(motorSellFeePercent),
+          );
+    }
+
+    _MotorVerificationItem coinCase({
+      required String name,
+      required String coin,
+      required List<Map<String, Object?>> rawMoves,
+      required Map<String, double> currentPrices,
+      required CoinStats expected,
+    }) {
+      final List<Movement> movements = rawMoves
+          .map((Map<String, Object?> raw) => Movement.fromJson(Map<String, dynamic>.from(raw)))
+          .toList();
+      final CoinStats actual = stat(movements, currentPrices, coin);
+      return _MotorVerificationItem(
+        name: name,
+        passed: sameStats(actual, expected),
+        expected: summary(expected),
+        actual: summary(actual),
+      );
+    }
+
+    final List<_MotorVerificationItem> items = <_MotorVerificationItem>[
+      coinCase(name: 'Compra simple', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 10, 'note': 'compra simple'}], currentPrices: prices('BTC', 120), expected: CoinStats(coin: 'BTC', quantity: 1, costBase: 110, currentPrice: 120, realizedPL: 0, feesPaid: 10, totalInvested: 110)),
+      coinCase(name: 'Dos compras con promedio', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'primera'}, <String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 300, 'fee': 0, 'note': 'segunda'}], currentPrices: prices('BTC', 250), expected: CoinStats(coin: 'BTC', quantity: 2, costBase: 400, currentPrice: 250, realizedPL: 0, feesPaid: 0, totalInvested: 400)),
+      coinCase(name: 'Venta parcial', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 150, 'fee': 0, 'note': 'parcial'}], currentPrices: prices('BTC', 150), expected: CoinStats(coin: 'BTC', quantity: 1, costBase: 100, currentPrice: 150, realizedPL: 50, feesPaid: 0, totalInvested: 200)),
+      coinCase(name: 'Venta total', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 150, 'fee': 0, 'note': 'cierre'}], currentPrices: prices('BTC', 150), expected: CoinStats(coin: 'BTC', quantity: 0, costBase: 0, currentPrice: 150, realizedPL: 50, feesPaid: 0, totalInvested: 100)),
+      coinCase(name: 'Entrada sin realizedPL', coin: 'ETH', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'transferIn', 'coin': 'ETH', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'entrada'}], currentPrices: prices('ETH', 120), expected: CoinStats(coin: 'ETH', quantity: 2, costBase: 200, currentPrice: 120, realizedPL: 0, feesPaid: 0, totalInvested: 200)),
+      coinCase(name: 'Salida sin realizedPL', coin: 'LINK', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'LINK', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'transferOut', 'coin': 'LINK', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 120, 'fee': 0, 'note': 'salida'}], currentPrices: prices('LINK', 100), expected: CoinStats(coin: 'LINK', quantity: 1, costBase: 100, currentPrice: 100, realizedPL: 0, feesPaid: 0, totalInvested: 200)),
+      coinCase(name: 'Comisión cero', coin: 'LTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'LTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'sin comisión'}], currentPrices: prices('LTC', 110), expected: CoinStats(coin: 'LTC', quantity: 1, costBase: 100, currentPrice: 110, realizedPL: 0, feesPaid: 0, totalInvested: 100)),
+      coinCase(name: 'Precio faltante = 0', coin: 'UNI', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'UNI', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'sin precio'}], currentPrices: <String, double>{}, expected: CoinStats(coin: 'UNI', quantity: 1, costBase: 100, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 100)),
+      coinCase(name: 'EURC con precio 0', coin: 'EURC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'EURC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 1, 'fee': 0, 'note': 'EURC sin precio'}], currentPrices: prices('EURC', 0), expected: CoinStats(coin: 'EURC', quantity: 1, costBase: 1, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 1)),
+      coinCase(name: 'Venta mayor al saldo', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 2, 'unitPrice': 200, 'fee': 0, 'note': 'exceso'}], currentPrices: prices('BTC', 200), expected: CoinStats(coin: 'BTC', quantity: 0, costBase: 0, currentPrice: 200, realizedPL: 100, feesPaid: 0, totalInvested: 100)),
+    ];
+
+    final List<Movement> snapshotMovements = <Movement>[
+      Movement(type: MovementType.buy, coin: 'BTC', date: stamp, quantity: 1, unitPrice: 100, fee: 10, note: 'snapshot'),
+    ];
+    final CoinStats snapshotStats = stat(snapshotMovements, prices('BTC', 120), 'BTC');
+    final PortfolioSnapshot snapshot = PortfolioSnapshot(
+      id: 'snapshot-verification',
+      createdAt: stamp,
+      totalCostBase: snapshotStats.costBase,
+      totalCurrentValue: snapshotStats.currentValue,
+      totalUnrealizedPL: snapshotStats.unrealizedPL,
+      totalRealizedPL: snapshotStats.realizedPL,
+      movementCount: snapshotMovements.length,
+      coins: <CoinSnapshot>[CoinSnapshot.fromStats(snapshotStats)],
+    );
+    final PortfolioSnapshot snapshotRoundTrip = PortfolioSnapshot.fromJson(snapshot.toJson());
+    items.add(
+      _MotorVerificationItem(
+        name: 'Snapshot compatible básico',
+        passed: close(snapshotRoundTrip.totalCostBase, snapshot.totalCostBase) &&
+            close(snapshotRoundTrip.totalCurrentValue, snapshot.totalCurrentValue) &&
+            close(snapshotRoundTrip.totalUnrealizedPL, snapshot.totalUnrealizedPL) &&
+            close(snapshotRoundTrip.totalRealizedPL, snapshot.totalRealizedPL) &&
+            snapshotRoundTrip.coins.length == 1 &&
+            snapshotRoundTrip.coins.first.coin == 'BTC',
+        expected:
+            'cost=${snapshot.totalCostBase.toStringAsFixed(2)}, value=${snapshot.totalCurrentValue.toStringAsFixed(2)}, uPL=${snapshot.totalUnrealizedPL.toStringAsFixed(2)}, rPL=${snapshot.totalRealizedPL.toStringAsFixed(2)}, coins=1',
+        actual:
+            'cost=${snapshotRoundTrip.totalCostBase.toStringAsFixed(2)}, value=${snapshotRoundTrip.totalCurrentValue.toStringAsFixed(2)}, uPL=${snapshotRoundTrip.totalUnrealizedPL.toStringAsFixed(2)}, rPL=${snapshotRoundTrip.totalRealizedPL.toStringAsFixed(2)}, coins=${snapshotRoundTrip.coins.length}',
+      ),
+    );
+
+    final Movement backupMovement = Movement(
+      type: MovementType.buy,
+      coin: 'ETH',
+      date: stamp,
+      quantity: 1,
+      unitPrice: 250,
+      fee: 5,
+      source: 'demo',
+      wallet: 'local',
+      network: 'erc20',
+      note: 'backup',
+    );
+    final Movement backupRoundTrip = Movement.fromJson(backupMovement.toJson());
+    final Map<String, dynamic> backupShape = <String, dynamic>{
+      'version': 2,
+      'exportedAt': stamp.toIso8601String(),
+      'settings': <String, double>{'sellFeePercent': motorSellFeePercent},
+      'currentPrices': prices('ETH', 260),
+      'movements': <Map<String, dynamic>>[backupMovement.toJson()],
+      'snapshots': <Map<String, dynamic>>[snapshot.toJson()],
+    };
+    final Map<String, dynamic> decodedBackup =
+        jsonDecode(jsonEncode(backupShape)) as Map<String, dynamic>;
+    items.add(
+      _MotorVerificationItem(
+        name: 'Backup financiero compatible',
+        passed: backupRoundTrip.isFinanciallyIdenticalTo(backupMovement) &&
+            decodedBackup['movements'] is List &&
+            decodedBackup['currentPrices'] is Map &&
+            decodedBackup['settings'] is Map &&
+            decodedBackup['snapshots'] is List,
+        expected: 'movimientos=1, precios=${coins.length}, settings=1, snapshots=1',
+        actual:
+            'movimientos=${(decodedBackup['movements'] as List).length}, precios=${(decodedBackup['currentPrices'] as Map).length}, settings=${(decodedBackup['settings'] as Map).length}, snapshots=${(decodedBackup['snapshots'] as List).length}',
+      ),
+    );
+
+    return items;
+  }
+}
+
+class _MotorVerificationItem {
+  final String name;
+  final bool passed;
+  final String expected;
+  final String actual;
+
+  const _MotorVerificationItem({
+    required this.name,
+    required this.passed,
+    required this.expected,
+    required this.actual,
+  });
 }
 
 class _CommandCenterHeader extends StatelessWidget {
@@ -10119,3 +10348,6 @@ Color pnlColor(double value) {
   if (value < 0) return const Color(0xFFDC2626);
   return Colors.grey.shade700;
 }
+
+
+
