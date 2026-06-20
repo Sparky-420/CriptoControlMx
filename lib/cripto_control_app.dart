@@ -2349,111 +2349,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<void> _resetFinancialData(BuildContext pageContext) async {
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
-    final TextEditingController confirmationController = TextEditingController();
-    bool backupReady = false;
-
-    try {
-      final bool? shouldReset = await showModalBottomSheet<bool>(
-        context: pageContext,
-        isScrollControlled: true,
-        useSafeArea: true,
-        showDragHandle: true,
-        builder: (BuildContext sheetContext) => StatefulBuilder(
-          builder:
-              (BuildContext context, void Function(void Function()) setModalState) {
-            Future<void> generateBackup() async {
-              final bool ok = await _exportBackup(pageContext);
-              if (!mounted) return;
-              setModalState(() {
-                backupReady = ok;
-              });
-            }
-
-            final ThemeData theme = Theme.of(context);
-            final bool canReset =
-                backupReady &&
-                confirmationController.text.trim() == 'RESTABLECER';
-
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                0,
-                20,
-                MediaQuery.viewInsetsOf(context).bottom + 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Restablecer datos financieros',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Borra cartera, precios, instantáneas y alertas. Conserva tema y preferencias visuales.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  const Divider(height: 20),
-                  const InfoLine('Se borra', 'Movimientos, precios, snapshots y alertas'),
-                  const InfoLine('Se conserva', 'Tema y preferencias visuales'),
-                  const InfoLine('Paso 1', 'Genera un respaldo JSON antes de continuar'),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: backupReady ? null : generateBackup,
-                    icon: const Icon(Icons.backup_outlined),
-                    label: const Text('Generar respaldo JSON'),
-                  ),
-                  if (backupReady) ...<Widget>[
-                    const SizedBox(height: 8),
-                    const InfoLine('Respaldo', 'Generado en esta sesión'),
-                  ],
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: confirmationController,
-                    textCapitalization: TextCapitalization.characters,
-                    onChanged: (_) => setModalState(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'Escribe RESTABLECER',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(sheetContext).pop(false),
-                          child: const Text('Cancelar'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: canReset
-                              ? () => Navigator.of(sheetContext).pop(true)
-                              : null,
-                          child: const Text('Restablecer'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
+    ScaffoldMessenger.of(pageContext).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Restablecimiento financiero temporalmente desactivado. Usa respaldo JSON e importación manual mientras se rediseña este flujo.',
         ),
-      );
-      if (shouldReset != true) return;
-      if (!mounted) return;
-      await _performFinancialReset(messenger);
-    } finally {
-      confirmationController.dispose();
-    }
+      ),
+    );
   }
 
   void _snack(BuildContext context, String message) {
@@ -9936,19 +9838,93 @@ class FinancialEngine {
       }
     }
 
-    if (wouldCreateInvalidHistoricalBalance(movements)) {
-      errors.add('Hay ventas o salidas mayores al saldo disponible');
-    }
-
-    for (final String coin in coins) {
-      if ((currentPrices[coin] ?? 0.0) <= 0) {
-        errors.add('Precio actual pendiente para $coin');
+    final Map<String, double> historicalBalances = <String, double>{
+      for (final String coin in coins) coin: 0.0,
+    };
+    final Set<String> balanceWarnings = <String>{};
+    final List<MapEntry<int, Movement>> orderedMovements =
+        movements.asMap().entries.toList()
+          ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
+            final int dateCompare = a.value.date.compareTo(b.value.date);
+            return dateCompare != 0 ? dateCompare : a.key.compareTo(b.key);
+          });
+    for (final MapEntry<int, Movement> entry in orderedMovements) {
+      final Movement movement = entry.value;
+      final double current = historicalBalances[movement.coin] ?? 0.0;
+      switch (movement.type) {
+        case MovementType.buy:
+        case MovementType.transferIn:
+          historicalBalances[movement.coin] = current + movement.quantity;
+          break;
+        case MovementType.sell:
+        case MovementType.transferOut:
+          if (movement.quantity > current + 0.0000000001) {
+            final String warningKey =
+                '${movement.type == MovementType.sell ? 'sell' : 'transferOut'}:${movement.coin}';
+            if (balanceWarnings.add(warningKey)) {
+              errors.add(
+                movement.type == MovementType.sell
+                    ? 'Venta excedida al saldo disponible en ${movement.coin}'
+                    : 'Salida excedida al saldo disponible en ${movement.coin}',
+              );
+            }
+          }
+          historicalBalances[movement.coin] = current - movement.quantity;
+          break;
       }
     }
 
-    if (snapshots.any((PortfolioSnapshot s) => s.createdAt.isAfter(DateTime.now().add(const Duration(minutes: 5))))) {
-      errors.add('Hay instantáneas con fecha futura');
+    if (wouldCreateInvalidHistoricalBalance(movements)) {
+      errors.add('Histórico inconsistente: balance negativo detectado');
     }
+
+    for (final String coin in coins) {
+      if (!currentPrices.containsKey(coin)) {
+        errors.add('Precio faltante para $coin');
+      } else if ((currentPrices[coin] ?? 0.0) <= 0) {
+        errors.add('Precio no disponible para $coin');
+      }
+    }
+
+    bool differs(double a, double b) => (a - b).abs() > 0.01;
+    var hasFutureSnapshot = false,
+        hasUnsupportedSnapshotCoin = false,
+        hasSnapshotMovementMismatch = false,
+        hasSnapshotTotalsMismatch = false;
+    for (final PortfolioSnapshot snapshot in snapshots) {
+      if (snapshot.createdAt.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
+        hasFutureSnapshot = true;
+      }
+      if (snapshot.movementCount > movements.length) {
+        hasSnapshotMovementMismatch = true;
+      }
+      if (snapshot.coins.any((CoinSnapshot c) => !coins.contains(c.coin))) {
+        hasUnsupportedSnapshotCoin = true;
+      }
+      if (snapshot.coins.isNotEmpty) {
+        final double costBase = snapshot.coins.fold<double>(
+          0.0,
+          (double sum, CoinSnapshot coin) => sum + coin.costBase,
+        );
+        final double currentValue = snapshot.coins.fold<double>(
+          0.0,
+          (double sum, CoinSnapshot coin) => sum + coin.currentValue,
+        );
+        final double unrealizedPL = snapshot.coins.fold<double>(
+          0.0,
+          (double sum, CoinSnapshot coin) => sum + coin.unrealizedPL,
+        );
+        if (differs(costBase, snapshot.totalCostBase) ||
+            differs(currentValue, snapshot.totalCurrentValue) ||
+            differs(unrealizedPL, snapshot.totalUnrealizedPL)) {
+          hasSnapshotTotalsMismatch = true;
+        }
+      }
+    }
+    if (hasFutureSnapshot) errors.add('Snapshot con fecha futura');
+    if (hasUnsupportedSnapshotCoin) errors.add('Snapshot desalineado: moneda no soportada');
+    if (hasSnapshotMovementMismatch) errors.add('Snapshot desalineado: movimientos mayores al ledger actual');
+    if (hasSnapshotTotalsMismatch) errors.add('Snapshot desalineado: totales no coinciden con monedas');
 
     return errors;
   }
