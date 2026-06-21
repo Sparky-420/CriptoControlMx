@@ -1644,14 +1644,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         'cripto',
         'cantidad_actual',
         'cantidad_acumulada',
-        'total_invertido_mxn',
-        'invertido_actual_mxn',
+        'total_adquirido_historico_mxn',
+        'costo_base_actual_mxn',
         'costo_promedio_mxn',
         'precio_actual_mxn',
         'valor_actual_mxn',
-        'resultado_actual_mxn',
-        'resultado_vendido_mxn',
-        'break_even_real_mxn',
+        'pnl_no_realizado_bruto_mxn',
+        'pnl_realizado_mxn',
+        'break_even_bruto_mxn',
         'break_even_con_comision_salida_mxn',
         'comisiones_pagadas_mxn',
       ],
@@ -1685,18 +1685,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       <Object?>[
         'snapshot_id',
         'fecha',
-        'invertido_total_mxn',
+        'costo_base_total_mxn',
         'valor_actual_total_mxn',
-        'resultado_actual_mxn',
-        'resultado_vendido_mxn',
+        'pnl_no_realizado_bruto_mxn',
+        'pnl_realizado_mxn',
         'movimientos',
         'cripto',
         'cantidad',
-        'invertido_mxn',
+        'costo_base_snapshot_mxn',
         'promedio_mxn',
         'valor_actual_mxn',
-        'resultado_actual_moneda_mxn',
-        'resultado_vendido_moneda_mxn',
+        'pnl_no_realizado_bruto_moneda_mxn',
+        'pnl_realizado_moneda_mxn',
       ],
     ];
 
@@ -1841,13 +1841,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _appendExcelRow(summary, <Object?>[
       'Cripto',
       'Cantidad actual',
-      'Invertido actual MXN',
+      'Costo base actual MXN',
       'Precio promedio MXN',
       'Precio actual MXN',
       'Valor actual MXN',
-      'Resultado actual MXN',
-      'Resultado vendido MXN',
-      'Precio para recuperar MXN',
+      'P&L no realizado bruto MXN',
+      'P&L realizado MXN',
+      'Break even neto con comisión de salida MXN',
       'Comisiones acumuladas MXN',
     ]);
 
@@ -1871,18 +1871,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _appendExcelRow(snapshots, <Object?>[
       'Snapshot ID',
       'Fecha',
-      'Invertido total MXN',
+      'Costo base total MXN',
       'Valor actual total MXN',
-      'Resultado actual MXN',
-      'Resultado vendido MXN',
+      'P&L no realizado bruto MXN',
+      'P&L realizado MXN',
       'Movimientos',
       'Cripto',
       'Cantidad',
-      'Invertido MXN',
+      'Costo base snapshot MXN',
       'Promedio MXN',
       'Valor actual MXN',
-      'Resultado actual moneda MXN',
-      'Resultado vendido moneda MXN',
+      'P&L no realizado bruto moneda MXN',
+      'P&L realizado moneda MXN',
     ]);
 
     for (final PortfolioSnapshot snapshot in _snapshots) {
@@ -1925,6 +1925,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       }
     }
 
+    _appendExcelRow(summary, <Object?>[
+      'Nota',
+      'Costo promedio ponderado. P&L no realizado bruto; equilibrio neto considera comisión de salida.',
+    ]);
     excel.setDefaultSheet('Resumen');
     final List<int>? bytes = excel.encode();
     if (bytes == null) throw StateError('No se pudo crear el XLSX');
@@ -1948,12 +1952,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           pw.SizedBox(height: 6),
           pw.Text('Generado: ${DateTime.now().toIso8601String()}'),
           pw.Text('Comisión de salida: ${pct(_sellFeePercent)}'),
+          pw.Text(
+            'Costo promedio ponderado. P&L no realizado bruto; equilibrio neto considera comisión de salida.',
+          ),
           pw.SizedBox(height: 18),
           pw.TableHelper.fromTextArray(
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
             headers: <String>['Concepto', 'Monto'],
             data: <List<String>>[
-              <String>['Invertido actual', money(totals.costBase)],
+              <String>['Costo base actual', money(totals.costBase)],
               <String>['Valor de cartera', money(totals.currentValue)],
               <String>['P&L no realizado', money(totals.unrealizedPL)],
               <String>['P&L realizado', money(totals.realizedPL)],
@@ -1972,8 +1979,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               'Cantidad',
               'Invertido',
               'Valor de cartera',
-              'Resultado',
-              'Recuperar',
+              'P&L no realizado bruto',
+              'Precio equilibrio neto',
             ],
             data: _coins.map((String coin) {
               final CoinStats s = stats[coin]!;
@@ -6609,7 +6616,8 @@ class MoreTab extends StatelessWidget {
             _CommandCard(
               icon: Icons.backup_outlined,
               title: 'Copia de seguridad',
-              subtitle: 'Exporta un JSON para guardarlo fuera de la app',
+              subtitle:
+                  'Respaldo financiero: movimientos, precios, comisión y snapshots',
               onTap: onExportBackup,
             ),
             _CommandCard(
@@ -6921,7 +6929,8 @@ class MoreTab extends StatelessWidget {
           _SheetAction(
             icon: Icons.data_object_outlined,
             title: 'JSON respaldo',
-            subtitle: 'Compartir respaldo completo para guardarlo fuera de la app',
+            subtitle:
+                'Respaldo financiero; no incluye tema, alertas ni preferencias visuales',
             onTap: onExportBackup,
           ),
           _SheetAction(
