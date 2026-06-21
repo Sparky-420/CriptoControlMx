@@ -3240,6 +3240,7 @@ class CleanCoinCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool isRecovered = stats.isAtOrAboveNetBreakEven(sellFeePercent);
+    final bool hasPrice = stats.currentPrice > 0;
     final String distance = stats.quantity <= 0 || isRecovered
         ? '0.00%'
         : pct(stats.percentToNetBreakEven(sellFeePercent));
@@ -3265,7 +3266,9 @@ class CleanCoinCard extends StatelessWidget {
                             ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                       Text(
-                        '${crypto(stats.quantity)} · BE ${money(stats.netBreakEvenPrice(sellFeePercent))}',
+                        hasPrice
+                            ? '${crypto(stats.quantity)} · BE ${money(stats.netBreakEvenPrice(sellFeePercent))}'
+                            : '${crypto(stats.quantity)} · Precio no disponible',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
@@ -5410,6 +5413,7 @@ class PremiumCoinCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
+    final bool hasPrice = stat.currentPrice > 0;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -5452,12 +5456,19 @@ class PremiumCoinCard extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: <Widget>[
-                MiniMetric(label: 'Precio', value: money(stat.currentPrice)),
+                MiniMetric(label: 'Precio', value: priceDisplay(stat.currentPrice)),
                 MiniMetric(label: 'Valor actual', value: money(stat.currentValue)),
                 MiniMetric(label: 'Resultado', value: money(stat.unrealizedPL), color: pnlColor(stat.unrealizedPL)),
                 MiniMetric(label: 'Break even', value: money(stat.netBreakEvenPrice(sellFeePercent))),
               ],
             ),
+            if (!hasPrice) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: <Widget>[
@@ -7031,6 +7042,10 @@ class MoreTab extends StatelessWidget {
                     : pricesAvailableCount == pricesTotalCount
                         ? 'Completo'
                         : 'Parcial',
+              ),
+              const InfoLine(
+                'Nota',
+                'Precio 0 puede indicar dato no disponible; no necesariamente valor real de mercado.',
               ),
               InfoLine('Estado de actualización', isRefreshingPrices ? 'Actualizando' : 'En reposo'),
               InfoLine('Al abrir app', refreshPricesOnOpen ? 'Activado' : 'Desactivado'),
@@ -10327,6 +10342,9 @@ DateTime dateOnly(DateTime value) {
 const Duration days1 = Duration(days: 1);
 
 String money(double value) => '\$${value.toStringAsFixed(2)} MXN';
+
+String priceDisplay(double value) =>
+    value > 0 ? money(value) : 'Precio no disponible';
 
 String moneyShort(double value) => '\$${value.toStringAsFixed(0)}';
 
