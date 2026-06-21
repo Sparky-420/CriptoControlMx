@@ -20,7 +20,6 @@ class PriceService {
     'XRP': 'ripple',
     'SOL': 'solana',
     'ATOM': 'cosmos',
-    'EURC': 'eurc',
   };
 
   final HttpClient? _httpClient;

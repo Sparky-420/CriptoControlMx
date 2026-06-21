@@ -44,7 +44,7 @@ const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
       'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: true),
       'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: true),
       'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: true),
-      'EURC': CryptoAssetMetadata(symbol: 'EURC', name: 'EURC', coingeckoId: 'eurc', hasLocalIcon: true, isActive: true),
+      'EURC': CryptoAssetMetadata(symbol: 'EURC', name: 'EURC', coingeckoId: 'eurc', hasLocalIcon: true, isActive: false),
     };
 
 class CriptoControlApp extends StatefulWidget {
@@ -81,7 +81,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     'XRP',
     'SOL',
     'ATOM',
-    'EURC',
   ];
 
   static const String _movementsKey = 'movements_json';
@@ -119,7 +118,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     'XRP': 0.0,
     'SOL': 0.0,
     'ATOM': 0.0,
-    'EURC': 0.0,
   };
 
   int _currentIndex = 0;
@@ -7286,7 +7284,7 @@ class MoreTab extends StatelessWidget {
       coinCase(name: 'Salida sin realizedPL', coin: 'LINK', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'LINK', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'transferOut', 'coin': 'LINK', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 120, 'fee': 0, 'note': 'salida'}], currentPrices: prices('LINK', 100), expected: CoinStats(coin: 'LINK', quantity: 1, costBase: 100, currentPrice: 100, realizedPL: 0, feesPaid: 0, totalInvested: 200)),
       coinCase(name: 'Comisión cero', coin: 'LTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'LTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'sin comisión'}], currentPrices: prices('LTC', 110), expected: CoinStats(coin: 'LTC', quantity: 1, costBase: 100, currentPrice: 110, realizedPL: 0, feesPaid: 0, totalInvested: 100)),
       coinCase(name: 'Precio faltante = 0', coin: 'UNI', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'UNI', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'sin precio'}], currentPrices: <String, double>{}, expected: CoinStats(coin: 'UNI', quantity: 1, costBase: 100, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 100)),
-      coinCase(name: 'EURC con precio 0', coin: 'EURC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'EURC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 1, 'fee': 0, 'note': 'EURC sin precio'}], currentPrices: prices('EURC', 0), expected: CoinStats(coin: 'EURC', quantity: 1, costBase: 1, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 1)),
+      coinCase(name: 'Moneda activa con precio 0', coin: 'USDC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'USDC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 1, 'fee': 0, 'note': 'USDC sin precio'}], currentPrices: prices('USDC', 0), expected: CoinStats(coin: 'USDC', quantity: 1, costBase: 1, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 1)),
       coinCase(name: 'Venta mayor al saldo', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 2, 'unitPrice': 200, 'fee': 0, 'note': 'exceso'}], currentPrices: prices('BTC', 200), expected: CoinStats(coin: 'BTC', quantity: 0, costBase: 0, currentPrice: 200, realizedPL: 100, feesPaid: 0, totalInvested: 100)),
     ];
 
