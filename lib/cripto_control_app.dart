@@ -1648,6 +1648,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         'costo_base_actual_mxn',
         'costo_promedio_mxn',
         'precio_actual_mxn',
+        'price_status',
         'valor_actual_mxn',
         'pnl_no_realizado_bruto_mxn',
         'pnl_realizado_mxn',
@@ -1665,6 +1666,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           fixed(s.costBase, 2),
           fixed(s.avgPrice, 2),
           fixed(s.currentPrice, 2),
+          priceStatusCsv(s.currentPrice),
           fixed(s.currentValue, 2),
           fixed(s.unrealizedPL, 2),
           fixed(s.realizedPL, 2),
@@ -1789,6 +1791,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             'costBase': stats[coin]!.costBase,
             'avgPrice': stats[coin]!.avgPrice,
             'currentPrice': stats[coin]!.currentPrice,
+            'priceStatus': priceStatusJson(stats[coin]!.currentPrice),
             'currentValue': stats[coin]!.currentValue,
             'unrealizedPL': stats[coin]!.unrealizedPL,
             'realizedPL': stats[coin]!.realizedPL,
@@ -1844,6 +1847,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'Costo base actual MXN',
       'Precio promedio MXN',
       'Precio actual MXN',
+      'Estado precio',
       'Valor actual MXN',
       'P&L no realizado bruto MXN',
       'P&L realizado MXN',
@@ -1859,6 +1863,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         stat.costBase,
         stat.avgPrice,
         stat.currentPrice,
+        priceStatusLabel(stat.currentPrice),
         stat.currentValue,
         stat.unrealizedPL,
         stat.realizedPL,
@@ -1927,7 +1932,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     _appendExcelRow(summary, <Object?>[
       'Nota',
-      'Costo promedio ponderado. P&L no realizado bruto; equilibrio neto considera comisión de salida.',
+      'Costo promedio ponderado. P&L no realizado bruto; equilibrio neto considera comisión de salida. Precio no disponible usa 0.00 MXN como fallback técnico.',
     ]);
     excel.setDefaultSheet('Resumen');
     final List<int>? bytes = excel.encode();
@@ -1955,6 +1960,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           pw.Text(
             'Costo promedio ponderado. P&L no realizado bruto; equilibrio neto considera comisión de salida.',
           ),
+          pw.Text(
+            'Precio no disponible significa que la fuente no entregó precio válido; \$0.00 se usa solo como fallback técnico.',
+          ),
           pw.SizedBox(height: 18),
           pw.TableHelper.fromTextArray(
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
@@ -1979,6 +1987,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               'Cantidad',
               'Invertido',
               'Valor de cartera',
+              'Estado precio',
               'P&L no realizado bruto',
               'Precio equilibrio neto',
             ],
@@ -1989,6 +1998,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 crypto(s.quantity),
                 money(s.costBase),
                 money(s.currentValue),
+                priceStatusLabel(s.currentPrice),
                 money(s.unrealizedPL),
                 money(s.netBreakEvenPrice(_sellFeePercent)),
               ];
@@ -10345,6 +10355,12 @@ String money(double value) => '\$${value.toStringAsFixed(2)} MXN';
 
 String priceDisplay(double value) =>
     value > 0 ? money(value) : 'Precio no disponible';
+
+String priceStatusCsv(double value) => value > 0 ? 'disponible' : 'no_disponible';
+
+String priceStatusJson(double value) => value > 0 ? 'available' : 'unavailable';
+
+String priceStatusLabel(double value) => value > 0 ? 'Disponible' : 'No disponible';
 
 String moneyShort(double value) => '\$${value.toStringAsFixed(0)}';
 
