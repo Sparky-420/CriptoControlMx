@@ -61,6 +61,13 @@ class CriptoControlApp extends StatefulWidget {
   State<CriptoControlApp> createState() => _CriptoControlAppState();
 }
 
+class _ImportResult {
+  const _ImportResult({required this.movementCount, required this.snapshotCount, this.warnings = const <String>[], this.errors = const <String>[]});
+  final int movementCount, snapshotCount;
+  final List<String> warnings, errors;
+  bool get hasWarnings => warnings.isNotEmpty; bool get hasErrors => errors.isNotEmpty;
+}
+
 class _CriptoControlAppState extends State<CriptoControlApp>
     with WidgetsBindingObserver {
   static const List<String> _coins = [
@@ -2119,29 +2126,77 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     );
   }
 
-  Future<void> _applyBackupJson(String rawJson) async {
+  bool _isKnownImportMovementType(dynamic value) {
+    return <String>{
+      'buy', 'compra', 'comprar', 'sell', 'venta', 'vender', 'transferin',
+      'transfer_in', 'transferenciaentrada', 'transferencia_entrada',
+      'transferencia recibida', 'recibida', 'entrada', 'transferout',
+      'transfer_out', 'transferenciasalida', 'transferencia_salida',
+      'transferencia enviada', 'enviada', 'salida',
+    }.contains(value?.toString().trim().toLowerCase() ?? '');
+  }
+
+  void _requireImportNumber(
+    Map<String, dynamic> json,
+    List<String> keys,
+    String label,
+    int number,
+  ) {
+    var hasField = false;
+    for (final String key in keys) {
+      if (!json.containsKey(key)) continue;
+      hasField = true;
+      final dynamic value = json[key];
+      if (value == null && key != keys.last) continue;
+      if (value is num || double.tryParse(value?.toString() ?? '') != null) return;
+      throw FormatException('Movimiento #$number tiene $label no numérico');
+    }
+    if (hasField) throw FormatException('Movimiento #$number tiene $label no numérico');
+  }
+
+  Map<String, dynamic> _validatedImportMovement(dynamic raw, int index) {
+    final int number = index + 1;
+    if (raw is! Map) throw FormatException('Movimiento #$number no es un objeto válido');
+    final Map<String, dynamic> json = Map<String, dynamic>.from(raw);
+    if (json.containsKey('type') && !_isKnownImportMovementType(json['type'])) {
+      throw FormatException('Movimiento #$number tiene tipo desconocido');
+    }
+    final dynamic coin = json['coin'] ?? json['crypto'];
+    if (coin == null || coin.toString().trim().isEmpty) throw FormatException('Movimiento #$number no tiene moneda');
+    _requireImportNumber(json, <String>['quantity'], 'cantidad', number);
+    _requireImportNumber(json, <String>['unitPrice', 'unit_price'], 'precio unitario', number);
+    _requireImportNumber(json, <String>['fee', 'commission'], 'comisión', number);
+    if (json.containsKey('date') &&
+        DateTime.tryParse(json['date']?.toString() ?? '') == null) {
+      throw FormatException('Movimiento #$number tiene fecha inválida');
+    }
+    return json;
+  }
+
+  String _importErrorMessage(Object error) =>
+      error is FormatException && error.message.isNotEmpty
+          ? error.message
+          : 'Respaldo JSON inválido o incompleto. Revisa el contenido e inténtalo de nuevo.';
+
+  Future<_ImportResult> _applyBackupJson(String rawJson) async {
     final dynamic decoded = jsonDecode(rawJson.trim());
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException();
-    }
+    if (decoded is! Map) throw const FormatException('La raíz del respaldo no es un objeto JSON');
+    final Map<String, dynamic> backup = Map<String, dynamic>.from(decoded);
 
-    final dynamic movementsRaw = decoded['movements'];
-    final dynamic pricesRaw = decoded['currentPrices'];
-    final dynamic settingsRaw = decoded['settings'];
-    final bool hasSnapshots = decoded.containsKey('snapshots');
-    final dynamic snapshotsRaw = decoded['snapshots'];
+    final dynamic movementsRaw = backup['movements'];
+    final dynamic pricesRaw = backup['currentPrices'];
+    final dynamic settingsRaw = backup['settings'];
+    final bool hasSnapshots = backup.containsKey('snapshots');
+    final dynamic snapshotsRaw = backup['snapshots'];
 
-    if (movementsRaw is! List ||
-        pricesRaw is! Map ||
-        (hasSnapshots && snapshotsRaw is! List)) {
-      throw const FormatException();
-    }
+    if (movementsRaw is! List) throw const FormatException('El respaldo no contiene movimientos válidos');
+    if (pricesRaw is! Map) throw const FormatException('El respaldo no contiene precios válidos');
+    if (hasSnapshots && snapshotsRaw is! List) throw const FormatException('Las instantáneas del respaldo no son válidas');
 
-    final List<Movement> imported = movementsRaw
-        .map(
-          (dynamic e) => Movement.fromJson(Map<String, dynamic>.from(e as Map)),
-        )
-        .toList();
+    final List<Movement> imported = <Movement>[
+      for (int i = 0; i < movementsRaw.length; i++)
+        Movement.fromJson(_validatedImportMovement(movementsRaw[i], i)),
+    ];
     final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
     final List<PortfolioSnapshot>? importedSnapshots = hasSnapshots
         ? (snapshotsRaw as List)
@@ -2152,6 +2207,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             )
             .toList()
         : null;
+    final List<String> warnings = <String>[
+      if (!hasSnapshots) 'Respaldo sin instantáneas',
+      ...FinancialEngine.diagnostics(
+        coins: _coins,
+        movements: imported,
+        snapshots: importedSnapshots ?? const <PortfolioSnapshot>[],
+        currentPrices: <String, double>{
+          for (final MapEntry<String, dynamic> entry in pricesMap.entries)
+            entry.key: numberFromJson(entry.value),
+        },
+      ),
+    ];
 
     setState(() {
       _movements
@@ -2183,6 +2250,19 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } else {
       await _saveSnapshots();
     }
+    return _ImportResult(movementCount: imported.length, snapshotCount: importedSnapshots?.length ?? 0, warnings: warnings);
+  }
+
+  void _showImportResult(ScaffoldMessengerState messenger, _ImportResult result, {String? fileName}) {
+    final String source = fileName == null ? '' : ': $fileName';
+    final String counts = '${result.movementCount} movimientos, ${result.snapshotCount} instantáneas';
+    if (!result.hasWarnings) {
+      messenger.showSnackBar(SnackBar(content: Text('Respaldo importado$source: $counts.')));
+      return;
+    }
+
+    final String warnings = result.warnings.take(5).join(' · ');
+    messenger.showSnackBar(SnackBar(content: Text('Respaldo importado con advertencias: $counts. $warnings')));
   }
 
   Future<void> _importBackup(BuildContext pageContext) async {
@@ -2224,16 +2304,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 pageContext,
               );
               try {
-                await _applyBackupJson(controller.text);
+                final _ImportResult result = await _applyBackupJson(controller.text);
 
                 if (!mounted) return;
                 navigator.pop();
+                await Future<void>.delayed(Duration.zero);
+                if (!mounted) return;
+                _showImportResult(messenger, result);
+              } catch (error) {
                 messenger.showSnackBar(
-                  const SnackBar(content: Text('Respaldo importado')),
-                );
-              } catch (_) {
-                messenger.showSnackBar(
-                  const SnackBar(content: Text('Respaldo JSON inválido o incompleto. Revisa el contenido e inténtalo de nuevo.')),
+                  SnackBar(content: Text('No se pudo importar el respaldo. ${_importErrorMessage(error)}')),
                 );
               }
             },
@@ -2248,28 +2328,26 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
+      final FilePickerResult? pickerResult = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: <String>['json'],
         withData: true,
       );
 
-      if (result == null || result.files.isEmpty) return;
+      if (pickerResult == null || pickerResult.files.isEmpty) return;
 
-      final PlatformFile file = result.files.single;
+      final PlatformFile file = pickerResult.files.single;
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw const FormatException();
 
-      await _applyBackupJson(utf8.decode(bytes));
+      final _ImportResult importResult = await _applyBackupJson(utf8.decode(bytes));
       if (!mounted) return;
 
-      messenger.showSnackBar(
-        SnackBar(content: Text('Respaldo importado: ${file.name}')),
-      );
-    } catch (_) {
+      _showImportResult(messenger, importResult, fileName: file.name);
+    } catch (error) {
       if (mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('No se pudo importar el archivo JSON. Verifica que sea un respaldo válido.')),
+          SnackBar(content: Text('No se pudo importar el respaldo. ${_importErrorMessage(error)}')),
         );
       }
     }
