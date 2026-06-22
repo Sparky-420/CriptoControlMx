@@ -3501,10 +3501,21 @@ class _MovementsTabState extends State<MovementsTab> {
   }
 
   _OcrMovementCandidate _parseMercadoPagoOcrText(String rawText) {
-    final String text = rawText.trim();
-    final String lower = text.toLowerCase();
+    final String text = rawText
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\n{2,}'), '\n')
+        .trim();
+    String fold(String value) => value
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u');
+    final String lower = fold(text).replaceAll(RegExp(r'\s+'), ' ');
     final List<String> warnings = <String>[];
-    final RegExp number = RegExp(r'\d[\d.,]*');
+    final RegExp number = RegExp(r'\d[\d .,]*');
 
     double? parseNumber(String raw) {
       String value = raw.replaceAll(RegExp(r'[^0-9,.-]'), '');
@@ -3521,14 +3532,22 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     double? firstGroup(RegExp pattern, [int group = 1]) {
-      final RegExpMatch? match = pattern.firstMatch(text);
+      final RegExpMatch? match = pattern.firstMatch(lower);
       return match == null ? null : parseNumber(match.group(group) ?? '');
     }
 
     MovementType? type;
-    if (RegExp(r'\b(compraste|compra|compra de)\b').hasMatch(lower)) {
+    final bool hasBuy = RegExp(
+      r'\b(compraste(?: cripto| bitcoin| ethereum)?|compra(?: de)?)\b',
+    ).hasMatch(lower);
+    final bool hasSell = RegExp(
+      r'\b(vendiste|venta(?: de)?|retiraste ganancia|recibiste por venta)\b',
+    ).hasMatch(lower);
+    if (hasBuy && hasSell) {
+      warnings.add('Tipo detectado con baja confianza.');
+    } else if (hasBuy) {
       type = MovementType.buy;
-    } else if (RegExp(r'\b(vendiste|venta|venta de)\b').hasMatch(lower)) {
+    } else if (hasSell) {
       type = MovementType.sell;
     }
 
@@ -3553,6 +3572,9 @@ class _MovementsTabState extends State<MovementsTab> {
       'sol': 'SOL',
       'atom': 'ATOM',
     };
+    if (RegExp(r'\b(eurc|musd|meli\s*dolar|melidolar)\b').hasMatch(lower)) {
+      warnings.add('Moneda no soportada por OCR.');
+    }
     String? coin;
     for (final MapEntry<String, String> entry in coins.entries) {
       if (RegExp('\\b${RegExp.escape(entry.key)}\\b').hasMatch(lower)) {
@@ -3563,53 +3585,125 @@ class _MovementsTabState extends State<MovementsTab> {
 
     double? quantity;
     if (coin != null) {
-      final String c = coins.keys.map(RegExp.escape).join('|');
+      final String c = coins.entries
+          .where((MapEntry<String, String> entry) => entry.value == coin)
+          .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
+          .join('|');
       quantity =
+          firstGroup(RegExp('(?:cantidad|recibiste|compraste|vendiste)[^\\d]{0,24}(${number.pattern})\\s*(?:$c)', caseSensitive: false)) ??
           firstGroup(RegExp('(${number.pattern})\\s*(?:$c)', caseSensitive: false)) ??
           firstGroup(RegExp('(?:$c)\\s*(${number.pattern})', caseSensitive: false));
+      if (quantity != null && quantity <= 0) quantity = null;
     }
 
-    final double? amountMxn =
-        firstGroup(RegExp(r'\$\s*(\d[\d.,]*)')) ??
-        firstGroup(
-          RegExp(r'(\d[\d.,]*)\s*(?:mxn|pesos)', caseSensitive: false),
-        );
-    double? unitPrice = firstGroup(
-      RegExp(
-        r'(?:precio|unitario|unidad|por unidad)[^\d$]{0,30}\$?\s*(\d[\d.,]*)',
-        caseSensitive: false,
-      ),
-    );
+    final List<double> preferredAmounts = <double>[];
+    final List<double> amountOptions = <double>[];
+    void addAmount(double? value, {bool preferred = false}) {
+      if (value == null || value <= 0) return;
+      final List<double> target = preferred ? preferredAmounts : amountOptions;
+      if (!target.any((double seen) => (seen - value).abs() < 0.005)) {
+        target.add(value);
+      }
+    }
+
+    for (final RegExpMatch match in RegExp(
+      '(?:total|pagaste|recibiste|monto)[^\\d\$]{0,30}(?:\\\$\\s*(${number.pattern})|(${number.pattern})\\s*(?:mxn|pesos))',
+      caseSensitive: false,
+    ).allMatches(lower)) {
+      addAmount(parseNumber(match.group(1) ?? match.group(2) ?? ''), preferred: true);
+    }
+    for (final RegExpMatch match in RegExp('\\\$\\s*(${number.pattern})').allMatches(text)) {
+      addAmount(parseNumber(match.group(1) ?? ''));
+    }
+    for (final RegExpMatch match in RegExp(
+      '(${number.pattern})\\s*(?:mxn|pesos)',
+      caseSensitive: false,
+    ).allMatches(lower)) {
+      addAmount(parseNumber(match.group(1) ?? ''));
+    }
+    final List<double> allAmounts = <double>[];
+    for (final double value in <double>[...preferredAmounts, ...amountOptions]) {
+      if (!allAmounts.any((double seen) => (seen - value).abs() < 0.005)) {
+        allAmounts.add(value);
+      }
+    }
+    final double? amountMxn = allAmounts.isEmpty ? null : allAmounts.first;
+    if (allAmounts.length > 1) {
+      warnings.add('Se detectaron varios montos; revisa el total.');
+    }
+
+    final String coinTerms = coin == null
+        ? coins.keys.map(RegExp.escape).join('|')
+        : coins.entries
+            .where((MapEntry<String, String> entry) => entry.value == coin)
+            .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
+            .join('|');
+    double? unitPrice =
+        firstGroup(RegExp('(?:precio(?: de (?:compra|venta))?|precio por|cotizacion)[^\\d\$]{0,36}\\\$?\\s*(${number.pattern})', caseSensitive: false)) ??
+        firstGroup(RegExp('1\\s*(?:$coinTerms)\\s*=\\s*\\\$?\\s*(${number.pattern})', caseSensitive: false));
+    if (unitPrice != null && unitPrice <= 0) unitPrice = null;
     if (unitPrice == null && amountMxn != null && quantity != null && quantity > 0) {
       unitPrice = amountMxn / quantity;
       warnings.add('Precio unitario calculado desde monto y cantidad.');
+    } else if (unitPrice == null) {
+      warnings.add('Precio unitario no detectado.');
     }
 
-    double? fee = firstGroup(
-      RegExp(r'comisi[oó]n[^\d$]{0,30}\$?\s*(\d[\d.,]*)', caseSensitive: false),
-    );
+    double? fee =
+        firstGroup(RegExp('(?:comision|cargo|fee|costo de servicio)[^\\d\$]{0,30}\\\$?\\s*(${number.pattern})', caseSensitive: false));
     if (fee == null) {
       fee = 0;
       warnings.add('Comisión no detectada; se usó 0.00 MXN.');
     }
 
     DateTime? date;
-    final RegExpMatch? dateMatch = RegExp(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b').firstMatch(text);
+    final RegExpMatch? dateMatch = RegExp(
+      r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?\b',
+    ).firstMatch(text);
     if (dateMatch != null) {
       final int day = int.parse(dateMatch.group(1)!);
       final int month = int.parse(dateMatch.group(2)!);
       int year = int.parse(dateMatch.group(3)!);
       if (year < 100) year += 2000;
-      date = DateTime(year, month, day);
+      date = DateTime(
+        year,
+        month,
+        day,
+        int.tryParse(dateMatch.group(4) ?? '') ?? 0,
+        int.tryParse(dateMatch.group(5) ?? '') ?? 0,
+      );
     } else {
-      date = DateTime.now();
-      warnings.add('Fecha no detectada; se usó fecha actual.');
+      const Map<String, int> months = <String, int>{
+        'ene': 1, 'enero': 1, 'feb': 2, 'febrero': 2, 'mar': 3,
+        'marzo': 3, 'abr': 4, 'abril': 4, 'may': 5, 'mayo': 5,
+        'jun': 6, 'junio': 6, 'jul': 7, 'julio': 7, 'ago': 8,
+        'agosto': 8, 'sep': 9, 'septiembre': 9, 'oct': 10,
+        'octubre': 10, 'nov': 11, 'noviembre': 11, 'dic': 12,
+        'diciembre': 12,
+      };
+      final RegExpMatch? namedDate = RegExp(
+        r'\b(\d{1,2})(?: de)? (ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?: de)? (\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?\b',
+      ).firstMatch(lower);
+      if (namedDate != null) {
+        int year = int.parse(namedDate.group(3)!);
+        if (year < 100) year += 2000;
+        date = DateTime(
+          year,
+          months[namedDate.group(2)]!,
+          int.parse(namedDate.group(1)!),
+          int.tryParse(namedDate.group(4) ?? '') ?? 0,
+          int.tryParse(namedDate.group(5) ?? '') ?? 0,
+        );
+      } else {
+        date = DateTime.now();
+        warnings.add('Fecha no detectada; se usó fecha actual.');
+      }
     }
 
     if (coin == null) warnings.add('Moneda no detectada.');
     if (type == null) warnings.add('Tipo de movimiento no detectado.');
     if (quantity == null) warnings.add('Cantidad cripto no detectada.');
-    if (amountMxn == null && unitPrice == null) warnings.add('Monto o precio no detectado.');
+    if (amountMxn == null) warnings.add('Monto MXN no detectado.');
 
     return _OcrMovementCandidate(
       type: type,
@@ -3622,7 +3716,7 @@ class _MovementsTabState extends State<MovementsTab> {
       source: 'Mercado Pago',
       note: 'OCR / captura Mercado Pago',
       warnings: warnings,
-      rawText: text,
+      rawText: rawText,
     );
   }
 
@@ -3652,6 +3746,8 @@ class _MovementsTabState extends State<MovementsTab> {
                 'Datos detectados',
                 style: Theme.of(sheetContext).textTheme.titleLarge,
               ),
+              const SizedBox(height: 6),
+              const Text('Revisa antes de guardar.'),
               const SizedBox(height: 12),
               if (!candidate.hasUsefulData)
                 const Text(
