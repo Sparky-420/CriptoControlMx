@@ -7,6 +7,7 @@ import 'package:excel/excel.dart' as xl;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -3394,6 +3395,91 @@ class _MovementsTabState extends State<MovementsTab> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _runOcrFromCapture() async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final FilePickerResult? pickerResult = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: <String>['png', 'jpg', 'jpeg', 'webp'],
+      );
+
+      if (pickerResult == null || pickerResult.files.isEmpty) return;
+
+      final String? path = pickerResult.files.single.path;
+      if (path == null || path.trim().isEmpty) {
+        throw const FormatException('Ruta de captura inválida.');
+      }
+
+      final InputImage inputImage = InputImage.fromFilePath(path);
+      final TextRecognizer textRecognizer = TextRecognizer();
+      late final RecognizedText recognizedText;
+
+      try {
+        recognizedText = await textRecognizer.processImage(inputImage);
+      } finally {
+        await textRecognizer.close();
+      }
+
+      if (!mounted) return;
+      _showOcrPreview(recognizedText.text);
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No se pudo leer la captura.')),
+      );
+    }
+  }
+
+  void _showOcrPreview(String detectedText) {
+    final String previewText = detectedText.trim();
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            8,
+            20,
+            20 + MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                'Texto detectado',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                previewText.isEmpty ? 'No se detectó texto útil' : previewText,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'En la siguiente fase se convertirá este texto en movimiento editable.',
+                style: Theme.of(sheetContext).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: const Text('Cerrar'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _editMovement(Movement movement) async {
     await widget.onEdit(movement);
     if (mounted) setState(() {});
@@ -3625,6 +3711,15 @@ class _MovementsTabState extends State<MovementsTab> {
             onPressed: _addMovement,
             icon: const Icon(Icons.add),
             label: const Text('Agregar movimiento'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _runOcrFromCapture,
+            icon: const Icon(Icons.document_scanner_outlined),
+            label: const Text('Importar desde captura'),
           ),
         ),
         const SizedBox(height: 12),
