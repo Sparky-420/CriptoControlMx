@@ -3414,6 +3414,8 @@ class _OcrMovementCandidate {
       unitPrice != null;
 }
 
+enum _OcrReadQuality { complete, partial, weak }
+
 class _MovementsTabState extends State<MovementsTab> {
   String _coinFilter = 'TODAS';
   String _typeFilter = 'TODOS';
@@ -3767,7 +3769,7 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     if (coin == null) addWarning('Moneda no detectada.');
-    if (type == null) addWarning('Tipo no detectado.');
+    if (type == null) addWarning('Tipo de movimiento no detectado.');
     if (quantity == null) addWarning('Cantidad cripto no detectada.');
     if (amountMxn == null) addWarning('Monto MXN no detectado.');
 
@@ -3786,9 +3788,88 @@ class _MovementsTabState extends State<MovementsTab> {
     );
   }
 
+  _OcrReadQuality _ocrReadQuality(_OcrMovementCandidate candidate) {
+    final bool hasCriticalData =
+        candidate.type != null &&
+        candidate.coin != null &&
+        candidate.quantity != null &&
+        candidate.unitPrice != null;
+    if (hasCriticalData) return _OcrReadQuality.complete;
+
+    final bool hasPartialData =
+        candidate.coin != null ||
+        candidate.quantity != null ||
+        candidate.amountMxn != null ||
+        candidate.unitPrice != null;
+    return hasPartialData ? _OcrReadQuality.partial : _OcrReadQuality.weak;
+  }
+
+  String _ocrReadTitle(_OcrReadQuality quality) {
+    switch (quality) {
+      case _OcrReadQuality.complete:
+        return 'Lectura completa';
+      case _OcrReadQuality.partial:
+        return 'Lectura parcial';
+      case _OcrReadQuality.weak:
+        return 'No se detectó movimiento claro';
+    }
+  }
+
+  String _ocrReadCopy(_OcrReadQuality quality) {
+    switch (quality) {
+      case _OcrReadQuality.complete:
+        return 'Revisa los datos antes de guardar.';
+      case _OcrReadQuality.partial:
+        return 'Se detectaron algunos datos. Completa lo faltante.';
+      case _OcrReadQuality.weak:
+        return 'No se pudo armar un movimiento automáticamente. Puedes capturarlo manualmente.';
+    }
+  }
+
+  _OcrMovementCandidate _manualOcrCandidate(String rawText) {
+    final bool looksLikeMercadoPago = _isMercadoPagoText(rawText);
+    return _OcrMovementCandidate(
+      type: null,
+      coin: null,
+      quantity: null,
+      amountMxn: null,
+      unitPrice: null,
+      fee: 0,
+      date: DateTime.now(),
+      source: looksLikeMercadoPago ? 'Mercado Pago' : '',
+      note: looksLikeMercadoPago ? 'OCR / captura Mercado Pago' : 'OCR / captura',
+      warnings: const <String>['Captura manual: completa los datos desde el texto OCR.'],
+      rawText: rawText,
+    );
+  }
+
+  void _showDetectedOcrText(BuildContext pageContext, String text) {
+    showDialog<void>(
+      context: pageContext,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Texto detectado'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            text.trim().isEmpty ? 'No se detectó texto útil' : text.trim(),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showOcrPreview(String detectedText) {
     final String previewText = detectedText.trim();
     final _OcrMovementCandidate candidate = _parseMercadoPagoOcrText(previewText);
+    final _OcrReadQuality quality = _ocrReadQuality(candidate);
+    final bool isWeak = quality == _OcrReadQuality.weak;
+    final List<String> visibleWarnings = candidate.warnings.take(6).toList();
+    final int hiddenWarningCount = candidate.warnings.length - visibleWarnings.length;
 
     showModalBottomSheet<void>(
       context: context,
@@ -3813,12 +3894,13 @@ class _MovementsTabState extends State<MovementsTab> {
                 style: Theme.of(sheetContext).textTheme.titleLarge,
               ),
               const SizedBox(height: 6),
-              const Text('Revisa antes de guardar.'),
+              Text(
+                _ocrReadTitle(quality),
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(_ocrReadCopy(quality)),
               const SizedBox(height: 12),
-              if (!candidate.hasUsefulData)
-                const Text(
-                  'No se detectó un movimiento claro. Revisa el texto o intenta con otra captura.',
-                ),
               InfoLine('Tipo', candidate.type?.label ?? 'No detectado'),
               InfoLine('Moneda', candidate.coin ?? 'No detectada'),
               InfoLine(
@@ -3833,10 +3915,13 @@ class _MovementsTabState extends State<MovementsTab> {
               const SizedBox(height: 16),
               Text('Advertencias', style: Theme.of(sheetContext).textTheme.titleMedium),
               const SizedBox(height: 8),
-              if (candidate.warnings.isEmpty)
+              if (visibleWarnings.isEmpty)
                 const Text('Sin advertencias.')
-              else
-                ...candidate.warnings.map((String warning) => Text('• $warning')),
+              else ...<Widget>[
+                ...visibleWarnings.map((String warning) => Text('• $warning')),
+                if (hiddenWarningCount > 0)
+                  Text('• $hiddenWarningCount advertencias más.'),
+              ],
               const SizedBox(height: 16),
               ExpansionTile(
                 tilePadding: EdgeInsets.zero,
@@ -3855,10 +3940,30 @@ class _MovementsTabState extends State<MovementsTab> {
                 style: Theme.of(sheetContext).textTheme.bodySmall,
               ),
               const SizedBox(height: 16),
-              Row(
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                alignment: WrapAlignment.end,
                 children: <Widget>[
-                  Expanded(
-                    child: FilledButton.icon(
+                  if (isWeak) ...<Widget>[
+                    FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.of(sheetContext).pop();
+                        await Future<void>.delayed(Duration.zero);
+                        if (!mounted) return;
+                        await widget.onAddFromOcr(_manualOcrCandidate(previewText));
+                        if (mounted) setState(() {});
+                      },
+                      icon: const Icon(Icons.edit_note_outlined),
+                      label: const Text('Capturar manualmente'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _showDetectedOcrText(sheetContext, previewText),
+                      icon: const Icon(Icons.text_snippet_outlined),
+                      label: const Text('Ver texto detectado'),
+                    ),
+                  ] else
+                    FilledButton.icon(
                       onPressed: () async {
                         Navigator.of(sheetContext).pop();
                         await Future<void>.delayed(Duration.zero);
@@ -3869,12 +3974,10 @@ class _MovementsTabState extends State<MovementsTab> {
                       icon: const Icon(Icons.edit_note_outlined),
                       label: const Text('Revisar y guardar movimiento'),
                     ),
-                  ),
-                  const SizedBox(width: 10),
                   TextButton(
-                  onPressed: () => Navigator.of(sheetContext).pop(),
-                  child: const Text('Cerrar'),
-                ),
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('Cerrar'),
+                  ),
                 ],
               ),
             ],
