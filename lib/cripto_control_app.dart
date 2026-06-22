@@ -2368,7 +2368,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
   }
 
-  Future<void> _performFinancialReset(ScaffoldMessengerState messenger) async {
+  Future<bool> _performFinancialReset(ScaffoldMessengerState messenger) async {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await _priceAlertService.configureAutomaticAlerts(
@@ -2401,13 +2401,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         await prefs.remove(key);
       }
 
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _movements.clear();
         _snapshots.clear();
-        for (final String coin in _coins) {
-          _currentPrices[coin] = 0.0;
-        }
+        _currentPrices
+          ..clear()
+          ..addEntries(
+            _coins.map((String coin) => MapEntry<String, double>(coin, 0.0)),
+          );
         _pricesUpdatedAt = null;
         _sellFeePercent = FinancialEngine.defaultExitFeePercent;
         _snapshotAutomationMode = SnapshotAutomationMode.manual;
@@ -2428,24 +2430,28 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       });
       _restartPriceRefreshTimer();
 
-      if (!mounted) return;
+      if (!mounted) return false;
       messenger.showSnackBar(
         const SnackBar(content: Text('Datos financieros restablecidos')),
       );
+      return true;
     } catch (_) {
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo restablecer la app')),
         );
       }
+      return false;
     }
   }
 
   Future<void> _resetFinancialData(BuildContext pageContext) async {
-    ScaffoldMessenger.of(pageContext).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Restablecimiento financiero temporalmente desactivado. Usa respaldo JSON e importación manual mientras se rediseña este flujo.',
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    await Navigator.of(pageContext).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext resetContext) => _FinancialResetScreen(
+          onExportBackup: () => _exportBackup(resetContext),
+          onReset: () => _performFinancialReset(messenger),
         ),
       ),
     );
@@ -6501,6 +6507,192 @@ class ResultBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FinancialResetScreen extends StatefulWidget {
+  final Future<bool> Function() onExportBackup;
+  final Future<bool> Function() onReset;
+
+  const _FinancialResetScreen({
+    required this.onExportBackup,
+    required this.onReset,
+  });
+
+  @override
+  State<_FinancialResetScreen> createState() => _FinancialResetScreenState();
+}
+
+class _FinancialResetScreenState extends State<_FinancialResetScreen> {
+  final TextEditingController _confirmationController =
+      TextEditingController();
+  bool _backupReady = false;
+  bool _exportingBackup = false;
+  bool _resetInProgress = false;
+
+  bool get _confirmationReady =>
+      _confirmationController.text.trim() == 'RESTABLECER';
+
+  bool get _canReset =>
+      _backupReady && _confirmationReady && !_resetInProgress;
+
+  @override
+  void initState() {
+    super.initState();
+    _confirmationController.addListener(_onConfirmationChanged);
+  }
+
+  @override
+  void dispose() {
+    _confirmationController.removeListener(_onConfirmationChanged);
+    _confirmationController.dispose();
+    super.dispose();
+  }
+
+  void _onConfirmationChanged() => setState(() {});
+
+  Future<void> _generateBackup() async {
+    if (_exportingBackup || _resetInProgress) return;
+    setState(() => _exportingBackup = true);
+    final bool exported = await widget.onExportBackup();
+    if (!mounted) return;
+    setState(() {
+      _backupReady = exported;
+      _exportingBackup = false;
+    });
+  }
+
+  Future<void> _resetFinancialData() async {
+    if (!_canReset) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _resetInProgress = true);
+    final bool completed = await widget.onReset();
+    if (!mounted) return;
+    if (completed) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _resetInProgress = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Restablecer datos financieros')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+          children: <Widget>[
+            CardPanel(
+              title: 'Acción permanente',
+              subtitle:
+                  'Borra datos financieros locales. Conserva tema y preferencias visuales.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const <Widget>[
+                  InfoLine('Se borra', 'Movimientos, precios y snapshots'),
+                  InfoLine('También se borra', 'Alertas y referencias'),
+                  InfoLine('Se conserva', 'Tema y preferencias visuales'),
+                ],
+              ),
+            ),
+            CardPanel(
+              title: '1. Respaldo financiero',
+              subtitle:
+                  'Genera un archivo JSON antes de permitir el restablecimiento.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  FilledButton.icon(
+                    onPressed: _exportingBackup || _resetInProgress
+                        ? null
+                        : _generateBackup,
+                    icon: _exportingBackup
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.backup_outlined),
+                    label: Text(
+                      _exportingBackup
+                          ? 'Generando respaldo...'
+                          : 'Generar respaldo financiero JSON',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  InfoLine(
+                    'Respaldo previo',
+                    _backupReady ? 'Listo para continuar' : 'Pendiente',
+                    emphasized: true,
+                    valueColor:
+                        _backupReady ? colors.primary : colors.error,
+                  ),
+                ],
+              ),
+            ),
+            CardPanel(
+              title: '2. Confirmación fuerte',
+              subtitle:
+                  'Escribe RESTABLECER exactamente para habilitar el botón final.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  TextField(
+                    controller: _confirmationController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Escribe RESTABLECER',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      OutlinedButton(
+                        onPressed: _resetInProgress
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        child: const Text('Cancelar'),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _canReset ? _resetFinancialData : null,
+                          style: _canReset
+                              ? FilledButton.styleFrom(
+                                  backgroundColor: colors.error,
+                                  foregroundColor: colors.onError,
+                                )
+                              : null,
+                          icon: _resetInProgress
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.delete_forever_outlined),
+                          label: Text(
+                            _resetInProgress
+                                ? 'Restableciendo...'
+                                : 'Restablecer datos financieros',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
