@@ -2137,7 +2137,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       fileName: 'criptocontrolmx_respaldo.json',
       mimeType: 'application/json',
       bytes: utf8.encode(_buildBackupJson()),
-      successMessage: 'Respaldo JSON listo para compartir',
+      successMessage: 'Copia de seguridad lista para compartir',
     );
   }
 
@@ -2191,11 +2191,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   String _importErrorMessage(Object error) =>
       error is FormatException && error.message.isNotEmpty
           ? error.message
-          : 'Respaldo JSON inválido o incompleto. Revisa el contenido e inténtalo de nuevo.';
+          : 'Copia de seguridad inválida o incompleta. Revisa el contenido e inténtalo de nuevo.';
 
   Future<_ImportResult> _applyBackupJson(String rawJson) async {
     final dynamic decoded = jsonDecode(rawJson.trim());
-    if (decoded is! Map) throw const FormatException('La raíz del respaldo no es un objeto JSON');
+    if (decoded is! Map) throw const FormatException('La raíz de la copia no es un objeto válido');
     final Map<String, dynamic> backup = Map<String, dynamic>.from(decoded);
 
     final dynamic movementsRaw = backup['movements'];
@@ -2204,9 +2204,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final bool hasSnapshots = backup.containsKey('snapshots');
     final dynamic snapshotsRaw = backup['snapshots'];
 
-    if (movementsRaw is! List) throw const FormatException('El respaldo no contiene movimientos válidos');
-    if (pricesRaw is! Map) throw const FormatException('El respaldo no contiene precios válidos');
-    if (hasSnapshots && snapshotsRaw is! List) throw const FormatException('Las instantáneas del respaldo no son válidas');
+    if (movementsRaw is! List) throw const FormatException('La copia no contiene movimientos válidos');
+    if (pricesRaw is! Map) throw const FormatException('La copia no contiene precios válidos');
+    if (hasSnapshots && snapshotsRaw is! List) throw const FormatException('Las instantáneas de la copia no son válidas');
 
     final List<Movement> imported = <Movement>[
       for (int i = 0; i < movementsRaw.length; i++)
@@ -2223,7 +2223,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             .toList()
         : null;
     final List<String> warnings = <String>[
-      if (!hasSnapshots) 'Respaldo sin instantáneas',
+      if (!hasSnapshots) 'Copia sin instantáneas',
       ...FinancialEngine.diagnostics(
         coins: _coins,
         movements: imported,
@@ -2272,12 +2272,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final String source = fileName == null ? '' : ': $fileName';
     final String counts = '${result.movementCount} movimientos, ${result.snapshotCount} instantáneas';
     if (!result.hasWarnings) {
-      messenger.showSnackBar(SnackBar(content: Text('Respaldo importado$source: $counts.')));
+      messenger.showSnackBar(SnackBar(content: Text('Copia restaurada$source: $counts.')));
       return;
     }
 
     final String warnings = result.warnings.take(5).join(' · ');
-    messenger.showSnackBar(SnackBar(content: Text('Respaldo importado con advertencias: $counts. $warnings')));
+    messenger.showSnackBar(SnackBar(content: Text('Copia restaurada con advertencias: $counts. $warnings')));
   }
 
   Future<void> _importBackup(BuildContext pageContext) async {
@@ -2286,7 +2286,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await showDialog<void>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Importar respaldo JSON'),
+        title: const Text('Restaurar copia de seguridad'),
         content: SafeArea(
           top: false,
           child: SingleChildScrollView(
@@ -2301,7 +2301,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               minLines: 8,
               maxLines: 14,
               decoration: const InputDecoration(
-                hintText: 'Pega aquí tu respaldo',
+                hintText: 'Pega aquí el contenido de tu copia',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -2328,11 +2328,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 _showImportResult(messenger, result);
               } catch (error) {
                 messenger.showSnackBar(
-                  SnackBar(content: Text('No se pudo importar el respaldo. ${_importErrorMessage(error)}')),
+                  SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
                 );
               }
             },
-            child: const Text('Importar'),
+            child: const Text('Restaurar copia'),
           ),
         ],
       ),
@@ -2362,7 +2362,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (error) {
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('No se pudo importar el respaldo. ${_importErrorMessage(error)}')),
+          SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
         );
       }
     }
@@ -2992,7 +2992,7 @@ class SummaryTab extends StatelessWidget {
           CardPanel(
             title: 'Bienvenido a CriptoControlMx',
             subtitle:
-                'Empieza con tu primer movimiento o importa un respaldo JSON. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
+                'Empieza con tu primer movimiento o restaura una copia de seguridad. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -3022,7 +3022,7 @@ class SummaryTab extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: onImportBackup,
                       icon: const Icon(Icons.upload_file_outlined),
-                      label: const Text('Importar respaldo'),
+                      label: const Text('Restaurar copia'),
                     ),
                     OutlinedButton.icon(
                       onPressed: onRefreshPrices,
@@ -6601,9 +6601,9 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
               ),
             ),
             CardPanel(
-              title: '1. Respaldo financiero',
+              title: '1. Copia de seguridad',
               subtitle:
-                  'Genera un archivo JSON antes de permitir el restablecimiento.',
+                  'Primero crea una copia de seguridad antes de permitir el restablecimiento.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -6620,13 +6620,13 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                         : const Icon(Icons.backup_outlined),
                     label: Text(
                       _exportingBackup
-                          ? 'Generando respaldo...'
-                          : 'Generar respaldo financiero JSON',
+                          ? 'Creando copia...'
+                          : 'Crear copia de seguridad',
                     ),
                   ),
                   const SizedBox(height: 12),
                   InfoLine(
-                    'Respaldo previo',
+                    'Copia previa',
                     _backupReady ? 'Listo para continuar' : 'Pendiente',
                     emphasized: true,
                     valueColor:
@@ -6815,12 +6815,12 @@ class MoreTab extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         _CommandSection(
-          title: 'Cuenta y respaldo',
+          title: 'Cuenta y copia de seguridad',
           children: <Widget>[
             _CommandCard(
               icon: Icons.account_circle_outlined,
               title: 'Cuenta',
-              subtitle: 'Próximamente: sincronización y respaldo en la nube',
+              subtitle: 'Próximamente: sincronización y copia en la nube',
               badge: 'Local',
               onTap: () => _showAccountPlaceholder(context),
             ),
@@ -6828,7 +6828,7 @@ class MoreTab extends StatelessWidget {
               icon: Icons.backup_outlined,
               title: 'Copia de seguridad',
               subtitle:
-                  'Respaldo financiero: movimientos, precios, comisión y snapshots',
+                  'Crear una copia de tus movimientos, precios, comisión y snapshots.',
               onTap: onExportBackup,
             ),
             _CommandCard(
@@ -6850,8 +6850,8 @@ class MoreTab extends StatelessWidget {
             ),
             _CommandCard(
               icon: Icons.upload_file_outlined,
-              title: 'Importar respaldo',
-              subtitle: 'Pegar JSON o cargar archivo local',
+              title: 'Restaurar copia de seguridad',
+              subtitle: 'Recuperar datos desde una copia guardada.',
               onTap: () => _showImportActions(context),
             ),
             _CommandCard(
@@ -6871,7 +6871,7 @@ class MoreTab extends StatelessWidget {
               icon: Icons.restart_alt_outlined,
               title: 'Restablecer datos financieros',
               subtitle:
-                  'Borra cartera, precios, instantáneas y alertas. Requiere respaldo previo.',
+                  'Borra cartera, precios, instantáneas y alertas. Requiere copia previa.',
               badge: 'Peligroso',
               onTap: onOpenFinancialReset,
             ),
@@ -6946,7 +6946,7 @@ class MoreTab extends StatelessWidget {
           child: EmptyState(
             icon: Icons.cloud_sync_outlined,
             title: 'Cuenta local',
-            subtitle: 'Próximamente: sincronización y respaldo en la nube. '
+            subtitle: 'Próximamente: sincronización y copia en la nube. '
                 'No se agregó Firebase en esta versión.',
           ),
         ),
@@ -7122,7 +7122,7 @@ class MoreTab extends StatelessWidget {
           _SheetAction(
             icon: Icons.data_object_outlined,
             title: 'JSON movimientos',
-            subtitle: 'Historial completo sin respaldo',
+            subtitle: 'Historial completo de movimientos',
             onTap: onExportMovementsJson,
           ),
           _SheetAction(
@@ -7139,9 +7139,9 @@ class MoreTab extends StatelessWidget {
           ),
           _SheetAction(
             icon: Icons.data_object_outlined,
-            title: 'JSON respaldo',
+            title: 'Copia de seguridad',
             subtitle:
-                'Respaldo financiero; no incluye tema, alertas ni preferencias visuales',
+                'Copia financiera; no incluye tema, alertas ni preferencias visuales',
             onTap: onExportBackup,
           ),
           _SheetAction(
@@ -7168,18 +7168,18 @@ class MoreTab extends StatelessWidget {
       useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => _CommandActionSheet(
-        title: 'Importar respaldo',
+        title: 'Restaurar copia de seguridad',
         actions: <_SheetAction>[
           _SheetAction(
             icon: Icons.content_paste_outlined,
-            title: 'Pegar JSON',
-            subtitle: 'Importar desde portapapeles o texto',
+            title: 'Pegar contenido de copia',
+            subtitle: 'Modo avanzado: pegar contenido técnico de la copia',
             onTap: onImportBackup,
           ),
           _SheetAction(
             icon: Icons.upload_file_outlined,
-            title: 'Importar archivo',
-            subtitle: 'Seleccionar respaldo JSON',
+            title: 'Cargar archivo local',
+            subtitle: 'Seleccionar copia guardada',
             onTap: onImportBackupFile,
           ),
         ],
@@ -7258,7 +7258,7 @@ class MoreTab extends StatelessWidget {
               Text('Salud', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
-              InfoLine('Respaldo JSON', 'Local compatible'),
+              InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Alertas automáticas locales', automaticLocalAlertsEnabled ? 'Activadas' : 'Desactivadas'),
               const InfoLine('Monitoreo de alertas', 'Configurable desde Alertas'),
               InfoLine('Intervalo de alertas', intervalLabel(automaticLocalAlertsIntervalMinutes)),
@@ -7331,7 +7331,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
-              InfoLine('Respaldo', 'Importación y exportación JSON disponibles'),
+              InfoLine('Copia de seguridad', 'Creación y restauración locales disponibles'),
               InfoLine('Aviso', 'No es asesoría financiera'),
               const SizedBox(height: 12),
               Text(
@@ -8344,14 +8344,14 @@ class SettingsTab extends StatelessWidget {
         ),
         if (showAdvanced)
           CardPanel(
-            title: 'Respaldo',
-          subtitle: 'Cuenta local. Próximamente: sincronización y respaldo en la nube.',
+            title: 'Copia de seguridad',
+          subtitle: 'Cuenta local. Próximamente: sincronización y copia en la nube.',
           child: Align(
             alignment: Alignment.centerLeft,
             child: FilledButton.tonalIcon(
               onPressed: onExportBackup,
               icon: const Icon(Icons.data_object_outlined),
-              label: const Text('Copiar JSON de respaldo'),
+              label: const Text('Copiar contenido de copia'),
             ),
           ),
         ),
