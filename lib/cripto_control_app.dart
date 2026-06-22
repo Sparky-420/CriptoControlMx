@@ -3345,6 +3345,41 @@ class MovementsTab extends StatefulWidget {
   State<MovementsTab> createState() => _MovementsTabState();
 }
 
+class _OcrMovementCandidate {
+  final MovementType? type;
+  final String? coin;
+  final double? quantity;
+  final double? amountMxn;
+  final double? unitPrice;
+  final double fee;
+  final DateTime date;
+  final String source;
+  final String note;
+  final List<String> warnings;
+  final String rawText;
+
+  const _OcrMovementCandidate({
+    required this.type,
+    required this.coin,
+    required this.quantity,
+    required this.amountMxn,
+    required this.unitPrice,
+    required this.fee,
+    required this.date,
+    required this.source,
+    required this.note,
+    required this.warnings,
+    required this.rawText,
+  });
+
+  bool get hasUsefulData =>
+      type != null ||
+      coin != null ||
+      quantity != null ||
+      amountMxn != null ||
+      unitPrice != null;
+}
+
 class _MovementsTabState extends State<MovementsTab> {
   String _coinFilter = 'TODAS';
   String _typeFilter = 'TODOS';
@@ -3431,8 +3466,135 @@ class _MovementsTabState extends State<MovementsTab> {
     }
   }
 
+  _OcrMovementCandidate _parseMercadoPagoOcrText(String rawText) {
+    final String text = rawText.trim();
+    final String lower = text.toLowerCase();
+    final List<String> warnings = <String>[];
+    final RegExp number = RegExp(r'\d[\d.,]*');
+
+    double? parseNumber(String raw) {
+      String value = raw.replaceAll(RegExp(r'[^0-9,.-]'), '');
+      final int comma = value.lastIndexOf(',');
+      final int dot = value.lastIndexOf('.');
+      if (comma >= 0 && dot >= 0) {
+        value = comma > dot
+            ? value.replaceAll('.', '').replaceAll(',', '.')
+            : value.replaceAll(',', '');
+      } else if (comma >= 0) {
+        value = value.replaceAll(',', '.');
+      }
+      return double.tryParse(value);
+    }
+
+    double? firstGroup(RegExp pattern, [int group = 1]) {
+      final RegExpMatch? match = pattern.firstMatch(text);
+      return match == null ? null : parseNumber(match.group(group) ?? '');
+    }
+
+    MovementType? type;
+    if (RegExp(r'\b(compraste|compra|compra de)\b').hasMatch(lower)) {
+      type = MovementType.buy;
+    } else if (RegExp(r'\b(vendiste|venta|venta de)\b').hasMatch(lower)) {
+      type = MovementType.sell;
+    }
+
+    const Map<String, String> coins = <String, String>{
+      'bitcoin': 'BTC',
+      'ethereum': 'ETH',
+      'chainlink': 'LINK',
+      'litecoin': 'LTC',
+      'uniswap': 'UNI',
+      'tether': 'USDT',
+      'usd coin': 'USDC',
+      'solana': 'SOL',
+      'cosmos': 'ATOM',
+      'btc': 'BTC',
+      'eth': 'ETH',
+      'link': 'LINK',
+      'ltc': 'LTC',
+      'uni': 'UNI',
+      'usdt': 'USDT',
+      'usdc': 'USDC',
+      'xrp': 'XRP',
+      'sol': 'SOL',
+      'atom': 'ATOM',
+    };
+    String? coin;
+    for (final MapEntry<String, String> entry in coins.entries) {
+      if (RegExp('\\b${RegExp.escape(entry.key)}\\b').hasMatch(lower)) {
+        coin = entry.value;
+        break;
+      }
+    }
+
+    double? quantity;
+    if (coin != null) {
+      final String c = coins.keys.map(RegExp.escape).join('|');
+      quantity =
+          firstGroup(RegExp('(${number.pattern})\\s*(?:$c)', caseSensitive: false)) ??
+          firstGroup(RegExp('(?:$c)\\s*(${number.pattern})', caseSensitive: false));
+    }
+
+    final double? amountMxn =
+        firstGroup(RegExp(r'\$\s*(\d[\d.,]*)')) ??
+        firstGroup(
+          RegExp(r'(\d[\d.,]*)\s*(?:mxn|pesos)', caseSensitive: false),
+        );
+    double? unitPrice = firstGroup(
+      RegExp(
+        r'(?:precio|unitario|unidad|por unidad)[^\d$]{0,30}\$?\s*(\d[\d.,]*)',
+        caseSensitive: false,
+      ),
+    );
+    if (unitPrice == null && amountMxn != null && quantity != null && quantity > 0) {
+      unitPrice = amountMxn / quantity;
+      warnings.add('Precio unitario calculado desde monto y cantidad.');
+    }
+
+    double? fee = firstGroup(
+      RegExp(r'comisi[oó]n[^\d$]{0,30}\$?\s*(\d[\d.,]*)', caseSensitive: false),
+    );
+    if (fee == null) {
+      fee = 0;
+      warnings.add('Comisión no detectada; se usó 0.00 MXN.');
+    }
+
+    DateTime? date;
+    final RegExpMatch? dateMatch = RegExp(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b').firstMatch(text);
+    if (dateMatch != null) {
+      final int day = int.parse(dateMatch.group(1)!);
+      final int month = int.parse(dateMatch.group(2)!);
+      int year = int.parse(dateMatch.group(3)!);
+      if (year < 100) year += 2000;
+      date = DateTime(year, month, day);
+    } else {
+      date = DateTime.now();
+      warnings.add('Fecha no detectada; se usó fecha actual.');
+    }
+
+    if (coin == null) warnings.add('Moneda no detectada.');
+    if (type == null) warnings.add('Tipo de movimiento no detectado.');
+    if (quantity == null) warnings.add('Cantidad cripto no detectada.');
+    if (amountMxn == null && unitPrice == null) warnings.add('Monto o precio no detectado.');
+
+    return _OcrMovementCandidate(
+      type: type,
+      coin: coin,
+      quantity: quantity,
+      amountMxn: amountMxn,
+      unitPrice: unitPrice,
+      fee: fee,
+      date: date,
+      source: 'Mercado Pago',
+      note: 'OCR / captura Mercado Pago',
+      warnings: warnings,
+      rawText: text,
+    );
+  }
+
   void _showOcrPreview(String detectedText) {
     final String previewText = detectedText.trim();
+    final _OcrMovementCandidate candidate = _parseMercadoPagoOcrText(previewText);
 
     showModalBottomSheet<void>(
       context: context,
@@ -3453,12 +3615,43 @@ class _MovementsTabState extends State<MovementsTab> {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Text(
-                'Texto detectado',
+                'Datos detectados',
                 style: Theme.of(sheetContext).textTheme.titleLarge,
               ),
               const SizedBox(height: 12),
-              SelectableText(
-                previewText.isEmpty ? 'No se detectó texto útil' : previewText,
+              if (!candidate.hasUsefulData)
+                const Text(
+                  'No se detectó un movimiento claro. Revisa el texto o intenta con otra captura.',
+                ),
+              InfoLine('Tipo', candidate.type?.label ?? 'No detectado'),
+              InfoLine('Moneda', candidate.coin ?? 'No detectada'),
+              InfoLine(
+                'Cantidad',
+                candidate.quantity == null ? 'No detectada' : fixed(candidate.quantity!, 8),
+              ),
+              InfoLine('Monto MXN', candidate.amountMxn == null ? 'No detectado' : money(candidate.amountMxn!)),
+              InfoLine('Precio unitario MXN', candidate.unitPrice == null ? 'No detectado' : money(candidate.unitPrice!)),
+              InfoLine('Comisión MXN', money(candidate.fee)),
+              InfoLine('Fecha', shortDate(candidate.date)),
+              InfoLine('Plataforma', candidate.source),
+              const SizedBox(height: 16),
+              Text('Advertencias', style: Theme.of(sheetContext).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              if (candidate.warnings.isEmpty)
+                const Text('Sin advertencias.')
+              else
+                ...candidate.warnings.map((String warning) => Text('• $warning')),
+              const SizedBox(height: 16),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Texto detectado'),
+                childrenPadding: EdgeInsets.zero,
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SelectableText(
+                    previewText.isEmpty ? 'No se detectó texto útil' : previewText,
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Text(
