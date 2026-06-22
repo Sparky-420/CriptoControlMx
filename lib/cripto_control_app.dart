@@ -3466,6 +3466,58 @@ class _MovementsTabState extends State<MovementsTab> {
     if (mounted) setState(() {});
   }
 
+  void _showAddMovementEntrySheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Agregar movimiento',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    Navigator.of(sheetContext).pop();
+                    await Future<void>.delayed(Duration.zero);
+                    if (!mounted) return;
+                    await _addMovement();
+                  },
+                  icon: const Icon(Icons.edit_note_outlined),
+                  label: const Text('Capturar manualmente'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.of(sheetContext).pop();
+                    await Future<void>.delayed(Duration.zero);
+                    if (!mounted) return;
+                    await _runOcrFromCapture();
+                  },
+                  icon: const Icon(Icons.document_scanner_outlined),
+                  label: const Text('Importar desde captura'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _runOcrFromCapture() async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
 
@@ -3889,10 +3941,7 @@ class _MovementsTabState extends State<MovementsTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text(
-                'Datos detectados',
-                style: Theme.of(sheetContext).textTheme.titleLarge,
-              ),
+              Text('Texto detectado', style: Theme.of(sheetContext).textTheme.titleLarge),
               const SizedBox(height: 6),
               Text(
                 _ocrReadTitle(quality),
@@ -3913,6 +3962,25 @@ class _MovementsTabState extends State<MovementsTab> {
               InfoLine('Fecha', shortDate(candidate.date)),
               InfoLine('Plataforma', candidate.source),
               const SizedBox(height: 16),
+              Text('Texto OCR', style: Theme.of(sheetContext).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 180),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    previewText.isEmpty ? 'No se detectó texto útil' : previewText,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               Text('Advertencias', style: Theme.of(sheetContext).textTheme.titleMedium),
               const SizedBox(height: 8),
               if (visibleWarnings.isEmpty)
@@ -3922,19 +3990,6 @@ class _MovementsTabState extends State<MovementsTab> {
                 if (hiddenWarningCount > 0)
                   Text('• $hiddenWarningCount advertencias más.'),
               ],
-              const SizedBox(height: 16),
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: const Text('Texto detectado'),
-                childrenPadding: EdgeInsets.zero,
-                expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  SelectableText(
-                    previewText.isEmpty ? 'No se detectó texto útil' : previewText,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
               Text(
                 'No se guardará nada hasta que confirmes desde el formulario normal.',
                 style: Theme.of(sheetContext).textTheme.bodySmall,
@@ -4215,7 +4270,7 @@ class _MovementsTabState extends State<MovementsTab> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: _addMovement,
+            onPressed: _showAddMovementEntrySheet,
             icon: const Icon(Icons.add),
             label: const Text('Agregar movimiento'),
           ),
