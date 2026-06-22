@@ -1027,22 +1027,41 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     BuildContext pageContext, {
     Movement? existing,
     int? index,
+    _OcrMovementCandidate? ocrCandidate,
   }) {
-    MovementType selectedType = existing?.type ?? MovementType.buy;
-    String selectedCoin = existing?.coin ?? _coins.first;
-    DateTime selectedDate = existing?.date ?? DateTime.now();
+    final List<String> ocrWarnings = <String>[
+      if (existing == null && ocrCandidate != null) ...ocrCandidate.warnings,
+    ];
+    final String? ocrCoin = ocrCandidate?.coin;
+    if (existing == null && ocrCoin != null && !_coins.contains(ocrCoin)) {
+      ocrWarnings.add('Moneda no soportada; selecciona la moneda correcta.');
+    }
+    final bool useOcr = existing == null && ocrCandidate != null;
+    MovementType selectedType =
+        existing?.type ?? ocrCandidate?.type ?? MovementType.buy;
+    String selectedCoin = existing?.coin ??
+        (ocrCoin != null && _coins.contains(ocrCoin) ? ocrCoin : _coins.first);
+    DateTime selectedDate = existing?.date ?? ocrCandidate?.date ?? DateTime.now();
 
     final TextEditingController qtyController = TextEditingController(
-      text: existing == null ? '' : compact(existing.quantity),
+      text: existing != null
+          ? compact(existing.quantity)
+          : ocrCandidate?.quantity == null
+              ? ''
+              : compact(ocrCandidate!.quantity!),
     );
     final TextEditingController priceController = TextEditingController(
-      text: existing == null ? '' : compact(existing.unitPrice),
+      text: existing != null
+          ? compact(existing.unitPrice)
+          : ocrCandidate?.unitPrice == null
+              ? ''
+              : compact(ocrCandidate!.unitPrice!),
     );
     final TextEditingController feeController = TextEditingController(
-      text: existing == null ? '0' : compact(existing.fee),
+      text: existing != null ? compact(existing.fee) : compact(ocrCandidate?.fee ?? 0),
     );
     final TextEditingController sourceController = TextEditingController(
-      text: existing?.source ?? '',
+      text: existing?.source ?? ocrCandidate?.source ?? '',
     );
     final TextEditingController walletController = TextEditingController(
       text: existing?.wallet ?? '',
@@ -1051,7 +1070,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       text: existing?.network ?? '',
     );
     final TextEditingController noteController = TextEditingController(
-      text: existing?.note ?? '',
+      text: existing?.note ?? ocrCandidate?.note ?? '',
     );
 
     return showModalBottomSheet<void>(
@@ -1078,12 +1097,23 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         SheetHeader(
-                          title: existing == null
+                          title: useOcr
+                              ? 'Revisar movimiento OCR'
+                              : existing == null
                               ? 'Nuevo movimiento'
                               : 'Editar movimiento',
                           onClose: () => Navigator.of(sheetContext).pop(),
                         ),
                         const SizedBox(height: 12),
+                        if (ocrWarnings.isNotEmpty) ...<Widget>[
+                          Text(
+                            'Revisa antes de guardar',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 6),
+                          ...ocrWarnings.map((String warning) => Text('• $warning')),
+                          const SizedBox(height: 12),
+                        ],
                         DropdownButtonFormField<MovementType>(
                           initialValue: selectedType,
                           decoration: const InputDecoration(
@@ -2554,6 +2584,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             movements: _movements,
             coins: _coins,
             onAdd: () => _showAddMovementSheet(pageContext),
+            onAddFromOcr: (_OcrMovementCandidate candidate) =>
+                _showAddMovementSheet(pageContext, ocrCandidate: candidate),
             onEdit: (Movement movement) => _showAddMovementSheet(
               pageContext,
               existing: movement,
@@ -3329,6 +3361,7 @@ class MovementsTab extends StatefulWidget {
   final List<Movement> movements;
   final List<String> coins;
   final Future<void> Function() onAdd;
+  final Future<void> Function(_OcrMovementCandidate candidate) onAddFromOcr;
   final Future<void> Function(Movement movement) onEdit;
   final void Function(Movement movement) onDelete;
 
@@ -3337,6 +3370,7 @@ class MovementsTab extends StatefulWidget {
     required this.movements,
     required this.coins,
     required this.onAdd,
+    required this.onAddFromOcr,
     required this.onEdit,
     required this.onDelete,
   });
@@ -3655,16 +3689,31 @@ class _MovementsTabState extends State<MovementsTab> {
               ),
               const SizedBox(height: 16),
               Text(
-                'En la siguiente fase se convertirá este texto en movimiento editable.',
+                'No se guardará nada hasta que confirmes desde el formulario normal.',
                 style: Theme.of(sheetContext).textTheme.bodySmall,
               ),
               const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.of(sheetContext).pop();
+                        await Future<void>.delayed(Duration.zero);
+                        if (!mounted) return;
+                        await widget.onAddFromOcr(candidate);
+                        if (mounted) setState(() {});
+                      },
+                      icon: const Icon(Icons.edit_note_outlined),
+                      label: const Text('Revisar y guardar movimiento'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  TextButton(
                   onPressed: () => Navigator.of(sheetContext).pop(),
                   child: const Text('Cerrar'),
                 ),
+                ],
               ),
             ],
           ),
