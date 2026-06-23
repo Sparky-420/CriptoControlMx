@@ -3570,6 +3570,22 @@ class _MovementsTabState extends State<MovementsTab> {
     ).hasMatch(value);
   }
 
+  bool _looksLikeMercadoPagoCapture(String rawText) {
+    final String value = rawText
+        .toLowerCase()
+        .replaceAll('\u00e1', 'a')
+        .replaceAll('\u00e9', 'e')
+        .replaceAll('\u00ed', 'i')
+        .replaceAll('\u00f3', 'o')
+        .replaceAll('\u00fa', 'u')
+        .replaceAll('\u00fc', 'u')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    return _isMercadoPagoText(rawText) ||
+        RegExp(
+          r'\b(compra|recepcion|equivalencia|wallet externa|comision de compra|creada el|n\.?\s*(?:º|o)?\s*de operacion|numero de operacion)\b',
+        ).hasMatch(value);
+  }
+
   _OcrMovementCandidate _parseMercadoPagoOcrText(String rawText) {
     final String text = rawText
         .replaceAll(RegExp(r'[ \t]+'), ' ')
@@ -3637,13 +3653,7 @@ class _MovementsTabState extends State<MovementsTab> {
     } else if (hasTransferOut) {
       type = MovementType.transferOut;
     }
-    final bool hasMercadoPagoSignals =
-        hasBuy ||
-        hasReceive ||
-        RegExp(
-          r'\b(comision de compra|creada el|n\.?\s*(?:º|o)?\s*de operacion|numero de operacion)\b',
-        ).hasMatch(lower);
-    final bool looksLikeMercadoPago = _isMercadoPagoText(text) || hasMercadoPagoSignals;
+    final bool looksLikeMercadoPago = _looksLikeMercadoPagoCapture(text);
     if (!looksLikeMercadoPago) {
       addWarning('No se detectó Mercado Pago claramente; revisa los datos.');
     }
@@ -3854,6 +3864,7 @@ class _MovementsTabState extends State<MovementsTab> {
           ),
         );
     if (unitPrice != null && unitPrice <= 0) unitPrice = null;
+    bool unitPriceWasDerived = false;
     final double? derivedUnitPrice = amountMxn != null && quantity != null && quantity > 0
         ? amountMxn / quantity
         : null;
@@ -3864,8 +3875,12 @@ class _MovementsTabState extends State<MovementsTab> {
       }
     } else if (unitPrice == null && derivedUnitPrice != null) {
       unitPrice = derivedUnitPrice;
+      unitPriceWasDerived = true;
     } else if (unitPrice == null) {
       addWarning('Precio unitario no detectado.');
+    }
+    if (unitPriceWasDerived) {
+      addWarning('Precio unitario calculado desde monto y cantidad.');
     }
 
     if (explicitFee == null && fee == 0) {
@@ -3998,7 +4013,7 @@ class _MovementsTabState extends State<MovementsTab> {
   }
 
   _OcrMovementCandidate _manualOcrCandidate(String rawText) {
-    final bool looksLikeMercadoPago = _isMercadoPagoText(rawText);
+    final bool looksLikeMercadoPago = _looksLikeMercadoPagoCapture(rawText);
     return _OcrMovementCandidate(
       type: null,
       coin: null,
@@ -4069,6 +4084,8 @@ class _MovementsTabState extends State<MovementsTab> {
               const SizedBox(height: 4),
               Text(_ocrReadCopy(quality)),
               const SizedBox(height: 12),
+              Text('Datos detectados', style: Theme.of(sheetContext).textTheme.titleMedium),
+              const SizedBox(height: 8),
               InfoLine('Tipo', _ocrMovementTypeLabel(candidate.type)),
               InfoLine('Moneda', candidate.coin ?? 'No detectada'),
               InfoLine(
@@ -4110,7 +4127,7 @@ class _MovementsTabState extends State<MovementsTab> {
                   Text('• $hiddenWarningCount advertencias más.'),
               ],
               Text(
-                'No se guardará nada hasta que confirmes desde el formulario normal.',
+                'Nada se guardará hasta que confirmes desde el formulario.',
                 style: Theme.of(sheetContext).textTheme.bodySmall,
               ),
               const SizedBox(height: 16),
