@@ -297,6 +297,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       ..addAll(_priceService.loadManualPriceUpdatedAtMs(prefs));
   }
 
+  String _priceModeFor(String coin) =>
+      _priceModes[coin] == PriceService.manualMode
+          ? PriceService.manualMode
+          : PriceService.automaticMode;
+
+  String _priceModeLabel(String coin) =>
+      _priceModeFor(coin) == PriceService.manualMode ? 'Manual' : 'Automático';
+
   Future<void> _loadPriceAlertSettings(SharedPreferences prefs) async {
     final PriceAlertSettings settings = await _priceAlertService.loadSettings(
       prefs,
@@ -713,6 +721,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     );
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
+    await _priceService.savePriceModes(prefs, _priceModes);
+    await _priceService.saveManualPriceUpdatedAtMs(
+      prefs,
+      _manualPriceUpdatedAtMs,
+    );
     await prefs.setDouble(_sellFeePercentKey, _sellFeePercent);
     await prefs.setString(_themeModeKey, _visualMode.name);
     await prefs.setString(_themeStyleKey, _themeStyle.name);
@@ -1680,7 +1693,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final Map<String, dynamic> backup = <String, dynamic>{
       'version': 2,
       'exportedAt': DateTime.now().toIso8601String(),
-      'settings': <String, double>{'sellFeePercent': _sellFeePercent},
+      'settings': <String, dynamic>{
+        'sellFeePercent': _sellFeePercent,
+        'priceModes': <String, String>{
+          for (final String coin in _coins) coin: _priceModeFor(coin),
+        },
+        'manualPricesUpdatedAtMs': <String, int>{
+          for (final String coin in _coins)
+            if (_manualPriceUpdatedAtMs.containsKey(coin))
+              coin: _manualPriceUpdatedAtMs[coin]!,
+        },
+      },
       'currentPrices': _currentPrices,
       'movements': _movements.map((Movement m) => m.toJson()).toList(),
       'snapshots': _snapshots.map((PortfolioSnapshot s) => s.toJson()).toList(),
@@ -1741,6 +1764,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         'costo_promedio_mxn',
         'precio_actual_mxn',
         'price_status',
+        'price_mode',
         'valor_actual_mxn',
         'pnl_no_realizado_bruto_mxn',
         'pnl_realizado_mxn',
@@ -1759,6 +1783,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           fixed(s.avgPrice, 2),
           fixed(s.currentPrice, 2),
           priceStatusCsv(s.currentPrice),
+          _priceModeFor(s.coin),
           fixed(s.currentValue, 2),
           fixed(s.unrealizedPL, 2),
           fixed(s.realizedPL, 2),
@@ -1884,6 +1909,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             'avgPrice': stats[coin]!.avgPrice,
             'currentPrice': stats[coin]!.currentPrice,
             'priceStatus': priceStatusJson(stats[coin]!.currentPrice),
+            'priceMode': _priceModeFor(coin),
+            'manualPriceUpdatedAtMs': _manualPriceUpdatedAtMs[coin],
             'currentValue': stats[coin]!.currentValue,
             'unrealizedPL': stats[coin]!.unrealizedPL,
             'realizedPL': stats[coin]!.realizedPL,
@@ -1940,6 +1967,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'Precio promedio MXN',
       'Precio actual MXN',
       'Estado precio',
+      'Modo precio',
       'Valor actual MXN',
       'P&L no realizado bruto MXN',
       'P&L realizado MXN',
@@ -1956,6 +1984,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         stat.avgPrice,
         stat.currentPrice,
         priceStatusLabel(stat.currentPrice),
+        _priceModeLabel(stat.coin),
         stat.currentValue,
         stat.unrealizedPL,
         stat.realizedPL,
@@ -2080,6 +2109,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               'Invertido',
               'Valor de cartera',
               'Estado precio',
+              'Modo precio',
               'P&L no realizado bruto',
               'Precio equilibrio neto',
             ],
@@ -2091,6 +2121,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 money(s.costBase),
                 money(s.currentValue),
                 priceStatusLabel(s.currentPrice),
+                _priceModeLabel(s.coin),
                 money(s.unrealizedPL),
                 money(s.netBreakEvenPrice(_sellFeePercent)),
               ];
@@ -2307,6 +2338,35 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         Movement.fromJson(_validatedImportMovement(movementsRaw[i], i)),
     ];
     final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
+    final Map<String, String> importedPriceModes = <String, String>{
+      for (final String coin in _coins) coin: PriceService.automaticMode,
+    };
+    final Map<String, int> importedManualUpdatedAt = <String, int>{};
+    if (settingsRaw is Map) {
+      final Map<String, dynamic> settings = Map<String, dynamic>.from(settingsRaw);
+      final dynamic modesRaw = settings['priceModes'];
+      if (modesRaw is Map) {
+        final Map<String, dynamic> modesMap = Map<String, dynamic>.from(modesRaw);
+        for (final String coin in _coins) {
+          importedPriceModes[coin] =
+              modesMap[coin]?.toString() == PriceService.manualMode
+                  ? PriceService.manualMode
+                  : PriceService.automaticMode;
+        }
+      }
+      final dynamic manualRaw = settings['manualPricesUpdatedAtMs'];
+      if (manualRaw is Map) {
+        final Map<String, dynamic> manualMap = Map<String, dynamic>.from(manualRaw);
+        for (final String coin in _coins) {
+          final dynamic value = manualMap[coin];
+          if (value is int) {
+            importedManualUpdatedAt[coin] = value;
+          } else if (value is num) {
+            importedManualUpdatedAt[coin] = value.toInt();
+          }
+        }
+      }
+    }
     final List<PortfolioSnapshot>? importedSnapshots = hasSnapshots
         ? (snapshotsRaw as List)
             .map(
@@ -2341,6 +2401,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (settingsRaw is Map && settingsRaw['sellFeePercent'] is num) {
         _sellFeePercent = (settingsRaw['sellFeePercent'] as num).toDouble();
       }
+      _priceModes
+        ..clear()
+        ..addAll(importedPriceModes);
+      _manualPriceUpdatedAtMs
+        ..clear()
+        ..addAll(importedManualUpdatedAt);
 
       if (importedSnapshots != null) {
         _snapshots
@@ -2354,6 +2420,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       }
     });
 
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await _priceService.savePriceModes(prefs, _priceModes);
+    await _priceService.saveManualPriceUpdatedAtMs(
+      prefs,
+      _manualPriceUpdatedAtMs,
+    );
     if (importedSnapshots == null) {
       await _saveData();
     } else {
@@ -2835,6 +2907,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               pricesTotalCount: _coins.length,
               missingPriceCoins: _coins
                   .where((String coin) => (_currentPrices[coin] ?? 0.0) <= 0.0)
+                  .toList(),
+              manualPriceCoins: _coins
+                  .where((String coin) => _priceModeFor(coin) == PriceService.manualMode)
                   .toList(),
               refreshPricesOnOpen: _refreshPricesOnOpen,
               refreshPricesAfterMovement: _refreshPricesAfterMovement,
@@ -7606,6 +7681,7 @@ class MoreTab extends StatelessWidget {
   final int pricesAvailableCount;
   final int pricesTotalCount;
   final List<String> missingPriceCoins;
+  final List<String> manualPriceCoins;
   final bool refreshPricesOnOpen;
   final bool refreshPricesAfterMovement;
   final PriceRefreshForegroundMode priceRefreshForegroundMode;
@@ -7656,6 +7732,7 @@ class MoreTab extends StatelessWidget {
     required this.pricesAvailableCount,
     required this.pricesTotalCount,
     required this.missingPriceCoins,
+    required this.manualPriceCoins,
     required this.refreshPricesOnOpen,
     required this.refreshPricesAfterMovement,
     required this.priceRefreshForegroundMode,
@@ -8124,6 +8201,15 @@ class MoreTab extends StatelessWidget {
               const SizedBox(height: 6),
               InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
               InfoLine('Precios disponibles', '$pricesAvailableCount/$pricesTotalCount'),
+              InfoLine('Precios manuales', manualPriceCoins.length.toString()),
+              InfoLine(
+                'Precios automáticos',
+                (pricesTotalCount - manualPriceCoins.length).toString(),
+              ),
+              InfoLine(
+                'Manual',
+                manualPriceCoins.isEmpty ? 'Ninguna' : manualPriceCoins.join(', '),
+              ),
               InfoLine(
                 'Sin precio',
                 missingPriceCoins.isEmpty ? 'Ninguna' : missingPriceCoins.join(', '),
