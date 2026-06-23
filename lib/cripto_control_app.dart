@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -101,6 +102,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'price_refresh_after_movement_v1';
   static const String _priceRefreshForegroundModeKey =
       'price_refresh_foreground_mode_v1';
+  static const List<String> _googleDriveScopes = <String>['https://www.googleapis.com/auth/drive.appdata'];
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -155,6 +157,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       PriceAlertService.defaultRecoveryThresholdPoints;
   Map<String, double> _recoveryAlertReferences = <String, double>{};
   bool _bootstrapped = false;
+  Future<void>? _googleSignInInitFuture;
+  GoogleSignInAccount? _googleAccount;
+  bool _isGoogleConnecting = false;
 
   @override
   void initState() {
@@ -163,6 +168,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _priceAlertService.initialize();
     _visualMode = appVisualModeFromName(widget.initialThemeModeName);
     _themeStyle = appThemeStyleFromName(widget.initialThemeStyleName);
+    unawaited(_ensureGoogleSignInInitialized().catchError((_) {}));
     _loadData();
   }
 
@@ -179,6 +185,92 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _restartPriceRefreshTimer();
     } else {
       _cancelPriceRefreshTimer();
+    }
+  }
+
+  Future<void> _ensureGoogleSignInInitialized() async {
+    _googleSignInInitFuture ??= GoogleSignIn.instance.initialize();
+    try {
+      await _googleSignInInitFuture;
+    } catch (_) {
+      _googleSignInInitFuture = null;
+      rethrow;
+    }
+  }
+
+  Future<void> _connectGoogleDrive(BuildContext pageContext) async {
+    if (_isGoogleConnecting) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    var errorMessage = 'No se pudo conectar Google Drive.';
+
+    setState(() => _isGoogleConnecting = true);
+    try {
+      await _ensureGoogleSignInInitialized();
+      if (!GoogleSignIn.instance.supportsAuthenticate()) {
+        throw UnsupportedError('Google Sign-In no disponible');
+      }
+
+      final GoogleSignInAccount account = await GoogleSignIn.instance
+          .authenticate(scopeHint: _googleDriveScopes);
+      errorMessage = 'No se pudo autorizar Google Drive.';
+      final GoogleSignInClientAuthorization? currentAuthorization =
+          await account.authorizationClient.authorizationForScopes(
+        _googleDriveScopes,
+      );
+      await (currentAuthorization == null
+          ? account.authorizationClient.authorizeScopes(_googleDriveScopes)
+          : Future<GoogleSignInClientAuthorization>.value(
+              currentAuthorization,
+            ));
+
+      if (!mounted) return;
+      setState(() => _googleAccount = account);
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Google Drive conectado.')),
+      );
+    } on GoogleSignInException catch (error) {
+      if (!mounted) return;
+      final bool canceled =
+          error.code == GoogleSignInExceptionCode.canceled ||
+          error.code == GoogleSignInExceptionCode.interrupted ||
+          error.code == GoogleSignInExceptionCode.uiUnavailable;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(canceled ? 'Conexión cancelada.' : errorMessage),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
+    } finally {
+      if (mounted) setState(() => _isGoogleConnecting = false);
+    }
+  }
+
+  Future<void> _disconnectGoogleDrive(BuildContext pageContext) async {
+    if (_isGoogleConnecting) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+
+    setState(() => _isGoogleConnecting = true);
+    try {
+      await _ensureGoogleSignInInitialized();
+      try {
+        await GoogleSignIn.instance.disconnect();
+      } catch (_) {
+        await GoogleSignIn.instance.signOut();
+      }
+    } catch (_) {
+      // Local UI state is cleared even if the provider cannot be reached.
+    } finally {
+      if (mounted) {
+        setState(() {
+          _googleAccount = null;
+          _isGoogleConnecting = false;
+        });
+      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Google Drive desconectado.')),
+      );
     }
   }
 
@@ -2918,6 +3010,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               automaticLocalAlertsIntervalMinutes:
                   _automaticLocalAlertsIntervalMinutes,
               notificationsAllowed: _notificationsAllowed,
+              googleAccountEmail: _googleAccount?.email,
+              isGoogleConnecting: _isGoogleConnecting,
               isRefreshingPrices: _isRefreshingPrices,
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
@@ -2967,6 +3061,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               },
               onImportBackup: () => _importBackup(pageContext),
               onImportBackupFile: () => _importBackupFile(pageContext),
+              onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
+              onDisconnectGoogleDrive: () =>
+                  _disconnectGoogleDrive(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
@@ -7688,6 +7785,8 @@ class MoreTab extends StatelessWidget {
   final bool automaticLocalAlertsEnabled;
   final int automaticLocalAlertsIntervalMinutes;
   final bool notificationsAllowed;
+  final String? googleAccountEmail;
+  final bool isGoogleConnecting;
   final bool isRefreshingPrices;
   final int chartDataCount;
   final List<String> motorCoins;
@@ -7709,6 +7808,8 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onExportBackup;
   final VoidCallback onImportBackup;
   final VoidCallback onImportBackupFile;
+  final VoidCallback onConnectGoogleDrive;
+  final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
@@ -7739,6 +7840,8 @@ class MoreTab extends StatelessWidget {
     required this.automaticLocalAlertsEnabled,
     required this.automaticLocalAlertsIntervalMinutes,
     required this.notificationsAllowed,
+    required this.googleAccountEmail,
+    required this.isGoogleConnecting,
     required this.isRefreshingPrices,
     required this.chartDataCount,
     required this.motorCoins,
@@ -7760,6 +7863,8 @@ class MoreTab extends StatelessWidget {
     required this.onExportBackup,
     required this.onImportBackup,
     required this.onImportBackupFile,
+    required this.onConnectGoogleDrive,
+    required this.onDisconnectGoogleDrive,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onSnapshotAutomationModeChanged,
@@ -7769,6 +7874,7 @@ class MoreTab extends StatelessWidget {
   });
 
   static const String _priceSource = 'CoinGecko';
+  bool get googleDriveConnected => googleAccountEmail != null;
 
   @override
   Widget build(BuildContext context) {
@@ -7793,6 +7899,16 @@ class MoreTab extends StatelessWidget {
               subtitle: 'Próximamente: sincronización y copia en la nube',
               badge: 'Local',
               onTap: () => _showAccountPlaceholder(context),
+            ),
+            _CommandCard(
+              icon: Icons.cloud_done_outlined,
+              title: 'Google Drive',
+              subtitle: googleDriveConnected
+                  ? 'Conectado como ${googleAccountEmail ?? 'cuenta Google'}'
+                  : 'Conecta tu cuenta para crear copias de seguridad en la nube.',
+              badge: googleDriveConnected ? 'Conectado' : 'Desconectado',
+              loading: isGoogleConnecting,
+              onTap: () => _showGoogleDriveActions(context),
             ),
             _CommandCard(
               icon: Icons.backup_outlined,
@@ -7920,6 +8036,55 @@ class MoreTab extends StatelessWidget {
                 'No se agregó Firebase en esta versión.',
           ),
         ),
+      ),
+    );
+  }
+
+  void _showGoogleDriveActions(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => _CommandActionSheet(
+        title: 'Google Drive',
+        actions: <_SheetAction>[
+          _SheetAction(
+            icon: googleDriveConnected
+                ? Icons.link_off_outlined
+                : Icons.cloud_sync_outlined,
+            title: googleDriveConnected
+                ? 'Desconectar'
+                : 'Conectar Google Drive',
+            subtitle: googleDriveConnected
+                ? 'Conectado como ${googleAccountEmail ?? 'cuenta Google'}'
+                : 'Conecta tu cuenta para crear copias de seguridad en la nube.',
+            onTap: isGoogleConnecting
+                ? null
+                : googleDriveConnected
+                    ? onDisconnectGoogleDrive
+                    : onConnectGoogleDrive,
+          ),
+          const _SheetAction(
+            icon: Icons.info_outline,
+            title: 'Sin sincronizaciÃ³n automÃ¡tica',
+            subtitle:
+                'No se sincroniza automÃ¡ticamente. Solo se subirÃ¡ o restaurarÃ¡ una copia cuando tÃº lo solicites.',
+            onTap: null,
+          ),
+          const _SheetAction(
+            icon: Icons.cloud_upload_outlined,
+            title: 'Crear copia en Google Drive',
+            subtitle: 'PrÃ³xima fase',
+            onTap: null,
+          ),
+          const _SheetAction(
+            icon: Icons.cloud_download_outlined,
+            title: 'Restaurar desde Google Drive',
+            subtitle: 'PrÃ³xima fase',
+            onTap: null,
+          ),
+        ],
       ),
     );
   }
