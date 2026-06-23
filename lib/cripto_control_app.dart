@@ -120,6 +120,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     'SOL': 0.0,
     'ATOM': 0.0,
   };
+  final Map<String, String> _priceModes = <String, String>{
+    for (final String coin in _coins) coin: PriceService.automaticMode,
+  };
+  final Map<String, int> _manualPriceUpdatedAtMs = <String, int>{};
 
   int _currentIndex = 0;
   double _sellFeePercent = FinancialEngine.defaultExitFeePercent;
@@ -201,6 +205,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
       final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
       _applyPriceCache(priceCache);
+      _loadPriceModeState(prefs);
 
       final String? snapshotsRaw = prefs.getString(_snapshotsKey);
       if (snapshotsRaw != null && snapshotsRaw.trim().isNotEmpty) {
@@ -281,6 +286,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _currentPrices[coin] = cache.prices[coin] ?? 0.0;
     }
     _pricesUpdatedAt = cache.updatedAt;
+  }
+
+  void _loadPriceModeState(SharedPreferences prefs) {
+    _priceModes
+      ..clear()
+      ..addAll(_priceService.loadPriceModes(prefs));
+    _manualPriceUpdatedAtMs
+      ..clear()
+      ..addAll(_priceService.loadManualPriceUpdatedAtMs(prefs));
   }
 
   Future<void> _loadPriceAlertSettings(SharedPreferences prefs) async {
@@ -1001,16 +1015,24 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               final double? value = double.tryParse(controller.text.trim());
               if (value == null || value < 0) return;
 
+              final SharedPreferences prefs =
+                  await SharedPreferences.getInstance();
+              final int updatedAtMs = DateTime.now().millisecondsSinceEpoch;
               _currentPrices[coin] = value;
+              _priceModes[coin] = PriceService.manualMode;
+              _manualPriceUpdatedAtMs[coin] = updatedAtMs;
               final PriceCache priceCache = await _priceService
                   .saveManualPrices(
-                    await SharedPreferences.getInstance(),
+                    prefs,
                     _currentPrices,
                   );
-              if (!dialogContext.mounted) return;
-              await _evaluatePriceAlerts(
-                await SharedPreferences.getInstance(),
+              await _priceService.savePriceModes(prefs, _priceModes);
+              await _priceService.saveManualPriceUpdatedAtMs(
+                prefs,
+                _manualPriceUpdatedAtMs,
               );
+              if (!dialogContext.mounted) return;
+              await _evaluatePriceAlerts(prefs);
               if (mounted) {
                 setState(() => _applyPriceCache(priceCache));
               }
@@ -2412,6 +2434,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         _movementsKey,
         _pricesKey,
         PriceService.pricesUpdatedAtKey,
+        PriceService.priceModesKey,
+        PriceService.manualPricesUpdatedAtKey,
         _sellFeePercentKey,
         _snapshotsKey,
         _snapshotModeKey,
@@ -2444,6 +2468,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             _coins.map((String coin) => MapEntry<String, double>(coin, 0.0)),
           );
         _pricesUpdatedAt = null;
+        _priceModes
+          ..clear()
+          ..addEntries(
+            _coins.map(
+              (String coin) =>
+                  MapEntry<String, String>(coin, PriceService.automaticMode),
+            ),
+          );
+        _manualPriceUpdatedAtMs.clear();
         _sellFeePercent = FinancialEngine.defaultExitFeePercent;
         _snapshotAutomationMode = SnapshotAutomationMode.manual;
         _snapshotRetention = SnapshotRetention.last30;

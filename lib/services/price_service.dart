@@ -8,6 +8,11 @@ class PriceService {
 
   static const String pricesKey = 'prices_json';
   static const String pricesUpdatedAtKey = 'prices_updated_at_ms';
+  static const String priceModesKey = 'price_modes_v1_json';
+  static const String manualPricesUpdatedAtKey =
+      'manual_prices_updated_at_v1_json';
+  static const String automaticMode = 'automatic';
+  static const String manualMode = 'manual';
   static const Duration cacheTtl = Duration(minutes: 10);
   static const Map<String, String> _coinIds = <String, String>{
     'BTC': 'bitcoin',
@@ -63,13 +68,17 @@ class PriceService {
 
   Future<PriceCache> fetchAndCachePrices(SharedPreferences prefs) async {
     final PriceCache cached = await loadCachedPrices(prefs);
+    final Map<String, String> priceModes = loadPriceModes(prefs);
     final Map<String, double> freshPrices = await _fetchMxnPrices();
     if (freshPrices.isEmpty) {
       throw const FormatException('No valid coin prices');
     }
 
-    final Map<String, double> prices = Map<String, double>.from(cached.prices)
-      ..addAll(freshPrices);
+    final Map<String, double> prices = Map<String, double>.from(cached.prices);
+    for (final MapEntry<String, double> entry in freshPrices.entries) {
+      if (priceModes[entry.key] == manualMode) continue;
+      prices[entry.key] = entry.value;
+    }
     for (final String coin in _coinIds.keys) {
       prices.putIfAbsent(coin, () => 0.0);
     }
@@ -92,6 +101,66 @@ class PriceService {
     await prefs.setInt(pricesUpdatedAtKey, updatedAt.millisecondsSinceEpoch);
 
     return PriceCache(prices: prices, updatedAt: updatedAt);
+  }
+
+  Map<String, String> loadPriceModes(SharedPreferences prefs) {
+    final Map<String, String> modes = <String, String>{
+      for (final String coin in _coinIds.keys) coin: automaticMode,
+    };
+    final String? raw = prefs.getString(priceModesKey);
+    if (raw == null || raw.trim().isEmpty) return modes;
+
+    try {
+      final dynamic decoded = jsonDecode(raw);
+      if (decoded is! Map) return modes;
+      for (final String coin in _coinIds.keys) {
+        final String mode = decoded[coin]?.toString() ?? automaticMode;
+        modes[coin] = mode == manualMode ? manualMode : automaticMode;
+      }
+    } catch (_) {}
+    return modes;
+  }
+
+  Map<String, int> loadManualPriceUpdatedAtMs(SharedPreferences prefs) {
+    final String? raw = prefs.getString(manualPricesUpdatedAtKey);
+    if (raw == null || raw.trim().isEmpty) return <String, int>{};
+
+    try {
+      final dynamic decoded = jsonDecode(raw);
+      if (decoded is! Map) return <String, int>{};
+      final Map<String, int> timestamps = <String, int>{};
+      for (final String coin in _coinIds.keys) {
+        final dynamic value = decoded[coin];
+        if (value is int) {
+          timestamps[coin] = value;
+        } else if (value is num) {
+          timestamps[coin] = value.toInt();
+        }
+      }
+      return timestamps;
+    } catch (_) {
+      return <String, int>{};
+    }
+  }
+
+  Future<void> savePriceModes(
+    SharedPreferences prefs,
+    Map<String, String> modes,
+  ) async {
+    await prefs.setString(priceModesKey, jsonEncode(<String, String>{
+      for (final String coin in _coinIds.keys)
+        coin: modes[coin] == manualMode ? manualMode : automaticMode,
+    }));
+  }
+
+  Future<void> saveManualPriceUpdatedAtMs(
+    SharedPreferences prefs,
+    Map<String, int> timestamps,
+  ) async {
+    await prefs.setString(manualPricesUpdatedAtKey, jsonEncode(<String, int>{
+      for (final String coin in _coinIds.keys)
+        if (timestamps.containsKey(coin)) coin: timestamps[coin]!,
+    }));
   }
 
   Future<Map<String, double>> _fetchMxnPrices() async {
