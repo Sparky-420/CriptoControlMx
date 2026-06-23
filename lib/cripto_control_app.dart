@@ -1042,6 +1042,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     String selectedCoin = existing?.coin ??
         (ocrCoin != null && _coins.contains(ocrCoin) ? ocrCoin : _coins.first);
     DateTime selectedDate = existing?.date ?? ocrCandidate?.date ?? DateTime.now();
+    final bool ocrWalletExternal =
+        useOcr && ocrCandidate.rawText.toLowerCase().contains('wallet externa');
 
     final TextEditingController qtyController = TextEditingController(
       text: existing != null
@@ -1064,7 +1066,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       text: existing?.source ?? ocrCandidate?.source ?? '',
     );
     final TextEditingController walletController = TextEditingController(
-      text: existing?.wallet ?? '',
+      text: existing?.wallet ?? (ocrWalletExternal ? 'Wallet externa' : ''),
     );
     final TextEditingController networkController = TextEditingController(
       text: existing?.network ?? '',
@@ -3557,11 +3559,11 @@ class _MovementsTabState extends State<MovementsTab> {
   bool _isMercadoPagoText(String rawText) {
     final String value = rawText
         .toLowerCase()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
+        .replaceAll('\u00e1', 'a')
+        .replaceAll('\u00e9', 'e')
+        .replaceAll('\u00ed', 'i')
+        .replaceAll('\u00f3', 'o')
+        .replaceAll('\u00fa', 'u')
         .replaceAll(RegExp(r'\s+'), ' ');
     return RegExp(
       r'\b(mercado pago|mercadopago|cuenta mercado pago|operacion mercado pago|mp)\b',
@@ -3587,10 +3589,6 @@ class _MovementsTabState extends State<MovementsTab> {
     void addWarning(String warning) {
       if (!warnings.contains(warning)) warnings.add(warning);
     }
-    if (!_isMercadoPagoText(text)) {
-      addWarning('No se detectó Mercado Pago claramente; revisa los datos.');
-    }
-
     double? parseNumber(String raw) {
       String value = raw.replaceAll(RegExp(r'[^0-9,.-]'), '');
       final int comma = value.lastIndexOf(',');
@@ -3638,6 +3636,16 @@ class _MovementsTabState extends State<MovementsTab> {
       type = MovementType.transferIn;
     } else if (hasTransferOut) {
       type = MovementType.transferOut;
+    }
+    final bool hasMercadoPagoSignals =
+        hasBuy ||
+        hasReceive ||
+        RegExp(
+          r'\b(comision de compra|creada el|n\.?\s*(?:º|o)?\s*de operacion|numero de operacion)\b',
+        ).hasMatch(lower);
+    final bool looksLikeMercadoPago = _isMercadoPagoText(text) || hasMercadoPagoSignals;
+    if (!looksLikeMercadoPago) {
+      addWarning('No se detectó Mercado Pago claramente; revisa los datos.');
     }
 
     const Map<String, String> coins = <String, String>{
@@ -3851,12 +3859,11 @@ class _MovementsTabState extends State<MovementsTab> {
         : null;
     if (unitPrice != null && derivedUnitPrice != null) {
       final double delta = (unitPrice - derivedUnitPrice).abs() / math.max(unitPrice, derivedUnitPrice);
-      if (unitPrice > 1.0000001 && delta > 0.2) {
+      if (unitPrice > 1.0000001 && delta > 0.35) {
         addWarning('Precio detectado no coincide con monto/cantidad; revisa antes de guardar.');
       }
     } else if (unitPrice == null && derivedUnitPrice != null) {
       unitPrice = derivedUnitPrice;
-      addWarning('Precio unitario calculado desde monto y cantidad.');
     } else if (unitPrice == null) {
       addWarning('Precio unitario no detectado.');
     }
@@ -3914,7 +3921,7 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     if (coin == null) addWarning('Moneda no detectada.');
-    if (type == null) addWarning('Tipo de movimiento no detectado.');
+    if (type == null) addWarning('Tipo no detectado.');
     if (quantity == null) addWarning('Cantidad cripto no detectada.');
     if (amountMxn == null) addWarning('Monto MXN no detectado.');
 
@@ -3926,8 +3933,12 @@ class _MovementsTabState extends State<MovementsTab> {
       unitPrice: unitPrice,
       fee: fee,
       date: date,
-      source: 'Mercado Pago',
-      note: 'OCR / captura Mercado Pago',
+      source: looksLikeMercadoPago ? 'Mercado Pago' : '',
+      note: looksLikeMercadoPago
+          ? hasReceive && lower.contains('wallet externa')
+              ? 'OCR / captura Mercado Pago · Recepción desde Wallet externa'
+              : 'OCR / captura Mercado Pago'
+          : 'OCR / captura',
       warnings: warnings,
       rawText: rawText,
     );
@@ -3968,6 +3979,21 @@ class _MovementsTabState extends State<MovementsTab> {
         return 'Se detectaron algunos datos. Completa lo faltante.';
       case _OcrReadQuality.weak:
         return 'No se pudo armar un movimiento automáticamente. Puedes capturarlo manualmente.';
+    }
+  }
+
+  String _ocrMovementTypeLabel(MovementType? type) {
+    switch (type) {
+      case MovementType.buy:
+        return 'Compra';
+      case MovementType.sell:
+        return 'Venta';
+      case MovementType.transferIn:
+        return 'Entrada / Recepción';
+      case MovementType.transferOut:
+        return 'Salida / Envío';
+      case null:
+        return 'No detectado';
     }
   }
 
@@ -4043,7 +4069,7 @@ class _MovementsTabState extends State<MovementsTab> {
               const SizedBox(height: 4),
               Text(_ocrReadCopy(quality)),
               const SizedBox(height: 12),
-              InfoLine('Tipo', candidate.type?.label ?? 'No detectado'),
+              InfoLine('Tipo', _ocrMovementTypeLabel(candidate.type)),
               InfoLine('Moneda', candidate.coin ?? 'No detectada'),
               InfoLine(
                 'Cantidad',
@@ -4104,11 +4130,6 @@ class _MovementsTabState extends State<MovementsTab> {
                       },
                       icon: const Icon(Icons.edit_note_outlined),
                       label: const Text('Capturar manualmente'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _showDetectedOcrText(sheetContext, previewText),
-                      icon: const Icon(Icons.text_snippet_outlined),
-                      label: const Text('Ver texto detectado'),
                     ),
                   ] else
                     FilledButton.icon(
