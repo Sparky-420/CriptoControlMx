@@ -3575,12 +3575,12 @@ class _MovementsTabState extends State<MovementsTab> {
         .trim();
     String fold(String value) => value
         .toLowerCase()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ü', 'u');
+        .replaceAll('\u00e1', 'a')
+        .replaceAll('\u00e9', 'e')
+        .replaceAll('\u00ed', 'i')
+        .replaceAll('\u00f3', 'o')
+        .replaceAll('\u00fa', 'u')
+        .replaceAll('\u00fc', 'u');
     final String lower = fold(text).replaceAll(RegExp(r'\s+'), ' ');
     final List<String> warnings = <String>[];
     final RegExp number = RegExp(r'\d[\d .,]*');
@@ -3611,6 +3611,12 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     MovementType? type;
+    final bool hasReceive = RegExp(
+      r'\b(recepcion|recepcion desde|wallet externa|equivalencia)\b',
+    ).hasMatch(lower);
+    final bool hasTransferOut = RegExp(
+      r'\b(envio|enviaste|retiro|retiraste|transferencia enviada)\b',
+    ).hasMatch(lower);
     final bool hasBuy = RegExp(
       r'\b(compraste(?: cripto| bitcoin| ethereum)?|compra(?: de)?)\b',
     ).hasMatch(lower);
@@ -3628,6 +3634,10 @@ class _MovementsTabState extends State<MovementsTab> {
       type = MovementType.buy;
     } else if (hasSell) {
       type = MovementType.sell;
+    } else if (hasReceive) {
+      type = MovementType.transferIn;
+    } else if (hasTransferOut) {
+      type = MovementType.transferOut;
     }
 
     const Map<String, String> coins = <String, String>{
@@ -3696,47 +3706,109 @@ class _MovementsTabState extends State<MovementsTab> {
       if (quantity != null && quantity <= 0) quantity = null;
     }
 
-    final List<double> preferredAmounts = <double>[];
-    final List<double> amountOptions = <double>[];
-    void addAmount(double? value, {bool preferred = false}) {
+    bool hasPercentContext(String source, int start, int end) {
+      final String before = source.substring(math.max(0, start - 4), start);
+      final String after = source.substring(end, math.min(source.length, end + 4));
+      return before.contains('%') || after.contains('%');
+    }
+
+    final RegExp moneyWithSymbol = RegExp('\\\$\\s*(${number.pattern})');
+    final RegExp moneyWithCurrency = RegExp(
+      '(${number.pattern})\\s*(?:mxn|pesos)',
+      caseSensitive: false,
+    );
+    final List<double> realMoneyAmounts = <double>[];
+    void addMoneyAmount(double? value) {
       if (value == null || value <= 0 || value < 0.01) return;
-      final List<double> target = preferred ? preferredAmounts : amountOptions;
-      if (!target.any((double seen) => (seen - value).abs() < 0.005)) {
-        target.add(value);
+      if (!realMoneyAmounts.any((double seen) => (seen - value).abs() < 0.005)) {
+        realMoneyAmounts.add(value);
       }
     }
 
-    for (final RegExpMatch match in RegExp(
-      '(?:total(?: pagado)?|pagaste|recibiste|monto(?: total)?)[^\\d\$]{0,30}(?:\\\$\\s*(${number.pattern})|(${number.pattern})\\s*(?:mxn|pesos))',
-      caseSensitive: false,
-    ).allMatches(lower)) {
-      addAmount(parseNumber(match.group(1) ?? match.group(2) ?? ''), preferred: true);
+    double? firstMoneyIn(String source, {int offset = 0}) {
+      RegExpMatch? bestMatch;
+      int? bestGroup;
+      for (final RegExpMatch match in moneyWithSymbol.allMatches(source)) {
+        if (hasPercentContext(source, match.start, match.end)) continue;
+        if (bestMatch == null || match.start < bestMatch.start) {
+          bestMatch = match;
+          bestGroup = 1;
+        }
+      }
+      for (final RegExpMatch match in moneyWithCurrency.allMatches(source)) {
+        if (hasPercentContext(source, match.start, match.end)) continue;
+        if (bestMatch == null || match.start < bestMatch.start) {
+          bestMatch = match;
+          bestGroup = 1;
+        }
+      }
+      if (bestMatch == null || bestGroup == null) return null;
+      return parseNumber(bestMatch.group(bestGroup) ?? '');
     }
-    for (final RegExpMatch match in RegExp('\\\$\\s*(${number.pattern})').allMatches(text)) {
-      final String before = lower.substring(math.max(0, match.start - 26), match.start);
+
+    double? firstMoneyAfterLabel(RegExp label, {List<RegExp> stopLabels = const <RegExp>[]}) {
+      for (final RegExpMatch labelMatch in label.allMatches(lower)) {
+        final int end = math.min(lower.length, labelMatch.end + 140);
+        String segment = lower.substring(labelMatch.end, end);
+        int stopAt = segment.length;
+        for (final RegExp stopLabel in stopLabels) {
+          final RegExpMatch? stopMatch = stopLabel.firstMatch(segment);
+          if (stopMatch != null && stopMatch.start < stopAt) {
+            stopAt = stopMatch.start;
+          }
+        }
+        segment = segment.substring(0, stopAt);
+        final double? value = firstMoneyIn(segment, offset: labelMatch.end);
+        if (value != null) return value;
+      }
+      return null;
+    }
+
+    for (final RegExpMatch match in moneyWithSymbol.allMatches(lower)) {
+      if (hasPercentContext(lower, match.start, match.end)) continue;
+      final String before = lower.substring(math.max(0, match.start - 32), match.start);
       if (RegExp(r'(comision|cargo|fee|costo de servicio|precio|cotizacion)').hasMatch(before)) {
         continue;
       }
-      addAmount(parseNumber(match.group(1) ?? ''));
+      addMoneyAmount(parseNumber(match.group(1) ?? ''));
     }
-    for (final RegExpMatch match in RegExp(
-      '(${number.pattern})\\s*(?:mxn|pesos)',
-      caseSensitive: false,
-    ).allMatches(lower)) {
-      final String before = lower.substring(math.max(0, match.start - 26), match.start);
+    for (final RegExpMatch match in moneyWithCurrency.allMatches(lower)) {
+      if (hasPercentContext(lower, match.start, match.end)) continue;
+      final String before = lower.substring(math.max(0, match.start - 32), match.start);
       if (RegExp(r'(comision|cargo|fee|costo de servicio|precio|cotizacion)').hasMatch(before)) {
         continue;
       }
-      addAmount(parseNumber(match.group(1) ?? ''));
+      addMoneyAmount(parseNumber(match.group(1) ?? ''));
     }
-    final List<double> allAmounts = <double>[];
-    for (final double value in <double>[...preferredAmounts, ...amountOptions]) {
-      if (!allAmounts.any((double seen) => (seen - value).abs() < 0.005)) {
-        allAmounts.add(value);
-      }
+
+    final RegExp amountLabel = RegExp(r'\b(monto|pagaste|recibiste|equivalencia)\b');
+    final RegExp totalLabel = RegExp(r'\btotal(?: pagado)?\b');
+    final RegExp feeLabel = RegExp(r'\b(comision(?: de compra| mercado pago)?|cargo|fee|costo de servicio)\b');
+    final RegExp priceLabel = RegExp(r'\b(precio|cotizacion|valor de 1)\b');
+    final double? explicitAmount = firstMoneyAfterLabel(
+      amountLabel,
+      stopLabels: <RegExp>[feeLabel, totalLabel, priceLabel],
+    );
+    final double? explicitTotal = firstMoneyAfterLabel(
+      totalLabel,
+      stopLabels: <RegExp>[amountLabel, feeLabel, priceLabel],
+    );
+    final double? explicitFee = firstMoneyAfterLabel(
+      feeLabel,
+      stopLabels: <RegExp>[amountLabel, totalLabel, priceLabel],
+    );
+
+    double fee = explicitFee ?? 0;
+    double? amountMxn = explicitAmount;
+    if (fee == 0 && explicitAmount != null && explicitTotal != null) {
+      final double inferredFee = explicitTotal - explicitAmount;
+      if (inferredFee > 0.005) fee = inferredFee;
     }
-    final double? amountMxn = allAmounts.isEmpty ? null : allAmounts.first;
-    if (allAmounts.length > 1) {
+    if (amountMxn == null && explicitTotal != null) {
+      amountMxn = fee > 0 ? explicitTotal - fee : explicitTotal;
+    }
+    amountMxn ??= realMoneyAmounts.isEmpty ? null : realMoneyAmounts.first;
+    if (realMoneyAmounts.length > 1) {
       addWarning('Se detectaron varios montos; revisa el total.');
     }
 
@@ -3746,16 +3818,40 @@ class _MovementsTabState extends State<MovementsTab> {
             .where((MapEntry<String, String> entry) => entry.value == coin)
             .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
             .join('|');
-    double? unitPrice =
-        firstGroup(RegExp('(?:precio(?: de (?:compra|venta))?|precio por|cotizacion|valor de 1 (?:$coinTerms))[^\\d\$]{0,36}\\\$?\\s*(${number.pattern})', caseSensitive: false)) ??
-        firstGroup(RegExp('1\\s*(?:$coinTerms)\\s*=\\s*\\\$?\\s*(${number.pattern})', caseSensitive: false));
+    double? unitPrice;
+    if (coin != null) {
+      unitPrice = firstGroup(
+            RegExp(
+              '(?:\\b$coin\\b|$coinTerms)\\s+1\\b[^\\d\$]{0,12}\\\$\\s*(${number.pattern})',
+              caseSensitive: false,
+            ),
+          ) ??
+          firstGroup(
+            RegExp(
+              '1\\s*(?:\\b$coin\\b|$coinTerms)\\b[^\\d\$]{0,12}\\\$\\s*(${number.pattern})',
+              caseSensitive: false,
+            ),
+          );
+    }
+    unitPrice ??= firstGroup(
+          RegExp(
+            '(?:precio(?: de (?:compra|venta))?|precio por|cotizacion|valor de 1 (?:$coinTerms))[^\\d\$]{0,36}\\\$\\s*(${number.pattern})',
+            caseSensitive: false,
+          ),
+        ) ??
+        firstGroup(
+          RegExp(
+            '1\\s*(?:$coinTerms)\\s*=\\s*\\\$\\s*(${number.pattern})',
+            caseSensitive: false,
+          ),
+        );
     if (unitPrice != null && unitPrice <= 0) unitPrice = null;
     final double? derivedUnitPrice = amountMxn != null && quantity != null && quantity > 0
         ? amountMxn / quantity
         : null;
     if (unitPrice != null && derivedUnitPrice != null) {
       final double delta = (unitPrice - derivedUnitPrice).abs() / math.max(unitPrice, derivedUnitPrice);
-      if (delta > 0.2) {
+      if (unitPrice > 1.0000001 && delta > 0.2) {
         addWarning('Precio detectado no coincide con monto/cantidad; revisa antes de guardar.');
       }
     } else if (unitPrice == null && derivedUnitPrice != null) {
@@ -3765,10 +3861,7 @@ class _MovementsTabState extends State<MovementsTab> {
       addWarning('Precio unitario no detectado.');
     }
 
-    double? fee =
-        firstGroup(RegExp('(?:comision(?: mercado pago)?|cargo|fee|costo de servicio)[^\\d\$]{0,30}\\\$?\\s*(${number.pattern})', caseSensitive: false));
-    if (fee == null) {
-      fee = 0;
+    if (explicitFee == null && fee == 0) {
       addWarning('Comisión no detectada; se usó 0.00 MXN.');
     }
 
@@ -3798,7 +3891,7 @@ class _MovementsTabState extends State<MovementsTab> {
         'diciembre': 12,
       };
       final RegExpMatch? namedDate = RegExp(
-        r'\b(\d{1,2})(?: de)? (ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|setiembre|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?: de)? (\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?\b',
+        r'\b(\d{1,2})(?: de)? (ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|setiembre|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?: de)? (\d{2,4})(?:[\s,\-]+(\d{1,2}):(\d{2})(?:\s*h(?:s)?)?)?\b',
       ).firstMatch(lower);
       if (namedDate != null) {
         int year = int.parse(namedDate.group(3)!);
