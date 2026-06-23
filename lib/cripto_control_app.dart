@@ -3611,13 +3611,23 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     MovementType? type;
+    final bool hasTransferIn = RegExp(
+      r'\b(recepcion|recepcion desde|wallet externa|equivalencia)\b',
+    ).hasMatch(lower);
+    final bool hasTransferOut = RegExp(
+      r'\b(envio|enviaste|retiro|retiraste|transferencia enviada)\b',
+    ).hasMatch(lower);
     final bool hasBuy = RegExp(
       r'\b(compraste(?: cripto| bitcoin| ethereum)?|compra(?: de)?)\b',
     ).hasMatch(lower);
     final bool hasSell = RegExp(
       r'\b(vendiste|venta(?: de)?|retiraste ganancia|recibiste por venta)\b',
     ).hasMatch(lower);
-    if (hasBuy && hasSell) {
+    if (hasTransferIn) {
+      type = MovementType.transferIn;
+    } else if (hasTransferOut) {
+      type = MovementType.transferOut;
+    } else if (hasBuy && hasSell) {
       addWarning('Tipo detectado con baja confianza.');
       final int buyIndex = lower.indexOf(RegExp(r'compr|compra'));
       final int sellIndex = lower.indexOf(RegExp(r'vendi|venta|recibiste por venta'));
@@ -3705,14 +3715,21 @@ class _MovementsTabState extends State<MovementsTab> {
         target.add(value);
       }
     }
+    bool touchesPercent(String source, int start, int end) {
+      final String before = source.substring(math.max(0, start - 4), start);
+      final String after = source.substring(end, math.min(source.length, end + 4));
+      return before.contains('%') || after.contains('%');
+    }
 
     for (final RegExpMatch match in RegExp(
-      '(?:total(?: pagado)?|pagaste|recibiste|monto(?: total)?)[^\\d\$]{0,30}(?:\\\$\\s*(${number.pattern})|(${number.pattern})\\s*(?:mxn|pesos))',
+      '(?:total(?: pagado)?|pagaste|recibiste|monto(?: total)?|equivalencia)[^\\d\$]{0,30}(?:\\\$\\s*(${number.pattern})|(${number.pattern})\\s*(?:mxn|pesos))',
       caseSensitive: false,
     ).allMatches(lower)) {
+      if (touchesPercent(lower, match.start, match.end)) continue;
       addAmount(parseNumber(match.group(1) ?? match.group(2) ?? ''), preferred: true);
     }
     for (final RegExpMatch match in RegExp('\\\$\\s*(${number.pattern})').allMatches(text)) {
+      if (touchesPercent(text, match.start, match.end)) continue;
       final String before = lower.substring(math.max(0, match.start - 26), match.start);
       if (RegExp(r'(comision|cargo|fee|costo de servicio|precio|cotizacion)').hasMatch(before)) {
         continue;
@@ -3723,6 +3740,7 @@ class _MovementsTabState extends State<MovementsTab> {
       '(${number.pattern})\\s*(?:mxn|pesos)',
       caseSensitive: false,
     ).allMatches(lower)) {
+      if (touchesPercent(lower, match.start, match.end)) continue;
       final String before = lower.substring(math.max(0, match.start - 26), match.start);
       if (RegExp(r'(comision|cargo|fee|costo de servicio|precio|cotizacion)').hasMatch(before)) {
         continue;
@@ -3735,7 +3753,10 @@ class _MovementsTabState extends State<MovementsTab> {
         allAmounts.add(value);
       }
     }
-    final double? amountMxn = allAmounts.isEmpty ? null : allAmounts.first;
+    double? amountMxn = allAmounts.isEmpty ? null : allAmounts.first;
+    if (type == MovementType.transferIn && preferredAmounts.isNotEmpty) {
+      amountMxn = preferredAmounts.first;
+    }
     if (allAmounts.length > 1) {
       addWarning('Se detectaron varios montos; revisa el total.');
     }
@@ -3746,10 +3767,15 @@ class _MovementsTabState extends State<MovementsTab> {
             .where((MapEntry<String, String> entry) => entry.value == coin)
             .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
             .join('|');
-    double? unitPrice =
-        firstGroup(RegExp('(?:precio(?: de (?:compra|venta))?|precio por|cotizacion|valor de 1 (?:$coinTerms))[^\\d\$]{0,36}\\\$?\\s*(${number.pattern})', caseSensitive: false)) ??
-        firstGroup(RegExp('1\\s*(?:$coinTerms)\\s*=\\s*\\\$?\\s*(${number.pattern})', caseSensitive: false));
+    double? unitPrice;
+    if (coin != null) {
+      unitPrice = firstGroup(RegExp('(?:$coinTerms)\\s*1\\s*(?:[≈=])?\\s*\\\$\\s*(${number.pattern})', caseSensitive: false));
+    }
+    unitPrice ??=
+        firstGroup(RegExp('(?:precio(?: de (?:compra|venta))?|precio por|cotizacion|valor de 1 (?:$coinTerms))[^\\d\$]{0,36}\\\$\\s*(${number.pattern})', caseSensitive: false)) ??
+        firstGroup(RegExp('1\\s*(?:$coinTerms)\\s*=\\s*\\\$\\s*(${number.pattern})', caseSensitive: false));
     if (unitPrice != null && unitPrice <= 0) unitPrice = null;
+    bool unitPriceCalculatedFromAmount = false;
     final double? derivedUnitPrice = amountMxn != null && quantity != null && quantity > 0
         ? amountMxn / quantity
         : null;
@@ -3760,16 +3786,44 @@ class _MovementsTabState extends State<MovementsTab> {
       }
     } else if (unitPrice == null && derivedUnitPrice != null) {
       unitPrice = derivedUnitPrice;
+      unitPriceCalculatedFromAmount = true;
       addWarning('Precio unitario calculado desde monto y cantidad.');
     } else if (unitPrice == null) {
       addWarning('Precio unitario no detectado.');
     }
 
-    double? fee =
-        firstGroup(RegExp('(?:comision(?: mercado pago)?|cargo|fee|costo de servicio)[^\\d\$]{0,30}\\\$?\\s*(${number.pattern})', caseSensitive: false));
+    double? fee;
+    for (final RegExpMatch match in RegExp(
+      '(?:comision(?: de compra| mercado pago)?|cargo|fee|costo de servicio)[^\\d\$]{0,30}(?:\\\$\\s*(${number.pattern})|(${number.pattern})\\s*(?:mxn|pesos))',
+      caseSensitive: false,
+    ).allMatches(lower)) {
+      if (touchesPercent(lower, match.start, match.end)) continue;
+      fee = parseNumber(match.group(1) ?? match.group(2) ?? '');
+      if (fee != null) break;
+    }
+    if (fee == null && type == MovementType.buy && allAmounts.length >= 3) {
+      final List<double> sortedAmounts = allAmounts.toList()..sort();
+      for (final double total in sortedAmounts.reversed) {
+        for (final double possibleAmount in sortedAmounts) {
+          if (possibleAmount >= total) continue;
+          final double possibleFee = total - possibleAmount;
+          if (sortedAmounts.any((double value) => (value - possibleFee).abs() <= math.max(0.02, total * 0.002))) {
+            amountMxn = possibleAmount;
+            fee = possibleFee;
+            break;
+          }
+        }
+        if (fee != null) break;
+      }
+    }
     if (fee == null) {
       fee = 0;
-      addWarning('Comisión no detectada; se usó 0.00 MXN.');
+      if (type == MovementType.buy) {
+        addWarning('Comisión no detectada; se usó 0.00 MXN.');
+      }
+    }
+    if (unitPriceCalculatedFromAmount && amountMxn != null && quantity != null && quantity > 0) {
+      unitPrice = amountMxn / quantity;
     }
 
     DateTime? date;
@@ -3798,7 +3852,7 @@ class _MovementsTabState extends State<MovementsTab> {
         'diciembre': 12,
       };
       final RegExpMatch? namedDate = RegExp(
-        r'\b(\d{1,2})(?: de)? (ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|setiembre|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?: de)? (\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?\b',
+        r'\b(\d{1,2})(?: de)? (ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|setiembre|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)(?: de)? (\d{2,4})(?:\s*(?:-|a las)?\s*(\d{1,2}):(\d{2})(?:\s*hs?)?)?\b',
       ).firstMatch(lower);
       if (namedDate != null) {
         int year = int.parse(namedDate.group(3)!);
@@ -11294,6 +11348,3 @@ Color pnlColor(double value) {
   if (value < 0) return const Color(0xFFDC2626);
   return Colors.grey.shade700;
 }
-
-
-
