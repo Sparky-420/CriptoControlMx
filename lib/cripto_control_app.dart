@@ -979,6 +979,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final TextEditingController controller = TextEditingController(
       text: compact(_currentPrices[coin] ?? 0.0),
     );
+    final bool isManual = _priceModes[coin] == PriceService.manualMode;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
     showDialog<void>(
       context: pageContext,
@@ -993,19 +995,53 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 24.0,
               ),
             ),
-            child: TextField(
-              controller: controller,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Precio MXN',
-                border: OutlineInputBorder(),
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                TextField(
+                  controller: controller,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Precio MXN',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Al guardar, esta moneda usará precio manual hasta que vuelvas a automático.',
+                ),
+              ],
             ),
           ),
         ),
         actions: <Widget>[
+          if (isManual)
+            TextButton(
+              onPressed: () async {
+                final SharedPreferences prefs =
+                    await SharedPreferences.getInstance();
+                _priceModes[coin] = PriceService.automaticMode;
+                _manualPriceUpdatedAtMs.remove(coin);
+                await _priceService.savePriceModes(prefs, _priceModes);
+                await _priceService.saveManualPriceUpdatedAtMs(
+                  prefs,
+                  _manualPriceUpdatedAtMs,
+                );
+                if (!dialogContext.mounted) return;
+                Navigator.of(dialogContext).pop();
+                if (mounted) setState(() {});
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '$coin volverá a actualizarse con CoinGecko en el próximo refresh.',
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Volver a automático'),
+            ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancelar'),
@@ -1037,6 +1073,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 setState(() => _applyPriceCache(priceCache));
               }
               Navigator.of(dialogContext).pop();
+              messenger.showSnackBar(
+                SnackBar(content: Text('Precio manual guardado para $coin.')),
+              );
             },
             child: const Text('Guardar'),
           ),
@@ -2738,6 +2777,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               coins: _coins,
               stats: stats,
               sellFeePercent: _sellFeePercent,
+              priceModes: _priceModes,
+              manualPriceUpdatedAtMs: _manualPriceUpdatedAtMs,
               onEditPrice: (String coin) =>
                   _showEditPriceDialog(pageContext, coin),
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
@@ -6166,6 +6207,8 @@ class CoinsTab extends StatelessWidget {
   final List<String> coins;
   final Map<String, CoinStats> stats;
   final double sellFeePercent;
+  final Map<String, String> priceModes;
+  final Map<String, int> manualPriceUpdatedAtMs;
   final void Function(String coin) onEditPrice;
   final void Function(CoinStats stats) onDetails;
 
@@ -6174,6 +6217,8 @@ class CoinsTab extends StatelessWidget {
     required this.coins,
     required this.stats,
     required this.sellFeePercent,
+    required this.priceModes,
+    required this.manualPriceUpdatedAtMs,
     required this.onEditPrice,
     required this.onDetails,
   });
@@ -6220,6 +6265,11 @@ class CoinsTab extends StatelessWidget {
             return PremiumCoinCard(
               stat: stat,
               sellFeePercent: sellFeePercent,
+              priceMode:
+                  priceModes[coin] == PriceService.manualMode
+                      ? PriceService.manualMode
+                      : PriceService.automaticMode,
+              manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
               onEditPrice: () => onEditPrice(coin),
               onDetails: () => onDetails(stat),
             );
@@ -6233,6 +6283,8 @@ class CoinsTab extends StatelessWidget {
 class PremiumCoinCard extends StatelessWidget {
   final CoinStats stat;
   final double sellFeePercent;
+  final String priceMode;
+  final int? manualPriceUpdatedAtMs;
   final VoidCallback onEditPrice;
   final VoidCallback onDetails;
 
@@ -6240,6 +6292,8 @@ class PremiumCoinCard extends StatelessWidget {
     super.key,
     required this.stat,
     required this.sellFeePercent,
+    required this.priceMode,
+    required this.manualPriceUpdatedAtMs,
     required this.onEditPrice,
     required this.onDetails,
   });
@@ -6249,6 +6303,15 @@ class PremiumCoinCard extends StatelessWidget {
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
     final bool hasPrice = stat.currentPrice > 0;
+    final bool isManual = priceMode == PriceService.manualMode;
+    final DateTime? manualUpdatedAt = manualPriceUpdatedAtMs == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(manualPriceUpdatedAtMs!);
+    final String priceModeLabel = isManual
+        ? manualUpdatedAt == null
+            ? 'Precio manual'
+            : 'Manual · ${longDate(manualUpdatedAt)}'
+        : 'Precio automático';
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -6274,6 +6337,13 @@ class PremiumCoinCard extends StatelessWidget {
                         hasPosition
                             ? '${crypto(stat.quantity)} en cartera'
                             : 'Precio listo para seguimiento',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      StatusPill(label: isManual ? 'Manual' : 'Automático', positive: !isManual),
+                      const SizedBox(height: 4),
+                      Text(
+                        priceModeLabel,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -6305,7 +6375,10 @@ class PremiumCoinCard extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 14),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 StatusPill(
                   label: hasPosition
@@ -6313,7 +6386,6 @@ class PremiumCoinCard extends StatelessWidget {
                       : 'Sin posición',
                   positive: !hasPosition || recovered,
                 ),
-                const Spacer(),
                 FilledButton.tonalIcon(
                   onPressed: onDetails,
                   icon: const Icon(Icons.info_outline),
