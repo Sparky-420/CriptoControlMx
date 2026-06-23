@@ -294,6 +294,19 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return matches == null || matches.isEmpty ? null : matches.first;
   }
 
+  Future<drive.File?> _loadGoogleDriveBackupFile(drive.DriveApi api) async {
+    final String? fileId = _googleDriveBackupFileId;
+    if (fileId != null && fileId.isNotEmpty) {
+      try {
+        return await api.files.get(
+          fileId,
+          $fields: 'id,name,modifiedTime',
+        ) as drive.File;
+      } catch (_) {}
+    }
+    return _findGoogleDriveBackupFile(api);
+  }
+
   Future<drive.File> _uploadGoogleDriveBackup(
     drive.DriveApi api,
     List<int> bytes,
@@ -349,6 +362,92 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo crear la copia en Google Drive.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isGoogleConnecting = false);
+    }
+  }
+
+  Future<bool> _confirmGoogleDriveRestore(BuildContext pageContext) async {
+    return await showDialog<bool>(
+          context: pageContext,
+          builder: (BuildContext dialogContext) => AlertDialog(
+            title: const Text('Restaurar desde Google Drive'),
+            content: const Text(
+              'Esto reemplazará tus datos financieros actuales con la copia guardada en Google Drive.',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Restaurar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _saveGoogleDriveBackupMetadata(
+    drive.File file,
+    GoogleSignInAccount account,
+  ) async {
+    final DateTime updatedAt = file.modifiedTime ?? DateTime.now();
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_googleDriveBackupFileIdKey, file.id ?? '');
+    await prefs.setInt(
+      _googleDriveBackupUpdatedAtKey,
+      updatedAt.millisecondsSinceEpoch,
+    );
+    await prefs.setString(_googleDriveBackupAccountEmailKey, account.email);
+    if (!mounted) return;
+    setState(() {
+      _googleDriveBackupFileId = file.id;
+      _googleDriveBackupUpdatedAt = updatedAt;
+      _googleDriveBackupAccountEmail = account.email;
+    });
+  }
+
+  Future<void> _restoreGoogleDriveBackup(BuildContext pageContext) async {
+    if (_isGoogleConnecting) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+
+    setState(() => _isGoogleConnecting = true);
+    try {
+      await _withGoogleDriveApi(pageContext, (drive.DriveApi api, GoogleSignInAccount account) async {
+        final drive.File? file = await _loadGoogleDriveBackupFile(api);
+        if (file?.id == null) {
+          messenger.showSnackBar(
+            const SnackBar(content: Text('No hay copia en Google Drive.')),
+          );
+          return;
+        }
+        if (!await _confirmGoogleDriveRestore(pageContext)) return;
+        final Object downloaded = await api.files.get(
+          file!.id!,
+          downloadOptions: commons.DownloadOptions.fullMedia,
+        );
+        if (downloaded is! commons.Media) throw const FormatException();
+        final List<int> bytes = <int>[];
+        await for (final List<int> chunk in downloaded.stream) {
+          bytes.addAll(chunk);
+        }
+        if (bytes.isEmpty) throw const FormatException();
+        final _ImportResult result = await _applyBackupJson(utf8.decode(bytes));
+        await _saveGoogleDriveBackupMetadata(file, account);
+        if (!mounted) return;
+        _showImportResult(messenger, result, fileName: 'Google Drive');
+      });
+    } on StateError {
+      // _withGoogleDriveApi already shows the user-facing message.
+    } catch (_) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No se pudo restaurar la copia desde Google Drive.')),
         );
       }
     } finally {
@@ -3184,6 +3283,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   _disconnectGoogleDrive(pageContext),
               onCreateGoogleDriveBackup: () =>
                   _createGoogleDriveBackup(pageContext),
+              onRestoreGoogleDriveBackup: () =>
+                  _restoreGoogleDriveBackup(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
@@ -7932,6 +8033,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onConnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onCreateGoogleDriveBackup;
+  final VoidCallback onRestoreGoogleDriveBackup;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
@@ -7989,6 +8091,7 @@ class MoreTab extends StatelessWidget {
     required this.onConnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
     required this.onCreateGoogleDriveBackup,
+    required this.onRestoreGoogleDriveBackup,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onSnapshotAutomationModeChanged,
@@ -8214,6 +8317,16 @@ class MoreTab extends StatelessWidget {
                 ? 'Actualiza criptocontrolmx_respaldo.json en appDataFolder'
                 : 'Conecta Google Drive primero',
             onTap: onCreateGoogleDriveBackup,
+          ),
+          _SheetAction(
+            icon: isGoogleConnecting
+                ? Icons.hourglass_top_outlined
+                : Icons.cloud_download_outlined,
+            title: 'Restaurar desde Google Drive',
+            subtitle: googleDriveConnected
+                ? 'Descarga la copia y pide confirmación antes de restaurar'
+                : 'Conecta Google Drive primero',
+            onTap: onRestoreGoogleDriveBackup,
           ),
           _SheetAction(
             icon: isGoogleConnecting
@@ -9255,6 +9368,11 @@ class _CommandActionSheet extends StatelessWidget {
         .where(
           (_SheetAction action) =>
               action.title != 'Crear copia en Google Drive' ||
+              action.onTap != null,
+        )
+        .where(
+          (_SheetAction action) =>
+              action.title != 'Restaurar desde Google Drive' ||
               action.onTap != null,
         )
         .toList();
