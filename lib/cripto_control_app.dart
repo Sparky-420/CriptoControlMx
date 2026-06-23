@@ -4,9 +4,12 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart' as xl;
+import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:_discoveryapis_commons/_discoveryapis_commons.dart' as commons;
+import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:pdf/pdf.dart';
@@ -103,6 +106,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   static const String _priceRefreshForegroundModeKey =
       'price_refresh_foreground_mode_v1';
   static const List<String> _googleDriveScopes = <String>['https://www.googleapis.com/auth/drive.appdata'];
+  static const String _googleDriveBackupFileName = 'criptocontrolmx_respaldo.json';
+  static const String _googleDriveBackupFileIdKey = 'google_drive_backup_file_id_v1';
+  static const String _googleDriveBackupUpdatedAtKey = 'google_drive_backup_updated_at_ms_v1';
+  static const String _googleDriveBackupAccountEmailKey = 'google_drive_backup_account_email_v1';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -160,6 +167,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<void>? _googleSignInInitFuture;
   GoogleSignInAccount? _googleAccount;
   bool _isGoogleConnecting = false;
+  String? _googleDriveBackupFileId;
+  DateTime? _googleDriveBackupUpdatedAt;
+  String? _googleDriveBackupAccountEmail;
 
   @override
   void initState() {
@@ -242,6 +252,105 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (_) {
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
+    } finally {
+      if (mounted) setState(() => _isGoogleConnecting = false);
+    }
+  }
+
+  commons.Media _googleDriveBackupMedia(List<int> bytes) =>
+      commons.Media(Stream<List<int>>.value(bytes), bytes.length, contentType: 'application/json');
+
+  Future<T> _withGoogleDriveApi<T>(
+    BuildContext pageContext,
+    Future<T> Function(drive.DriveApi api, GoogleSignInAccount account) action,
+  ) async {
+    final GoogleSignInAccount? account = _googleAccount;
+    if (account == null) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(content: Text('Conecta Google Drive primero.')),
+      );
+      throw StateError('Google Drive no conectado');
+    }
+    await _ensureGoogleSignInInitialized();
+    final GoogleSignInClientAuthorization authorization =
+        await account.authorizationClient.authorizationForScopes(_googleDriveScopes) ??
+            await account.authorizationClient.authorizeScopes(_googleDriveScopes);
+    final client = authorization.authClient(scopes: _googleDriveScopes);
+    try {
+      return await action(drive.DriveApi(client), account);
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<drive.File?> _findGoogleDriveBackupFile(drive.DriveApi api) async {
+    final drive.FileList files = await api.files.list(
+      spaces: 'appDataFolder',
+      q: "name = '$_googleDriveBackupFileName' and trashed = false",
+      pageSize: 1,
+      $fields: 'files(id,name,modifiedTime)',
+    );
+    final List<drive.File>? matches = files.files;
+    return matches == null || matches.isEmpty ? null : matches.first;
+  }
+
+  Future<drive.File> _uploadGoogleDriveBackup(
+    drive.DriveApi api,
+    List<int> bytes,
+  ) async {
+    final drive.File metadata = drive.File()
+      ..name = _googleDriveBackupFileName
+      ..mimeType = 'application/json';
+    final drive.File? existing = await _findGoogleDriveBackupFile(api);
+    if (existing?.id != null) {
+      return api.files.update(
+        metadata,
+        existing!.id!,
+        uploadMedia: _googleDriveBackupMedia(bytes),
+        $fields: 'id,name,modifiedTime',
+      );
+    }
+    metadata.parents = <String>['appDataFolder'];
+    return api.files.create(
+      metadata,
+      uploadMedia: _googleDriveBackupMedia(bytes),
+      $fields: 'id,name,modifiedTime',
+    );
+  }
+
+  Future<void> _createGoogleDriveBackup(BuildContext pageContext) async {
+    if (_isGoogleConnecting) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+
+    setState(() => _isGoogleConnecting = true);
+    try {
+      await _withGoogleDriveApi(pageContext, (drive.DriveApi api, GoogleSignInAccount account) async {
+        final List<int> bytes = utf8.encode(_buildBackupJson());
+        final drive.File uploaded = await _uploadGoogleDriveBackup(api, bytes);
+        final DateTime updatedAt = uploaded.modifiedTime ?? DateTime.now();
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_googleDriveBackupFileIdKey, uploaded.id ?? '');
+        await prefs.setInt(_googleDriveBackupUpdatedAtKey, updatedAt.millisecondsSinceEpoch);
+        await prefs.setString(_googleDriveBackupAccountEmailKey, account.email);
+        if (!mounted) return;
+        setState(() {
+          _googleDriveBackupFileId = uploaded.id;
+          _googleDriveBackupUpdatedAt = updatedAt;
+          _googleDriveBackupAccountEmail = account.email;
+        });
+      });
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Copia creada en Google Drive.')),
+      );
+    } on StateError {
+      // _withGoogleDriveApi already shows the user-facing message.
+    } catch (_) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No se pudo crear la copia en Google Drive.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isGoogleConnecting = false);
     }
@@ -354,6 +463,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _priceRefreshForegroundMode = priceRefreshForegroundModeFromName(
         prefs.getString(_priceRefreshForegroundModeKey),
       );
+      _googleDriveBackupFileId = prefs.getString(_googleDriveBackupFileIdKey);
+      final int? driveBackupUpdatedAt =
+          prefs.getInt(_googleDriveBackupUpdatedAtKey);
+      _googleDriveBackupUpdatedAt = driveBackupUpdatedAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(driveBackupUpdatedAt);
+      _googleDriveBackupAccountEmail =
+          prefs.getString(_googleDriveBackupAccountEmailKey);
       await _loadPriceAlertSettings(prefs);
 
       if (mounted) setState(() => _bootstrapped = true);
@@ -3011,6 +3128,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   _automaticLocalAlertsIntervalMinutes,
               notificationsAllowed: _notificationsAllowed,
               googleAccountEmail: _googleAccount?.email,
+              googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isGoogleConnecting: _isGoogleConnecting,
               isRefreshingPrices: _isRefreshingPrices,
               chartDataCount: stats.values
@@ -3064,6 +3182,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
               onDisconnectGoogleDrive: () =>
                   _disconnectGoogleDrive(pageContext),
+              onCreateGoogleDriveBackup: () =>
+                  _createGoogleDriveBackup(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
@@ -7786,6 +7906,7 @@ class MoreTab extends StatelessWidget {
   final int automaticLocalAlertsIntervalMinutes;
   final bool notificationsAllowed;
   final String? googleAccountEmail;
+  final DateTime? googleDriveBackupUpdatedAt;
   final bool isGoogleConnecting;
   final bool isRefreshingPrices;
   final int chartDataCount;
@@ -7810,6 +7931,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onImportBackupFile;
   final VoidCallback onConnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
+  final VoidCallback onCreateGoogleDriveBackup;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final ValueChanged<SnapshotAutomationMode> onSnapshotAutomationModeChanged;
@@ -7841,6 +7963,7 @@ class MoreTab extends StatelessWidget {
     required this.automaticLocalAlertsIntervalMinutes,
     required this.notificationsAllowed,
     required this.googleAccountEmail,
+    required this.googleDriveBackupUpdatedAt,
     required this.isGoogleConnecting,
     required this.isRefreshingPrices,
     required this.chartDataCount,
@@ -7865,6 +7988,7 @@ class MoreTab extends StatelessWidget {
     required this.onImportBackupFile,
     required this.onConnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
+    required this.onCreateGoogleDriveBackup,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
     required this.onSnapshotAutomationModeChanged,
@@ -7875,6 +7999,9 @@ class MoreTab extends StatelessWidget {
 
   static const String _priceSource = 'CoinGecko';
   bool get googleDriveConnected => googleAccountEmail != null;
+  String get googleDriveBackupLabel => googleDriveBackupUpdatedAt == null
+      ? 'Sin copia en Drive'
+      : 'Última copia en Drive: ${longDate(googleDriveBackupUpdatedAt!)}';
 
   @override
   Widget build(BuildContext context) {
@@ -7904,7 +8031,7 @@ class MoreTab extends StatelessWidget {
               icon: Icons.cloud_done_outlined,
               title: 'Google Drive',
               subtitle: googleDriveConnected
-                  ? 'Conectado como ${googleAccountEmail ?? 'cuenta Google'}'
+                  ? 'Conectado como ${googleAccountEmail ?? 'cuenta Google'} · $googleDriveBackupLabel'
                   : 'Conecta tu cuenta para crear copias de seguridad en la nube.',
               badge: googleDriveConnected ? 'Conectado' : 'Desconectado',
               loading: isGoogleConnecting,
@@ -8072,8 +8199,26 @@ class MoreTab extends StatelessWidget {
                 'No se sincroniza automÃ¡ticamente. Solo se subirÃ¡ o restaurarÃ¡ una copia cuando tÃº lo solicites.',
             onTap: null,
           ),
-          const _SheetAction(
-            icon: Icons.cloud_upload_outlined,
+          _SheetAction(
+            icon: Icons.history_outlined,
+            title: googleDriveBackupLabel,
+            subtitle: 'Archivo: criptocontrolmx_respaldo.json',
+            onTap: null,
+          ),
+          _SheetAction(
+            icon: isGoogleConnecting
+                ? Icons.hourglass_top_outlined
+                : Icons.cloud_upload_outlined,
+            title: 'Crear copia en Google Drive',
+            subtitle: googleDriveConnected
+                ? 'Actualiza criptocontrolmx_respaldo.json en appDataFolder'
+                : 'Conecta Google Drive primero',
+            onTap: onCreateGoogleDriveBackup,
+          ),
+          _SheetAction(
+            icon: isGoogleConnecting
+                ? Icons.hourglass_top_outlined
+                : Icons.cloud_upload_outlined,
             title: 'Crear copia en Google Drive',
             subtitle: 'PrÃ³xima fase',
             onTap: null,
@@ -9106,6 +9251,13 @@ class _CommandActionSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double bottomPadding = MediaQuery.viewPaddingOf(context).bottom + 20;
+    final List<_SheetAction> visibleActions = actions
+        .where(
+          (_SheetAction action) =>
+              action.title != 'Crear copia en Google Drive' ||
+              action.onTap != null,
+        )
+        .toList();
     return SafeArea(
       top: false,
       child: Padding(
@@ -9127,10 +9279,10 @@ class _CommandActionSheet extends StatelessWidget {
               ),
               child: ListView.separated(
                 shrinkWrap: true,
-                itemCount: actions.length,
+                itemCount: visibleActions.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (BuildContext context, int index) {
-                  final _SheetAction action = actions[index];
+                  final _SheetAction action = visibleActions[index];
                   return Card(
                     margin: EdgeInsets.zero,
                     child: ListTile(
