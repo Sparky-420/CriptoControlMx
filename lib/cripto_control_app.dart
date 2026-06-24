@@ -167,9 +167,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<void>? _googleSignInInitFuture;
   GoogleSignInAccount? _googleAccount;
   bool _isGoogleConnecting = false;
+  bool _isGoogleDriveCreating = false;
+  bool _isGoogleDriveRestoring = false;
   String? _googleDriveBackupFileId;
   DateTime? _googleDriveBackupUpdatedAt;
   String? _googleDriveBackupAccountEmail;
+
+  bool get _isGoogleDriveBusy =>
+      _isGoogleConnecting || _isGoogleDriveCreating || _isGoogleDriveRestoring;
 
   @override
   void initState() {
@@ -209,7 +214,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<void> _connectGoogleDrive(BuildContext pageContext) async {
-    if (_isGoogleConnecting) return;
+    if (_isGoogleDriveBusy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     var errorMessage = 'No se pudo conectar Google Drive.';
 
@@ -244,6 +249,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           error.code == GoogleSignInExceptionCode.canceled ||
           error.code == GoogleSignInExceptionCode.interrupted ||
           error.code == GoogleSignInExceptionCode.uiUnavailable;
+      if (canceled) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No se conectó Google Drive.')),
+        );
+        return;
+      }
       messenger.showSnackBar(
         SnackBar(
           content: Text(canceled ? 'Conexión cancelada.' : errorMessage),
@@ -332,10 +343,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<void> _createGoogleDriveBackup(BuildContext pageContext) async {
-    if (_isGoogleConnecting) return;
+    if (_isGoogleDriveBusy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
-    setState(() => _isGoogleConnecting = true);
+    setState(() => _isGoogleDriveCreating = true);
     try {
       await _withGoogleDriveApi(pageContext, (drive.DriveApi api, GoogleSignInAccount account) async {
         final List<int> bytes = utf8.encode(_buildBackupJson());
@@ -365,7 +376,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         );
       }
     } finally {
-      if (mounted) setState(() => _isGoogleConnecting = false);
+      if (mounted) setState(() => _isGoogleDriveCreating = false);
     }
   }
 
@@ -413,10 +424,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<void> _restoreGoogleDriveBackup(BuildContext pageContext) async {
-    if (_isGoogleConnecting) return;
+    if (_isGoogleDriveBusy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
-    setState(() => _isGoogleConnecting = true);
+    setState(() => _isGoogleDriveRestoring = true);
     try {
       await _withGoogleDriveApi(pageContext, (drive.DriveApi api, GoogleSignInAccount account) async {
         final drive.File? file = await _loadGoogleDriveBackupFile(api);
@@ -441,9 +452,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         await _saveGoogleDriveBackupMetadata(file, account);
         if (!mounted) return;
         _showImportResult(messenger, result, fileName: 'Google Drive');
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Copia restaurada desde Google Drive.')),
+        );
       });
     } on StateError {
       // _withGoogleDriveApi already shows the user-facing message.
+    } on FormatException {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('La copia de Google Drive no es válida.')),
+        );
+      }
     } catch (_) {
       if (mounted) {
         messenger.showSnackBar(
@@ -451,12 +471,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         );
       }
     } finally {
-      if (mounted) setState(() => _isGoogleConnecting = false);
+      if (mounted) setState(() => _isGoogleDriveRestoring = false);
     }
   }
 
   Future<void> _disconnectGoogleDrive(BuildContext pageContext) async {
-    if (_isGoogleConnecting) return;
+    if (_isGoogleDriveBusy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
     setState(() => _isGoogleConnecting = true);
@@ -3229,6 +3249,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               googleAccountEmail: _googleAccount?.email,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isGoogleConnecting: _isGoogleConnecting,
+              isGoogleDriveCreating: _isGoogleDriveCreating,
+              isGoogleDriveRestoring: _isGoogleDriveRestoring,
               isRefreshingPrices: _isRefreshingPrices,
               chartDataCount: stats.values
                   .where((CoinStats stat) => stat.currentValue > 0)
@@ -8009,6 +8031,8 @@ class MoreTab extends StatelessWidget {
   final String? googleAccountEmail;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isGoogleConnecting;
+  final bool isGoogleDriveCreating;
+  final bool isGoogleDriveRestoring;
   final bool isRefreshingPrices;
   final int chartDataCount;
   final List<String> motorCoins;
@@ -8067,6 +8091,8 @@ class MoreTab extends StatelessWidget {
     required this.googleAccountEmail,
     required this.googleDriveBackupUpdatedAt,
     required this.isGoogleConnecting,
+    required this.isGoogleDriveCreating,
+    required this.isGoogleDriveRestoring,
     required this.isRefreshingPrices,
     required this.chartDataCount,
     required this.motorCoins,
@@ -8102,7 +8128,12 @@ class MoreTab extends StatelessWidget {
 
   static const String _priceSource = 'CoinGecko';
   bool get googleDriveConnected => googleAccountEmail != null;
+  bool get googleDriveBusy =>
+      isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
   String get googleDriveBackupLabel => googleDriveBackupUpdatedAt == null
+      ? 'Sin copia en Drive'
+      : longDate(googleDriveBackupUpdatedAt!);
+  String get googleDriveBackupStatus => googleDriveBackupUpdatedAt == null
       ? 'Sin copia en Drive'
       : 'Última copia en Drive: ${longDate(googleDriveBackupUpdatedAt!)}';
 
@@ -8134,10 +8165,10 @@ class MoreTab extends StatelessWidget {
               icon: Icons.cloud_done_outlined,
               title: 'Google Drive',
               subtitle: googleDriveConnected
-                  ? 'Conectado como ${googleAccountEmail ?? 'cuenta Google'} · $googleDriveBackupLabel'
-                  : 'Conecta tu cuenta para crear copias de seguridad en la nube.',
-              badge: googleDriveConnected ? 'Conectado' : 'Desconectado',
-              loading: isGoogleConnecting,
+                  ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Última copia: $googleDriveBackupLabel'
+                  : 'No conectado · Conecta tu cuenta para crear y restaurar copias en la nube.',
+              badge: googleDriveConnected ? 'Conectado' : 'No conectado',
+              loading: googleDriveBusy,
               onTap: () => _showGoogleDriveActions(context),
             ),
             _CommandCard(
@@ -8287,9 +8318,9 @@ class MoreTab extends StatelessWidget {
                 ? 'Desconectar'
                 : 'Conectar Google Drive',
             subtitle: googleDriveConnected
-                ? 'Conectado como ${googleAccountEmail ?? 'cuenta Google'}'
-                : 'Conecta tu cuenta para crear copias de seguridad en la nube.',
-            onTap: isGoogleConnecting
+                ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Estado: conectado'
+                : 'Estado: no conectado · Conecta tu cuenta para crear y restaurar copias en la nube.',
+            onTap: googleDriveBusy
                 ? null
                 : googleDriveConnected
                     ? onDisconnectGoogleDrive
@@ -8304,29 +8335,37 @@ class MoreTab extends StatelessWidget {
           ),
           _SheetAction(
             icon: Icons.history_outlined,
-            title: googleDriveBackupLabel,
+            title: googleDriveBackupStatus,
             subtitle: 'Archivo: criptocontrolmx_respaldo.json',
             onTap: null,
           ),
           _SheetAction(
-            icon: isGoogleConnecting
+            icon: isGoogleDriveCreating
                 ? Icons.hourglass_top_outlined
                 : Icons.cloud_upload_outlined,
-            title: 'Crear copia en Google Drive',
+            title: isGoogleDriveCreating
+                ? 'Creando copia...'
+                : 'Crear copia en Google Drive',
             subtitle: googleDriveConnected
-                ? 'Actualiza criptocontrolmx_respaldo.json en appDataFolder'
+                ? 'Actualiza la copia guardada en Google Drive'
                 : 'Conecta Google Drive primero',
-            onTap: onCreateGoogleDriveBackup,
+            onTap: googleDriveConnected && !googleDriveBusy
+                ? onCreateGoogleDriveBackup
+                : null,
           ),
           _SheetAction(
-            icon: isGoogleConnecting
+            icon: isGoogleDriveRestoring
                 ? Icons.hourglass_top_outlined
                 : Icons.cloud_download_outlined,
-            title: 'Restaurar desde Google Drive',
+            title: isGoogleDriveRestoring
+                ? 'Restaurando copia...'
+                : 'Restaurar desde Google Drive',
             subtitle: googleDriveConnected
                 ? 'Descarga la copia y pide confirmación antes de restaurar'
                 : 'Conecta Google Drive primero',
-            onTap: onRestoreGoogleDriveBackup,
+            onTap: googleDriveConnected && !googleDriveBusy
+                ? onRestoreGoogleDriveBackup
+                : null,
           ),
           _SheetAction(
             icon: isGoogleConnecting
