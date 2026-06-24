@@ -8327,6 +8327,13 @@ class MoreTab extends StatelessWidget {
                     : onConnectGoogleDrive,
           ),
           const _SheetAction(
+            icon: Icons.privacy_tip_outlined,
+            title: 'Privacidad de Drive',
+            subtitle:
+                'Tu copia se guarda en el espacio privado de la app en Google Drive. CriptoControlMx no sincroniza automáticamente; solo crea o restaura una copia cuando tú lo solicitas. La copia puede incluir movimientos, precios, comisión, snapshots y configuración financiera. Puedes desconectar Google Drive cuando quieras.',
+            onTap: null,
+          ),
+          const _SheetAction(
             icon: Icons.info_outline,
             title: 'Sin sincronizaciÃ³n automÃ¡tica',
             subtitle:
@@ -8349,9 +8356,7 @@ class MoreTab extends StatelessWidget {
             subtitle: googleDriveConnected
                 ? 'Actualiza la copia guardada en Google Drive'
                 : 'Conecta Google Drive primero',
-            onTap: googleDriveConnected && !googleDriveBusy
-                ? onCreateGoogleDriveBackup
-                : null,
+            onTap: googleDriveBusy ? null : onCreateGoogleDriveBackup,
           ),
           _SheetAction(
             icon: isGoogleDriveRestoring
@@ -8363,9 +8368,7 @@ class MoreTab extends StatelessWidget {
             subtitle: googleDriveConnected
                 ? 'Descarga la copia y pide confirmación antes de restaurar'
                 : 'Conecta Google Drive primero',
-            onTap: googleDriveConnected && !googleDriveBusy
-                ? onRestoreGoogleDriveBackup
-                : null,
+            onTap: googleDriveBusy ? null : onRestoreGoogleDriveBackup,
           ),
           _SheetAction(
             icon: isGoogleConnecting
@@ -8700,6 +8703,10 @@ class MoreTab extends StatelessWidget {
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
               InfoLine('Copia de seguridad local', 'Compatible'),
+              InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
+              const InfoLine('Scope Drive', 'appDataFolder'),
+              const InfoLine('Sync automático Drive', 'No'),
+              InfoLine('Última copia Drive', googleDriveBackupLabel),
               InfoLine('Alertas automáticas locales', automaticLocalAlertsEnabled ? 'Activadas' : 'Desactivadas'),
               const InfoLine('Monitoreo de alertas', 'Configurable desde Alertas'),
               InfoLine('Intervalo de alertas', intervalLabel(automaticLocalAlertsIntervalMinutes)),
@@ -8772,6 +8779,10 @@ class MoreTab extends StatelessWidget {
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
+              const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
+              const InfoLine('Datos en copia', 'Movimientos, precios, comisión, snapshots y configuración financiera'),
+              const InfoLine('Cuenta Google', 'Email visible para mostrar la cuenta conectada'),
+              const InfoLine('Privacidad', 'Sin venta de datos, analytics ni sync automático'),
               InfoLine('Copia de seguridad', 'Creación y restauración locales disponibles'),
               InfoLine('Aviso', 'No es asesoría financiera'),
               const SizedBox(height: 12),
@@ -9404,6 +9415,9 @@ class _CommandActionSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final double bottomPadding = MediaQuery.viewPaddingOf(context).bottom + 20;
     final List<_SheetAction> visibleActions = actions
+        .where(
+          (_SheetAction action) => !action.title.startsWith('Sin sincron'),
+        )
         .where(
           (_SheetAction action) =>
               action.title != 'Crear copia en Google Drive' ||
