@@ -57,10 +57,12 @@ class CriptoControlApp extends StatefulWidget {
     super.key,
     this.initialThemeModeName,
     this.initialThemeStyleName,
+    this.firebaseStatus = 'No disponible',
   });
 
   final String? initialThemeModeName;
   final String? initialThemeStyleName;
+  final String firebaseStatus;
 
   @override
   State<CriptoControlApp> createState() => _CriptoControlAppState();
@@ -3246,6 +3248,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               automaticLocalAlertsIntervalMinutes:
                   _automaticLocalAlertsIntervalMinutes,
               notificationsAllowed: _notificationsAllowed,
+              firebaseStatus: widget.firebaseStatus,
               googleAccountEmail: _googleAccount?.email,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isGoogleConnecting: _isGoogleConnecting,
@@ -8028,6 +8031,7 @@ class MoreTab extends StatelessWidget {
   final bool automaticLocalAlertsEnabled;
   final int automaticLocalAlertsIntervalMinutes;
   final bool notificationsAllowed;
+  final String firebaseStatus;
   final String? googleAccountEmail;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isGoogleConnecting;
@@ -8088,6 +8092,7 @@ class MoreTab extends StatelessWidget {
     required this.automaticLocalAlertsEnabled,
     required this.automaticLocalAlertsIntervalMinutes,
     required this.notificationsAllowed,
+    required this.firebaseStatus,
     required this.googleAccountEmail,
     required this.googleDriveBackupUpdatedAt,
     required this.isGoogleConnecting,
@@ -8702,6 +8707,7 @@ class MoreTab extends StatelessWidget {
               Text('Salud', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
+              InfoLine('Firebase', firebaseStatus),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
               const InfoLine('Scope Drive', 'appDataFolder'),
@@ -8777,6 +8783,7 @@ class MoreTab extends StatelessWidget {
               const Divider(height: 20),
               InfoLine('Estado', 'Fase 1'),
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
+              InfoLine('Firebase', firebaseStatus),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
               const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),

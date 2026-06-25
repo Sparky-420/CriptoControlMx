@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "767407830346",
+    "project_id": "control-cripto-mx",
+    "storage_bucket": "control-cripto-mx.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767407830346:android:915069e9e921ccdcea3db3",
+        "android_client_info": {
+          "package_name": "mx.criptocontrolmx.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBn_oja87EpcNDD-cHnTTEyzeSbQcUFqO4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
