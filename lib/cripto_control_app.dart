@@ -9692,6 +9692,16 @@ class MoreTab extends StatelessWidget {
                 'Retención de instantáneas',
                 snapshotRetention.label,
               ),
+              const Divider(height: 20),
+              Text('Checklist beta', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              const InfoLine('Cuenta', 'Google/Firebase Auth opcional'),
+              const InfoLine('Datos financieros', 'Locales; Drive/Firebase solo por acción manual'),
+              InfoLine('App activity', analyticsEnabled ? 'Analytics autorizado' : 'No autorizado'),
+              InfoLine('Crash logs', crashlyticsEnabled ? 'Reportes autorizados' : 'No autorizados'),
+              const InfoLine('OCR', 'Procesado localmente; no enviado a monitoreo'),
+              const InfoLine('Sync automático', 'No activo'),
+              const InfoLine('Beta readiness', 'Data Safety pendiente de confirmar en Play Console'),
               if (financialErrors.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
                 ...financialErrors.take(6).map(
@@ -9769,6 +9779,24 @@ class MoreTab extends StatelessWidget {
               const InfoLine('Privacidad', 'Monitoreo opcional; sin venta de datos ni sync automático'),
               InfoLine('Copia de seguridad', 'Creación y restauración locales disponibles'),
               InfoLine('Aviso', 'No es asesoría financiera'),
+              const Divider(height: 20),
+              Text('Privacidad y datos', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              const Text(
+                'CriptoControlMx maneja datos financieros registrados por ti. Esos datos se quedan en tu dispositivo salvo cuando decides crear una copia en Google Drive o subir/restaurar estado desde Firebase.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Analytics y reportes de errores solo se envían si los autorizas. No se envían a monitoreo movimientos completos, montos, cantidades cripto, precios, P&L, OCR detectado, copias de seguridad, notas, wallets ni redes.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Si usas cuenta en la nube, Firebase puede procesar tu correo de cuenta y el estado financiero que subas manualmente. Si usas Google Drive Backup, tu copia se guarda en el espacio privado de la app cuando tú lo solicitas.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Data Safety preliminar: email y User ID solo con inicio de sesión; información financiera solo para funcionalidad, backup o sync manual; app activity y diagnósticos solo con autorización.',
+              ),
               const SizedBox(height: 12),
               Text(
                 'Las cifras dependen de los movimientos registrados, precios disponibles y comisiones configuradas.',
@@ -10194,7 +10222,11 @@ class _PrivacyMonitoringCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'No se envían movimientos, montos, precios, OCR, copias de seguridad, email ni UID.',
+              'Los datos financieros se quedan en tu dispositivo salvo cuando creas una copia en Google Drive o subes/restauras estado desde Firebase.',
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'No se envían a Analytics ni Crashlytics movimientos completos, montos, cantidades cripto, precios, P&L, OCR detectado, copias de seguridad, notas, wallets ni redes.',
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
