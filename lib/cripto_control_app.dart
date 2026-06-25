@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xl;
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -22,6 +23,41 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
+
+const Set<String> _safeCrashAreas = <String>{'cloud', 'drive', 'export', 'import', 'ocr', 'price_refresh', 'reset', 'unknown'};
+const Set<String> _safeCrashCodes = <String>{'network_error', 'permission_denied', 'invalid_backup', 'auth_cancelled', 'ocr_failed', 'drive_error', 'cloud_error', 'export_error', 'import_error', 'price_refresh_error', 'reset_error', 'unknown'};
+
+class _SafeCrashError {
+  const _SafeCrashError(this.area, this.code);
+  final String area;
+  final String code;
+  @override
+  String toString() => 'safe_error:$area:$code';
+}
+
+Future<void> recordSafeError({
+  required String area,
+  required String code,
+  Object? error,
+  StackTrace? stackTrace,
+  bool fatal = false,
+}) async {
+  final String safeArea = _safeCrashAreas.contains(area) ? area : 'unknown';
+  final String safeCode = _safeCrashCodes.contains(code) ? code : 'unknown';
+
+  try {
+    final FirebaseCrashlytics crashlytics = FirebaseCrashlytics.instance;
+    await crashlytics.setCustomKey('app_area', safeArea);
+    await crashlytics.setCustomKey('area', safeArea);
+    await crashlytics.setCustomKey('code', safeCode);
+    await crashlytics.setCustomKey('fatal', fatal);
+    await crashlytics.recordError(
+      _SafeCrashError(safeArea, safeCode),
+      stackTrace ?? StackTrace.current,
+      fatal: fatal,
+    );
+  } catch (_) {}
+}
 
 class CryptoAssetMetadata {
   const CryptoAssetMetadata({
@@ -447,7 +483,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         _firebaseDeviceId = deviceId;
         _cloudProfileStatus = 'Configurado';
       });
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
       if (!mounted) return;
       setState(() => _cloudProfileStatus = 'Error');
       if (showError && pageContext != null) {
@@ -542,7 +579,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Estado financiero subido a la nube.')),
       );
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
@@ -661,14 +699,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         _firebaseDeviceId = uploadedByDeviceId ?? _firebaseDeviceId;
       });
       _showImportResult(messenger, result, fileName: 'Firebase');
-    } on FormatException {
+    } on FormatException catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'cloud', code: 'invalid_backup', stackTrace: stackTrace));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
           content: Text('El estado guardado en la nube no es válido.'),
         ),
       );
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
@@ -791,12 +831,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Google Drive conectado.')),
       );
-    } on GoogleSignInException catch (error) {
-      if (!mounted) return;
+    } on GoogleSignInException catch (error, StackTrace stackTrace) {
       final bool canceled =
           error.code == GoogleSignInExceptionCode.canceled ||
           error.code == GoogleSignInExceptionCode.interrupted ||
           error.code == GoogleSignInExceptionCode.uiUnavailable;
+      unawaited(recordSafeError(area: 'drive', code: canceled ? 'auth_cancelled' : 'drive_error', stackTrace: stackTrace));
+      if (!mounted) return;
       if (canceled) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se conectó Google Drive.')),
@@ -808,7 +849,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           content: Text(canceled ? 'Conexión cancelada.' : errorMessage),
         ),
       );
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
     } finally {
@@ -917,7 +959,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
     } on StateError {
       // _withGoogleDriveApi already shows the user-facing message.
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo crear la copia en Google Drive.')),
@@ -1006,13 +1049,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       });
     } on StateError {
       // _withGoogleDriveApi already shows the user-facing message.
-    } on FormatException {
+    } on FormatException catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'drive', code: 'invalid_backup', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('La copia de Google Drive no es válida.')),
         );
       }
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo restaurar la copia desde Google Drive.')),
@@ -1544,7 +1589,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Precios actualizados')),
       );
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'price_refresh', code: 'price_refresh_error', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(
@@ -3054,7 +3100,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         messenger.showSnackBar(SnackBar(content: Text(successMessage)));
       }
       return true;
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'export', code: 'export_error', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo exportar el archivo')),
@@ -3397,7 +3444,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 await Future<void>.delayed(Duration.zero);
                 if (!mounted) return;
                 _showImportResult(messenger, result);
-              } catch (error) {
+              } catch (error, stackTrace) {
+                unawaited(recordSafeError(area: 'import', code: error is FormatException ? 'invalid_backup' : 'import_error', stackTrace: stackTrace));
                 messenger.showSnackBar(
                   SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
                 );
@@ -3430,7 +3478,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (!mounted) return;
 
       _showImportResult(messenger, importResult, fileName: file.name);
-    } catch (error) {
+    } catch (error, stackTrace) {
+      unawaited(recordSafeError(area: 'import', code: error is FormatException ? 'invalid_backup' : 'import_error', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
@@ -3517,7 +3566,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         const SnackBar(content: Text('Datos financieros restablecidos')),
       );
       return true;
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'reset', code: 'reset_error', stackTrace: stackTrace));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo restablecer la app')),
@@ -4638,7 +4688,8 @@ class _MovementsTabState extends State<MovementsTab> {
 
       if (!mounted) return;
       _showOcrPreview(recognizedText.text);
-    } catch (_) {
+    } catch (_, StackTrace stackTrace) {
+      unawaited(recordSafeError(area: 'ocr', code: 'ocr_failed', stackTrace: stackTrace));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('No se pudo leer la captura.')),
@@ -9483,6 +9534,10 @@ class MoreTab extends StatelessWidget {
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
               InfoLine('Firebase', firebaseStatus),
+              InfoLine(
+                'Crash reporting',
+                firebaseStatus == 'Inicializado' ? 'Configurado' : 'Pendiente',
+              ),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               if (firebaseAuthConnected)
                 InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
@@ -9569,6 +9624,10 @@ class MoreTab extends StatelessWidget {
               InfoLine('Estado', 'Fase 1'),
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
               InfoLine('Firebase', firebaseStatus),
+              InfoLine(
+                'Crash reporting',
+                firebaseStatus == 'Inicializado' ? 'Configurado' : 'Pendiente',
+              ),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Cloud profile', cloudProfileStatus),
               const InfoLine('Firebase sync', 'Manual; sin automático'),
