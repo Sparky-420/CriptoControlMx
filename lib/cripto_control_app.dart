@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart' as xl;
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -168,6 +169,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   bool _bootstrapped = false;
   Future<void>? _googleSignInInitFuture;
   GoogleSignInAccount? _googleAccount;
+  User? _firebaseUser;
+  bool _isFirebaseAuthBusy = false;
   bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
@@ -185,6 +188,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _priceAlertService.initialize();
     _visualMode = appVisualModeFromName(widget.initialThemeModeName);
     _themeStyle = appThemeStyleFromName(widget.initialThemeStyleName);
+    _loadFirebaseAuthUser();
     unawaited(_ensureGoogleSignInInitialized().catchError((_) {}));
     _loadData();
   }
@@ -212,6 +216,90 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (_) {
       _googleSignInInitFuture = null;
       rethrow;
+    }
+  }
+
+  void _loadFirebaseAuthUser() {
+    try {
+      _firebaseUser = FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      _firebaseUser = null;
+    }
+  }
+
+  bool _isCanceledGoogleSignIn(GoogleSignInException error) =>
+      error.code == GoogleSignInExceptionCode.canceled ||
+      error.code == GoogleSignInExceptionCode.interrupted ||
+      error.code == GoogleSignInExceptionCode.uiUnavailable;
+
+  Future<void> _signInFirebaseWithGoogle(BuildContext pageContext) async {
+    if (_isFirebaseAuthBusy) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+
+    setState(() => _isFirebaseAuthBusy = true);
+    try {
+      await _ensureGoogleSignInInitialized();
+      if (!GoogleSignIn.instance.supportsAuthenticate()) {
+        throw UnsupportedError('Google Sign-In no disponible');
+      }
+
+      final GoogleSignInAccount account =
+          await GoogleSignIn.instance.authenticate();
+      final String? idToken = account.authentication.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw StateError('Google ID token no disponible');
+      }
+
+      final UserCredential credential =
+          await FirebaseAuth.instance.signInWithCredential(
+        GoogleAuthProvider.credential(idToken: idToken),
+      );
+
+      if (!mounted) return;
+      setState(() => _firebaseUser = credential.user);
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Sesión iniciada.')),
+      );
+    } on GoogleSignInException catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            _isCanceledGoogleSignIn(error)
+                ? 'No se inició sesión.'
+                : 'No se pudo iniciar sesión.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No se pudo iniciar sesión.')),
+      );
+    } finally {
+      if (mounted) setState(() => _isFirebaseAuthBusy = false);
+    }
+  }
+
+  Future<void> _signOutFirebase(BuildContext pageContext) async {
+    if (_isFirebaseAuthBusy) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+
+    setState(() => _isFirebaseAuthBusy = true);
+    try {
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      setState(() => _firebaseUser = null);
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Sesión cerrada.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No se pudo cerrar sesión.')),
+      );
+    } finally {
+      if (mounted) setState(() => _isFirebaseAuthBusy = false);
     }
   }
 
@@ -3249,8 +3337,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   _automaticLocalAlertsIntervalMinutes,
               notificationsAllowed: _notificationsAllowed,
               firebaseStatus: widget.firebaseStatus,
+              firebaseAuthEmail: _firebaseUser?.email,
+              firebaseAuthDisplayName: _firebaseUser?.displayName,
+              firebaseAuthUid: _firebaseUser?.uid,
               googleAccountEmail: _googleAccount?.email,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
+              isFirebaseAuthBusy: _isFirebaseAuthBusy,
               isGoogleConnecting: _isGoogleConnecting,
               isGoogleDriveCreating: _isGoogleDriveCreating,
               isGoogleDriveRestoring: _isGoogleDriveRestoring,
@@ -3303,6 +3395,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               },
               onImportBackup: () => _importBackup(pageContext),
               onImportBackupFile: () => _importBackupFile(pageContext),
+              onSignInFirebaseWithGoogle: () =>
+                  _signInFirebaseWithGoogle(pageContext),
+              onSignOutFirebase: () => _signOutFirebase(pageContext),
               onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
               onDisconnectGoogleDrive: () =>
                   _disconnectGoogleDrive(pageContext),
@@ -8032,8 +8127,12 @@ class MoreTab extends StatelessWidget {
   final int automaticLocalAlertsIntervalMinutes;
   final bool notificationsAllowed;
   final String firebaseStatus;
+  final String? firebaseAuthEmail;
+  final String? firebaseAuthDisplayName;
+  final String? firebaseAuthUid;
   final String? googleAccountEmail;
   final DateTime? googleDriveBackupUpdatedAt;
+  final bool isFirebaseAuthBusy;
   final bool isGoogleConnecting;
   final bool isGoogleDriveCreating;
   final bool isGoogleDriveRestoring;
@@ -8058,6 +8157,8 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onExportBackup;
   final VoidCallback onImportBackup;
   final VoidCallback onImportBackupFile;
+  final VoidCallback onSignInFirebaseWithGoogle;
+  final VoidCallback onSignOutFirebase;
   final VoidCallback onConnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onCreateGoogleDriveBackup;
@@ -8093,8 +8194,12 @@ class MoreTab extends StatelessWidget {
     required this.automaticLocalAlertsIntervalMinutes,
     required this.notificationsAllowed,
     required this.firebaseStatus,
+    required this.firebaseAuthEmail,
+    required this.firebaseAuthDisplayName,
+    required this.firebaseAuthUid,
     required this.googleAccountEmail,
     required this.googleDriveBackupUpdatedAt,
+    required this.isFirebaseAuthBusy,
     required this.isGoogleConnecting,
     required this.isGoogleDriveCreating,
     required this.isGoogleDriveRestoring,
@@ -8119,6 +8224,8 @@ class MoreTab extends StatelessWidget {
     required this.onExportBackup,
     required this.onImportBackup,
     required this.onImportBackupFile,
+    required this.onSignInFirebaseWithGoogle,
+    required this.onSignOutFirebase,
     required this.onConnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
     required this.onCreateGoogleDriveBackup,
@@ -8132,6 +8239,9 @@ class MoreTab extends StatelessWidget {
   });
 
   static const String _priceSource = 'CoinGecko';
+  bool get firebaseAuthConnected => firebaseAuthUid != null;
+  String get firebaseAuthAccountLabel =>
+      firebaseAuthEmail ?? firebaseAuthDisplayName ?? 'Cuenta Google';
   bool get googleDriveConnected => googleAccountEmail != null;
   bool get googleDriveBusy =>
       isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
@@ -8161,10 +8271,13 @@ class MoreTab extends StatelessWidget {
           children: <Widget>[
             _CommandCard(
               icon: Icons.account_circle_outlined,
-              title: 'Cuenta',
-              subtitle: 'Próximamente: sincronización y copia en la nube',
-              badge: 'Local',
-              onTap: () => _showAccountPlaceholder(context),
+              title: 'Cuenta en la nube',
+              subtitle: firebaseAuthConnected
+                  ? 'Conectado: $firebaseAuthAccountLabel'
+                  : 'No conectado · Inicia sesión con Google',
+              badge: firebaseAuthConnected ? 'Conectado' : 'No conectado',
+              loading: isFirebaseAuthBusy,
+              onTap: () => _showCloudAccountActions(context),
             ),
             _CommandCard(
               icon: Icons.cloud_done_outlined,
@@ -8285,23 +8398,67 @@ class MoreTab extends StatelessWidget {
     );
   }
 
-  void _showAccountPlaceholder(BuildContext context) {
+  void _showCloudAccountActions(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (BuildContext sheetContext) => const Padding(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, 28),
-        child: SafeArea(
-          top: false,
-          child: EmptyState(
-            icon: Icons.cloud_sync_outlined,
-            title: 'Cuenta local',
-            subtitle: 'Próximamente: sincronización y copia en la nube. '
-                'No se agregó Firebase en esta versión.',
+      builder: (BuildContext sheetContext) => _CommandActionSheet(
+        title: 'Cuenta en la nube',
+        actions: <_SheetAction>[
+          _SheetAction(
+            icon: firebaseAuthConnected
+                ? Icons.verified_user_outlined
+                : Icons.account_circle_outlined,
+            title: firebaseAuthConnected ? 'Estado: Conectado' : 'Estado: No conectado',
+            subtitle: firebaseAuthConnected
+                ? 'Email: ${firebaseAuthEmail ?? 'sin email visible'}'
+                : 'Inicia sesión con Google para preparar el acceso en la nube.',
+            onTap: null,
           ),
-        ),
+          const _SheetAction(
+            icon: Icons.cloud_off_outlined,
+            title: 'Sincronización inactiva',
+            subtitle:
+                'La sincronización todavía no está activa. Esta cuenta solo prepara el acceso en la nube.',
+            onTap: null,
+          ),
+          if (firebaseAuthConnected && firebaseAuthDisplayName != null)
+            _SheetAction(
+              icon: Icons.badge_outlined,
+              title: 'Nombre',
+              subtitle: firebaseAuthDisplayName!,
+              onTap: null,
+            ),
+          if (firebaseAuthConnected && firebaseAuthUid != null)
+            _SheetAction(
+              icon: Icons.developer_mode_outlined,
+              title: 'UID diagnóstico',
+              subtitle: firebaseAuthUid!,
+              onTap: null,
+            ),
+          _SheetAction(
+            icon: isFirebaseAuthBusy
+                ? Icons.hourglass_top_outlined
+                : firebaseAuthConnected
+                    ? Icons.logout_outlined
+                    : Icons.login_outlined,
+            title: isFirebaseAuthBusy
+                ? 'Procesando...'
+                : firebaseAuthConnected
+                    ? 'Cerrar sesión'
+                    : 'Iniciar sesión con Google',
+            subtitle: firebaseAuthConnected
+                ? 'Cierra solo Firebase Auth; Google Drive conserva su conexión.'
+                : 'No sube ni descarga datos todavía.',
+            onTap: isFirebaseAuthBusy
+                ? null
+                : firebaseAuthConnected
+                    ? onSignOutFirebase
+                    : onSignInFirebaseWithGoogle,
+          ),
+        ],
       ),
     );
   }
@@ -8708,6 +8865,9 @@ class MoreTab extends StatelessWidget {
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
               InfoLine('Firebase', firebaseStatus),
+              InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
+              if (firebaseAuthConnected)
+                InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
               const InfoLine('Scope Drive', 'appDataFolder'),
@@ -8784,6 +8944,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Estado', 'Fase 1'),
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
               InfoLine('Firebase', firebaseStatus),
+              InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
               const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
