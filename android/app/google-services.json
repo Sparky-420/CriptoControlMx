@@ -12,7 +12,20 @@
           "package_name": "mx.criptocontrolmx.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "767407830346-bjlqgsn828sjq677b4t65mmrdgooc35o.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "mx.criptocontrolmx.app",
+            "certificate_hash": "f54fc2de52aafd7f1d3dcef65063f5da362c079a"
+          }
+        },
+        {
+          "client_id": "767407830346-bf771ge1ba2roalchb21a4j3fl8v8258.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBn_oja87EpcNDD-cHnTTEyzeSbQcUFqO4"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "767407830346-bf771ge1ba2roalchb21a4j3fl8v8258.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
