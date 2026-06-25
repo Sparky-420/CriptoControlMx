@@ -119,6 +119,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'firebase_cloud_state_uploaded_at_ms_v1';
   static const String _firebaseCloudStateDeviceIdKey =
       'firebase_cloud_state_device_id_v1';
+  static const String _firebaseCloudStateDownloadedAtKey =
+      'firebase_cloud_state_downloaded_at_ms_v1';
+  static const String _firebaseCloudStateDownloadedFromDeviceIdKey =
+      'firebase_cloud_state_downloaded_from_device_id_v1';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -178,9 +182,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   User? _firebaseUser;
   bool _isFirebaseAuthBusy = false;
   bool _isCloudUploading = false;
+  bool _isCloudDownloading = false;
   String _cloudProfileStatus = 'Pendiente';
   String? _firebaseDeviceId;
   DateTime? _cloudStateUploadedAt;
+  DateTime? _cloudStateDownloadedAt;
   bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
@@ -246,15 +252,22 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<void> _loadCloudStateUploadMetadata() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final int? uploadedAtMs = prefs.getInt(_firebaseCloudStateUploadedAtKey);
+    final int? downloadedAtMs =
+        prefs.getInt(_firebaseCloudStateDownloadedAtKey);
     final String? uploadedDeviceId =
         prefs.getString(_firebaseCloudStateDeviceIdKey);
+    final String? downloadedDeviceId =
+        prefs.getString(_firebaseCloudStateDownloadedFromDeviceIdKey);
     final String? localDeviceId = prefs.getString(_firebaseDeviceIdKey);
     if (!mounted) return;
     setState(() {
       _cloudStateUploadedAt = uploadedAtMs == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(uploadedAtMs);
-      _firebaseDeviceId = uploadedDeviceId ?? localDeviceId;
+      _cloudStateDownloadedAt = downloadedAtMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(downloadedAtMs);
+      _firebaseDeviceId = downloadedDeviceId ?? uploadedDeviceId ?? localDeviceId;
     });
   }
 
@@ -429,6 +442,111 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
     } finally {
       if (mounted) setState(() => _isCloudUploading = false);
+    }
+  }
+
+  Future<bool> _confirmCloudStateDownload(BuildContext pageContext) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: pageContext,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Descargar estado desde la nube'),
+        content: const Text(
+          'Esto reemplazará tus datos financieros actuales con el estado '
+          'guardado en Firebase. No se mezclarán datos en esta fase.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Descargar y restaurar'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _downloadFinancialStateFromFirebase(BuildContext pageContext) async {
+    if (_isCloudDownloading) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    final User? user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Inicia sesión para descargar tu estado de la nube.'),
+        ),
+      );
+      return;
+    }
+
+    if (!await _confirmCloudStateDownload(pageContext)) return;
+
+    setState(() => _isCloudDownloading = true);
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> snapshot =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('cloudState')
+              .doc('current')
+              .get();
+
+      if (!snapshot.exists) {
+        if (!mounted) return;
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No hay estado financiero en la nube.')),
+        );
+        return;
+      }
+
+      final Map<String, dynamic>? data = snapshot.data();
+      final Object? payload = data?['payload'];
+      if (payload == null) {
+        throw const FormatException('Payload cloud faltante');
+      }
+
+      final _ImportResult result = await _applyBackupJson(jsonEncode(payload));
+      final DateTime downloadedAt = DateTime.now();
+      final String? uploadedByDeviceId = data?['uploadedByDeviceId']?.toString();
+
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        _firebaseCloudStateDownloadedAtKey,
+        downloadedAt.millisecondsSinceEpoch,
+      );
+      if (uploadedByDeviceId != null && uploadedByDeviceId.isNotEmpty) {
+        await prefs.setString(
+          _firebaseCloudStateDownloadedFromDeviceIdKey,
+          uploadedByDeviceId,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _cloudStateDownloadedAt = downloadedAt;
+        _firebaseDeviceId = uploadedByDeviceId ?? _firebaseDeviceId;
+      });
+      _showImportResult(messenger, result, fileName: 'Firebase');
+    } on FormatException {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('El estado guardado en la nube no es válido.'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo descargar el estado de la nube.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isCloudDownloading = false);
     }
   }
 
@@ -3553,10 +3671,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               cloudProfileStatus: _cloudProfileStatus,
               hasLocalFirebaseDeviceId: _firebaseDeviceId != null,
               cloudStateUploadedAt: _cloudStateUploadedAt,
+              cloudStateDownloadedAt: _cloudStateDownloadedAt,
               googleAccountEmail: _googleAccount?.email,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isFirebaseAuthBusy: _isFirebaseAuthBusy,
               isCloudUploading: _isCloudUploading,
+              isCloudDownloading: _isCloudDownloading,
               isGoogleConnecting: _isGoogleConnecting,
               isGoogleDriveCreating: _isGoogleDriveCreating,
               isGoogleDriveRestoring: _isGoogleDriveRestoring,
@@ -3614,6 +3734,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onSignOutFirebase: () => _signOutFirebase(pageContext),
               onUploadFinancialStateToFirebase: () =>
                   _uploadFinancialStateToFirebase(pageContext),
+              onDownloadFinancialStateFromFirebase: () =>
+                  _downloadFinancialStateFromFirebase(pageContext),
               onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
               onDisconnectGoogleDrive: () =>
                   _disconnectGoogleDrive(pageContext),
@@ -8349,10 +8471,12 @@ class MoreTab extends StatelessWidget {
   final String cloudProfileStatus;
   final bool hasLocalFirebaseDeviceId;
   final DateTime? cloudStateUploadedAt;
+  final DateTime? cloudStateDownloadedAt;
   final String? googleAccountEmail;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isFirebaseAuthBusy;
   final bool isCloudUploading;
+  final bool isCloudDownloading;
   final bool isGoogleConnecting;
   final bool isGoogleDriveCreating;
   final bool isGoogleDriveRestoring;
@@ -8380,6 +8504,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onSignInFirebaseWithGoogle;
   final VoidCallback onSignOutFirebase;
   final VoidCallback onUploadFinancialStateToFirebase;
+  final VoidCallback onDownloadFinancialStateFromFirebase;
   final VoidCallback onConnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onCreateGoogleDriveBackup;
@@ -8421,10 +8546,12 @@ class MoreTab extends StatelessWidget {
     required this.cloudProfileStatus,
     required this.hasLocalFirebaseDeviceId,
     required this.cloudStateUploadedAt,
+    required this.cloudStateDownloadedAt,
     required this.googleAccountEmail,
     required this.googleDriveBackupUpdatedAt,
     required this.isFirebaseAuthBusy,
     required this.isCloudUploading,
+    required this.isCloudDownloading,
     required this.isGoogleConnecting,
     required this.isGoogleDriveCreating,
     required this.isGoogleDriveRestoring,
@@ -8452,6 +8579,7 @@ class MoreTab extends StatelessWidget {
     required this.onSignInFirebaseWithGoogle,
     required this.onSignOutFirebase,
     required this.onUploadFinancialStateToFirebase,
+    required this.onDownloadFinancialStateFromFirebase,
     required this.onConnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
     required this.onCreateGoogleDriveBackup,
@@ -8471,6 +8599,9 @@ class MoreTab extends StatelessWidget {
   String get cloudStateUploadLabel => cloudStateUploadedAt == null
       ? 'Sin subir'
       : longDate(cloudStateUploadedAt!);
+  String get cloudStateDownloadLabel => cloudStateDownloadedAt == null
+      ? 'Sin descargar'
+      : longDate(cloudStateDownloadedAt!);
   bool get googleDriveConnected => googleAccountEmail != null;
   bool get googleDriveBusy =>
       isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
@@ -8660,6 +8791,12 @@ class MoreTab extends StatelessWidget {
             onTap: null,
           ),
           _SheetAction(
+            icon: Icons.history_toggle_off_outlined,
+            title: 'Última descarga: $cloudStateDownloadLabel',
+            subtitle: 'Restauración manual; sin merge ni sync automático.',
+            onTap: null,
+          ),
+          _SheetAction(
             icon: isCloudUploading
                 ? Icons.hourglass_top_outlined
                 : Icons.cloud_upload_outlined,
@@ -8669,6 +8806,20 @@ class MoreTab extends StatelessWidget {
                 : 'Inicia sesión para usar la nube.',
             onTap: firebaseAuthConnected && !isCloudUploading
                 ? onUploadFinancialStateToFirebase
+                : null,
+          ),
+          _SheetAction(
+            icon: isCloudDownloading
+                ? Icons.hourglass_top_outlined
+                : Icons.cloud_download_outlined,
+            title: isCloudDownloading
+                ? 'Descargando...'
+                : 'Descargar estado desde la nube',
+            subtitle: firebaseAuthConnected
+                ? 'Reemplaza datos locales con confirmación previa.'
+                : 'Inicia sesión para usar la nube.',
+            onTap: firebaseAuthConnected && !isCloudDownloading
+                ? onDownloadFinancialStateFromFirebase
                 : null,
           ),
           _SheetAction(
@@ -9131,7 +9282,8 @@ class MoreTab extends StatelessWidget {
                 InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
               InfoLine('Cloud profile', cloudProfileStatus),
               InfoLine('DeviceId local', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
-              InfoLine('Cloud state', cloudStateUploadLabel),
+              InfoLine('Cloud state subida', cloudStateUploadLabel),
+              InfoLine('Cloud state descarga', cloudStateDownloadLabel),
               const InfoLine('Sync automático Firebase', 'No'),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
@@ -9211,7 +9363,8 @@ class MoreTab extends StatelessWidget {
               InfoLine('Firebase', firebaseStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Cloud profile', cloudProfileStatus),
-              InfoLine('Cloud state', cloudStateUploadLabel),
+              InfoLine('Cloud state subida', cloudStateUploadLabel),
+              InfoLine('Cloud state descarga', cloudStateDownloadLabel),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
               const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
