@@ -119,6 +119,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'firebase_cloud_state_uploaded_at_ms_v1';
   static const String _firebaseCloudStateDeviceIdKey =
       'firebase_cloud_state_device_id_v1';
+  static const String _firebaseCloudStateUploadedByDeviceIdKey =
+      'firebase_cloud_state_uploaded_by_device_id_v1';
   static const String _firebaseCloudStateDownloadedAtKey =
       'firebase_cloud_state_downloaded_at_ms_v1';
   static const String _firebaseCloudStateDownloadedFromDeviceIdKey =
@@ -255,7 +257,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final int? downloadedAtMs =
         prefs.getInt(_firebaseCloudStateDownloadedAtKey);
     final String? uploadedDeviceId =
-        prefs.getString(_firebaseCloudStateDeviceIdKey);
+        prefs.getString(_firebaseCloudStateUploadedByDeviceIdKey) ??
+            prefs.getString(_firebaseCloudStateDeviceIdKey);
     final String? downloadedDeviceId =
         prefs.getString(_firebaseCloudStateDownloadedFromDeviceIdKey);
     final String? localDeviceId = prefs.getString(_firebaseDeviceIdKey);
@@ -341,6 +344,54 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     );
   }
 
+  DateTime? _cloudDateTime(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    return DateTime.tryParse(value?.toString() ?? '');
+  }
+
+  DateTime? _latestLocalMovementUpdatedAt() {
+    DateTime? latest;
+    for (final Movement movement in _movements) {
+      if (latest == null || movement.updatedAt.isAfter(latest)) {
+        latest = movement.updatedAt;
+      }
+    }
+    return latest;
+  }
+
+  bool _hasPossibleCloudDownloadConflict({
+    required DateTime? cloudUploadedAt,
+    required String? uploadedByDeviceId,
+    required String localDeviceId,
+  }) {
+    if (_movements.isEmpty) return false;
+    final DateTime? latestLocal = _latestLocalMovementUpdatedAt();
+    final DateTime? latestSync = <DateTime?>[
+      _cloudStateUploadedAt,
+      _cloudStateDownloadedAt,
+    ].whereType<DateTime>().fold<DateTime?>(
+          null,
+          (DateTime? current, DateTime value) =>
+              current == null || value.isAfter(current) ? value : current,
+        );
+    final bool fromOtherDevice = uploadedByDeviceId != null &&
+        uploadedByDeviceId.isNotEmpty &&
+        uploadedByDeviceId != localDeviceId;
+    final bool cloudOlderThanLocal =
+        latestLocal != null &&
+        cloudUploadedAt != null &&
+        latestLocal.isAfter(cloudUploadedAt);
+    final bool localAfterLastSync =
+        latestLocal != null &&
+        (latestSync == null || latestLocal.isAfter(latestSync));
+    return fromOtherDevice || cloudOlderThanLocal || localAfterLastSync;
+  }
+
   Future<void> _ensureCloudProfile({
     BuildContext? pageContext,
     bool showError = true,
@@ -415,8 +466,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Subir estado a la nube'),
         content: const Text(
-          'Esto guardará una copia de tus datos financieros actuales en tu '
-          'cuenta en la nube. No se descargarán ni mezclarán datos en esta fase.',
+          'Esto guardará tu estado financiero actual en Firebase y '
+          'reemplazará la copia cloud anterior. No se descargarán ni '
+          'mezclarán datos en esta fase.',
         ),
         actions: <Widget>[
           TextButton(
@@ -425,7 +477,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Subir'),
+            child: const Text('Subir y reemplazar nube'),
           ),
         ],
       ),
@@ -441,7 +493,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (widget.firebaseStatus != 'Inicializado' || user == null) {
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Inicia sesión para subir tu estado a la nube.'),
+          content: Text('Inicia sesión para usar la nube.'),
         ),
       );
       return;
@@ -480,6 +532,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         uploadedAt.millisecondsSinceEpoch,
       );
       await prefs.setString(_firebaseCloudStateDeviceIdKey, deviceId);
+      await prefs.setString(_firebaseCloudStateUploadedByDeviceIdKey, deviceId);
 
       if (!mounted) return;
       setState(() {
@@ -501,15 +554,22 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
   }
 
-  Future<bool> _confirmCloudStateDownload(BuildContext pageContext) async {
+  Future<bool> _confirmCloudStateDownload(
+    BuildContext pageContext, {
+    required bool hasPossibleConflict,
+  }) async {
+    final String message = hasPossibleConflict
+        ? 'Esto reemplazará tus datos financieros actuales con el estado '
+            'guardado en Firebase. No se mezclarán datos en esta fase.\n\n'
+            'Se detectaron posibles cambios locales no sincronizados. Crea una '
+            'copia antes de continuar.'
+        : 'Esto reemplazará tus datos financieros actuales con el estado '
+            'guardado en Firebase. No se mezclarán datos en esta fase.';
     final bool? confirmed = await showDialog<bool>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Descargar estado desde la nube'),
-        content: const Text(
-          'Esto reemplazará tus datos financieros actuales con el estado '
-          'guardado en Firebase. No se mezclarán datos en esta fase.',
-        ),
+        content: Text(message),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -517,7 +577,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Descargar y restaurar'),
+            child: const Text('Descargar y reemplazar'),
           ),
         ],
       ),
@@ -533,13 +593,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (user == null) {
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Inicia sesión para descargar tu estado de la nube.'),
+          content: Text('Inicia sesión para usar la nube.'),
         ),
       );
       return;
     }
-
-    if (!await _confirmCloudStateDownload(pageContext)) return;
 
     setState(() => _isCloudDownloading = true);
     try {
@@ -565,9 +623,25 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         throw const FormatException('Payload cloud faltante');
       }
 
+      final String localDeviceId = await _localFirebaseDeviceId();
+      final DateTime? cloudUploadedAt =
+          _cloudDateTime(data?['uploadedAt']) ??
+              _cloudDateTime(data?['uploadedAtLocal']);
+      final String? uploadedByDeviceId = data?['uploadedByDeviceId']?.toString();
+      final bool hasPossibleConflict = _hasPossibleCloudDownloadConflict(
+        cloudUploadedAt: cloudUploadedAt,
+        uploadedByDeviceId: uploadedByDeviceId,
+        localDeviceId: localDeviceId,
+      );
+      if (!await _confirmCloudStateDownload(
+        pageContext,
+        hasPossibleConflict: hasPossibleConflict,
+      )) {
+        return;
+      }
+
       final _ImportResult result = await _applyBackupJson(jsonEncode(payload));
       final DateTime downloadedAt = DateTime.now();
-      final String? uploadedByDeviceId = data?['uploadedByDeviceId']?.toString();
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setInt(
@@ -3458,6 +3532,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await Navigator.of(pageContext).push(
       MaterialPageRoute<void>(
         builder: (BuildContext resetContext) => _FinancialResetScreen(
+          hasCloudState: _firebaseUser != null ||
+              _cloudStateUploadedAt != null ||
+              _cloudStateDownloadedAt != null,
           onExportBackup: () => _exportBackup(resetContext),
           onReset: () => _performFinancialReset(messenger),
         ),
@@ -8345,10 +8422,12 @@ class ResultBar extends StatelessWidget {
 }
 
 class _FinancialResetScreen extends StatefulWidget {
+  final bool hasCloudState;
   final Future<bool> Function() onExportBackup;
   final Future<bool> Function() onReset;
 
   const _FinancialResetScreen({
+    required this.hasCloudState,
     required this.onExportBackup,
     required this.onReset,
   });
@@ -8399,6 +8478,29 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
   Future<void> _resetFinancialData() async {
     if (!_canReset) return;
     FocusScope.of(context).unfocus();
+    if (widget.hasCloudState) {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          title: const Text('Reset local con nube activa'),
+          content: const Text(
+            'Este reset borrará datos locales, pero no eliminará tu estado '
+            'guardado en Firebase ni tu copia de Google Drive.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Continuar reset local'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
     setState(() => _resetInProgress = true);
     final bool completed = await widget.onReset();
     if (!mounted) return;
@@ -8425,10 +8527,20 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                   'Borra datos financieros locales. Conserva tema y preferencias visuales.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const <Widget>[
-                  InfoLine('Se borra', 'Movimientos, precios y snapshots'),
-                  InfoLine('También se borra', 'Alertas y referencias'),
-                  InfoLine('Se conserva', 'Tema y preferencias visuales'),
+                children: <Widget>[
+                  const InfoLine('Se borra', 'Movimientos, precios y snapshots'),
+                  const InfoLine('También se borra', 'Alertas y referencias'),
+                  const InfoLine('Se conserva', 'Tema y preferencias visuales'),
+                  if (widget.hasCloudState)
+                    const InfoLine(
+                      'Firebase',
+                      'La copia en Firebase no se borra con este reset local.',
+                    ),
+                  if (widget.hasCloudState)
+                    const InfoLine(
+                      'Google Drive',
+                      'La copia de Google Drive tampoco se borra.',
+                    ),
                 ],
               ),
             ),
@@ -8869,21 +8981,21 @@ class MoreTab extends StatelessWidget {
           ),
           const _SheetAction(
             icon: Icons.cloud_off_outlined,
-            title: 'Sincronización inactiva',
+            title: 'Sync automático: No activo',
             subtitle:
-                'La sincronización todavía no está activa. Esta cuenta solo prepara el acceso en la nube.',
+                'La sincronización automática todavía no está activa. Las acciones de nube son manuales.',
             onTap: null,
           ),
           _SheetAction(
             icon: Icons.history_outlined,
             title: 'Última subida: $cloudStateUploadLabel',
-            subtitle: 'Cloud state manual; sin descarga ni mezcla de datos.',
+            subtitle: 'Subida manual disponible; reemplaza la copia cloud.',
             onTap: null,
           ),
           _SheetAction(
             icon: Icons.history_toggle_off_outlined,
             title: 'Última descarga: $cloudStateDownloadLabel',
-            subtitle: 'Restauración manual; sin merge ni sync automático.',
+            subtitle: 'Descarga manual disponible; reemplaza datos locales.',
             onTap: null,
           ),
           _SheetAction(
@@ -9375,9 +9487,11 @@ class MoreTab extends StatelessWidget {
               if (firebaseAuthConnected)
                 InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
               InfoLine('Cloud profile', cloudProfileStatus),
+              const InfoLine('Firebase sync', 'Manual'),
               InfoLine('DeviceId local', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
               InfoLine('Cloud state subida', cloudStateUploadLabel),
               InfoLine('Cloud state descarga', cloudStateDownloadLabel),
+              InfoLine('DeviceId cloud', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
               const InfoLine('Sync automático Firebase', 'No'),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
@@ -9457,6 +9571,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Firebase', firebaseStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Cloud profile', cloudProfileStatus),
+              const InfoLine('Firebase sync', 'Manual; sin automático'),
               InfoLine('Cloud state subida', cloudStateUploadLabel),
               InfoLine('Cloud state descarga', cloudStateDownloadLabel),
               InfoLine('Fuente de precios', 'CoinGecko'),
