@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xl;
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:file_picker/file_picker.dart';
@@ -26,6 +27,17 @@ import 'ui/app_theme.dart' as ccmx;
 
 const Set<String> _safeCrashAreas = <String>{'cloud', 'drive', 'export', 'import', 'ocr', 'price_refresh', 'reset', 'unknown'};
 const Set<String> _safeCrashCodes = <String>{'network_error', 'permission_denied', 'invalid_backup', 'auth_cancelled', 'ocr_failed', 'drive_error', 'cloud_error', 'export_error', 'import_error', 'price_refresh_error', 'reset_error', 'unknown'};
+const String _analyticsConsentKey = 'analytics_consent_v1';
+const Set<String> _safeAnalyticsEvents = <String>{'app_opened', 'tab_view', 'feature_used', 'backup_created', 'backup_restored', 'drive_backup_created', 'drive_backup_restored', 'cloud_upload', 'cloud_download', 'ocr_result', 'movement_form_opened', 'movement_saved', 'price_refresh', 'export_created', 'financial_reset_opened', 'financial_reset_completed'};
+const Map<String, Set<Object>> _safeAnalyticsParameterValues = <String, Set<Object>>{
+  'source': <Object>{'local', 'drive', 'firebase', 'ocr', 'manual'},
+  'status': <Object>{'started', 'completed', 'failed', 'cancelled'},
+  'error_code': <Object>{'network_error', 'permission_denied', 'invalid_backup', 'auth_cancelled', 'ocr_failed', 'drive_error', 'cloud_error', 'export_error', 'import_error', 'price_refresh_error', 'reset_error', 'unknown'},
+  'sync_mode': <Object>{'manual'},
+  'platform': <Object>{'android'},
+  'movement_count_bucket': <Object>{'0', '1_10', '11_50', '51_plus'},
+  'active_coin_count_bucket': <Object>{'0', '1_3', '4_6', '7_plus'},
+};
 
 class _SafeCrashError {
   const _SafeCrashError(this.area, this.code);
@@ -55,6 +67,32 @@ Future<void> recordSafeError({
       _SafeCrashError(safeArea, safeCode),
       stackTrace ?? StackTrace.current,
       fatal: fatal,
+    );
+  } catch (_) {}
+}
+
+Future<void> _logSafeAnalyticsEvent({
+  required String name,
+  Map<String, Object>? parameters,
+}) async {
+  if (!_safeAnalyticsEvents.contains(name)) return;
+  try {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final bool enabled = prefs.getBool(_analyticsConsentKey) ?? false;
+    final FirebaseAnalytics analytics = FirebaseAnalytics.instance;
+    await analytics.setAnalyticsCollectionEnabled(enabled);
+    if (!enabled) return;
+
+    final Map<String, Object> safeParameters = <String, Object>{};
+    parameters?.forEach((String key, Object value) {
+      final Set<Object>? allowedValues = _safeAnalyticsParameterValues[key];
+      if (allowedValues != null && allowedValues.contains(value)) {
+        safeParameters[key] = value;
+      }
+    });
+    await analytics.logEvent(
+      name: name,
+      parameters: safeParameters.isEmpty ? null : safeParameters,
     );
   } catch (_) {}
 }
@@ -95,11 +133,13 @@ class CriptoControlApp extends StatefulWidget {
     super.key,
     this.initialThemeModeName,
     this.initialThemeStyleName,
+    this.initialAnalyticsEnabled = false,
     this.firebaseStatus = 'No disponible',
   });
 
   final String? initialThemeModeName;
   final String? initialThemeStyleName;
+  final bool initialAnalyticsEnabled;
   final String firebaseStatus;
 
   @override
@@ -248,6 +288,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       unawaited(_ensureCloudProfile(showError: false));
     }
     unawaited(_ensureGoogleSignInInitialized().catchError((_) {}));
+    unawaited(_logSafeAnalyticsEvent(name: 'app_opened', parameters: <String, Object>{'platform': 'android'}));
     _loadData();
   }
 
@@ -579,8 +620,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Estado financiero subido a la nube.')),
       );
+      unawaited(_logSafeAnalyticsEvent(name: 'cloud_upload', parameters: <String, Object>{'source': 'firebase', 'status': 'completed', 'sync_mode': 'manual'}));
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'cloud_upload', parameters: <String, Object>{'source': 'firebase', 'status': 'failed', 'sync_mode': 'manual', 'error_code': 'cloud_error'}));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
@@ -699,8 +742,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         _firebaseDeviceId = uploadedByDeviceId ?? _firebaseDeviceId;
       });
       _showImportResult(messenger, result, fileName: 'Firebase');
+      unawaited(_logSafeAnalyticsEvent(name: 'cloud_download', parameters: <String, Object>{'source': 'firebase', 'status': 'completed', 'sync_mode': 'manual'}));
     } on FormatException catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'cloud', code: 'invalid_backup', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'cloud_download', parameters: <String, Object>{'source': 'firebase', 'status': 'failed', 'sync_mode': 'manual', 'error_code': 'invalid_backup'}));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
@@ -709,6 +754,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'cloud_download', parameters: <String, Object>{'source': 'firebase', 'status': 'failed', 'sync_mode': 'manual', 'error_code': 'cloud_error'}));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
@@ -957,10 +1003,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Copia creada en Google Drive.')),
       );
+      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_created', parameters: <String, Object>{'source': 'drive', 'status': 'completed'}));
     } on StateError {
       // _withGoogleDriveApi already shows the user-facing message.
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_created', parameters: <String, Object>{'source': 'drive', 'status': 'failed', 'error_code': 'drive_error'}));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo crear la copia en Google Drive.')),
@@ -1046,11 +1094,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         messenger.showSnackBar(
           const SnackBar(content: Text('Copia restaurada desde Google Drive.')),
         );
+        unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_restored', parameters: <String, Object>{'source': 'drive', 'status': 'completed'}));
       });
     } on StateError {
       // _withGoogleDriveApi already shows the user-facing message.
     } on FormatException catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'drive', code: 'invalid_backup', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_restored', parameters: <String, Object>{'source': 'drive', 'status': 'failed', 'error_code': 'invalid_backup'}));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('La copia de Google Drive no es válida.')),
@@ -1058,6 +1108,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       }
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_restored', parameters: <String, Object>{'source': 'drive', 'status': 'failed', 'error_code': 'drive_error'}));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo restaurar la copia desde Google Drive.')),
@@ -1589,8 +1640,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Precios actualizados')),
       );
+      unawaited(_logSafeAnalyticsEvent(name: 'price_refresh', parameters: <String, Object>{'status': 'completed'}));
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'price_refresh', code: 'price_refresh_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'price_refresh', parameters: <String, Object>{'status': 'failed', 'error_code': 'price_refresh_error'}));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(
@@ -2047,6 +2100,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       ocrWarnings.add('Moneda no soportada; selecciona la moneda correcta.');
     }
     final bool useOcr = existing == null && ocrCandidate != null;
+    unawaited(_logSafeAnalyticsEvent(name: 'movement_form_opened', parameters: <String, Object>{'source': useOcr ? 'ocr' : 'manual'}));
     MovementType selectedType =
         existing?.type ?? ocrCandidate?.type ?? MovementType.buy;
     String selectedCoin = existing?.coin ??
@@ -2405,6 +2459,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                       )
                                     : saveFuture,
                               );
+                              unawaited(_logSafeAnalyticsEvent(name: 'movement_saved', parameters: <String, Object>{'source': useOcr ? 'ocr' : 'manual'}));
                               Navigator.of(sheetContext).pop();
                             },
                             icon: Icon(
@@ -3099,9 +3154,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text(successMessage)));
       }
+      unawaited(_logSafeAnalyticsEvent(name: 'export_created', parameters: <String, Object>{'source': 'local', 'status': 'completed'}));
       return true;
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'export', code: 'export_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'export_created', parameters: <String, Object>{'source': 'local', 'status': 'failed', 'error_code': 'export_error'}));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo exportar el archivo')),
@@ -3198,13 +3255,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<bool> _exportBackup(BuildContext pageContext) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
-    return _shareDataFile(
+    final bool exported = await _shareDataFile(
       messenger: messenger,
       fileName: 'criptocontrolmx_respaldo.json',
       mimeType: 'application/json',
       bytes: utf8.encode(_buildBackupJson()),
       successMessage: 'Copia de seguridad lista para compartir',
     );
+    unawaited(_logSafeAnalyticsEvent(name: 'backup_created', parameters: <String, Object>{'source': 'local', 'status': exported ? 'completed' : 'failed'}));
+    return exported;
   }
 
   bool _isKnownImportMovementType(dynamic value) {
@@ -3444,8 +3503,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 await Future<void>.delayed(Duration.zero);
                 if (!mounted) return;
                 _showImportResult(messenger, result);
+                unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'completed'}));
               } catch (error, stackTrace) {
                 unawaited(recordSafeError(area: 'import', code: error is FormatException ? 'invalid_backup' : 'import_error', stackTrace: stackTrace));
+                unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'failed', 'error_code': error is FormatException ? 'invalid_backup' : 'import_error'}));
                 messenger.showSnackBar(
                   SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
                 );
@@ -3478,8 +3539,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (!mounted) return;
 
       _showImportResult(messenger, importResult, fileName: file.name);
+      unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'completed'}));
     } catch (error, stackTrace) {
       unawaited(recordSafeError(area: 'import', code: error is FormatException ? 'invalid_backup' : 'import_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'failed', 'error_code': error is FormatException ? 'invalid_backup' : 'import_error'}));
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
@@ -3565,9 +3628,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Datos financieros restablecidos')),
       );
+      unawaited(_logSafeAnalyticsEvent(name: 'financial_reset_completed', parameters: <String, Object>{'status': 'completed'}));
       return true;
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'reset', code: 'reset_error', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'financial_reset_completed', parameters: <String, Object>{'status': 'failed', 'error_code': 'reset_error'}));
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo restablecer la app')),
@@ -3579,6 +3644,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _resetFinancialData(BuildContext pageContext) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    unawaited(_logSafeAnalyticsEvent(name: 'financial_reset_opened', parameters: <String, Object>{'status': 'started'}));
     await Navigator.of(pageContext).push(
       MaterialPageRoute<void>(
         builder: (BuildContext resetContext) => _FinancialResetScreen(
@@ -3880,6 +3946,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   _automaticLocalAlertsIntervalMinutes,
               notificationsAllowed: _notificationsAllowed,
               firebaseStatus: widget.firebaseStatus,
+              analyticsEnabled: widget.initialAnalyticsEnabled,
               firebaseAuthEmail: _firebaseUser?.email,
               firebaseAuthDisplayName: _firebaseUser?.displayName,
               firebaseAuthUid: _firebaseUser?.uid,
@@ -3996,6 +4063,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             bottomNavigationBar: NavigationBar(
               selectedIndex: _currentIndex,
               onDestinationSelected: (int index) {
+                unawaited(_logSafeAnalyticsEvent(name: 'tab_view'));
                 setState(() => _currentIndex = index);
               },
               destinations: const <NavigationDestination>[
@@ -4688,8 +4756,10 @@ class _MovementsTabState extends State<MovementsTab> {
 
       if (!mounted) return;
       _showOcrPreview(recognizedText.text);
+      unawaited(_logSafeAnalyticsEvent(name: 'ocr_result', parameters: <String, Object>{'source': 'ocr', 'status': 'completed'}));
     } catch (_, StackTrace stackTrace) {
       unawaited(recordSafeError(area: 'ocr', code: 'ocr_failed', stackTrace: stackTrace));
+      unawaited(_logSafeAnalyticsEvent(name: 'ocr_result', parameters: <String, Object>{'source': 'ocr', 'status': 'failed', 'error_code': 'ocr_failed'}));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('No se pudo leer la captura.')),
@@ -8717,6 +8787,7 @@ class MoreTab extends StatelessWidget {
   final int automaticLocalAlertsIntervalMinutes;
   final bool notificationsAllowed;
   final String firebaseStatus;
+  final bool analyticsEnabled;
   final String? firebaseAuthEmail;
   final String? firebaseAuthDisplayName;
   final String? firebaseAuthUid;
@@ -8793,6 +8864,7 @@ class MoreTab extends StatelessWidget {
     required this.automaticLocalAlertsIntervalMinutes,
     required this.notificationsAllowed,
     required this.firebaseStatus,
+    required this.analyticsEnabled,
     required this.firebaseAuthEmail,
     required this.firebaseAuthDisplayName,
     required this.firebaseAuthUid,
@@ -8847,6 +8919,7 @@ class MoreTab extends StatelessWidget {
 
   static const String _priceSource = 'CoinGecko';
   bool get firebaseAuthConnected => firebaseAuthUid != null;
+  String get analyticsStatus => analyticsEnabled ? 'Activado' : 'Pendiente de consentimiento';
   String get firebaseAuthAccountLabel =>
       firebaseAuthEmail ?? firebaseAuthDisplayName ?? 'Cuenta Google';
   String get cloudStateUploadLabel => cloudStateUploadedAt == null
@@ -9538,6 +9611,7 @@ class MoreTab extends StatelessWidget {
                 'Crash reporting',
                 firebaseStatus == 'Inicializado' ? 'Configurado' : 'Pendiente',
               ),
+              InfoLine('Analytics', analyticsStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               if (firebaseAuthConnected)
                 InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
@@ -9628,6 +9702,7 @@ class MoreTab extends StatelessWidget {
                 'Crash reporting',
                 firebaseStatus == 'Inicializado' ? 'Configurado' : 'Pendiente',
               ),
+              InfoLine('Analytics', analyticsStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Cloud profile', cloudProfileStatus),
               const InfoLine('Firebase sync', 'Manual; sin automático'),
