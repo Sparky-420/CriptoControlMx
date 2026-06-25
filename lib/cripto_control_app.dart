@@ -28,6 +28,7 @@ import 'ui/app_theme.dart' as ccmx;
 const Set<String> _safeCrashAreas = <String>{'cloud', 'drive', 'export', 'import', 'ocr', 'price_refresh', 'reset', 'unknown'};
 const Set<String> _safeCrashCodes = <String>{'network_error', 'permission_denied', 'invalid_backup', 'auth_cancelled', 'ocr_failed', 'drive_error', 'cloud_error', 'export_error', 'import_error', 'price_refresh_error', 'reset_error', 'unknown'};
 const String _analyticsConsentKey = 'analytics_consent_v1';
+const String _crashlyticsConsentKey = 'crashlytics_consent_v1';
 const Set<String> _safeAnalyticsEvents = <String>{'app_opened', 'tab_view', 'feature_used', 'backup_created', 'backup_restored', 'drive_backup_created', 'drive_backup_restored', 'cloud_upload', 'cloud_download', 'ocr_result', 'movement_form_opened', 'movement_saved', 'price_refresh', 'export_created', 'financial_reset_opened', 'financial_reset_completed'};
 const Map<String, Set<Object>> _safeAnalyticsParameterValues = <String, Set<Object>>{
   'source': <Object>{'local', 'drive', 'firebase', 'ocr', 'manual'},
@@ -58,7 +59,11 @@ Future<void> recordSafeError({
   final String safeCode = _safeCrashCodes.contains(code) ? code : 'unknown';
 
   try {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final bool enabled = prefs.getBool(_crashlyticsConsentKey) ?? false;
     final FirebaseCrashlytics crashlytics = FirebaseCrashlytics.instance;
+    await crashlytics.setCrashlyticsCollectionEnabled(enabled);
+    if (!enabled) return;
     await crashlytics.setCustomKey('app_area', safeArea);
     await crashlytics.setCustomKey('area', safeArea);
     await crashlytics.setCustomKey('code', safeCode);
@@ -134,12 +139,14 @@ class CriptoControlApp extends StatefulWidget {
     this.initialThemeModeName,
     this.initialThemeStyleName,
     this.initialAnalyticsEnabled = false,
+    this.initialCrashlyticsEnabled = false,
     this.firebaseStatus = 'No disponible',
   });
 
   final String? initialThemeModeName;
   final String? initialThemeStyleName;
   final bool initialAnalyticsEnabled;
+  final bool initialCrashlyticsEnabled;
   final String firebaseStatus;
 
   @override
@@ -271,6 +278,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   String? _googleDriveBackupFileId;
   DateTime? _googleDriveBackupUpdatedAt;
   String? _googleDriveBackupAccountEmail;
+  bool _analyticsConsent = false;
+  bool _crashlyticsConsent = false;
 
   bool get _isGoogleDriveBusy =>
       _isGoogleConnecting || _isGoogleDriveCreating || _isGoogleDriveRestoring;
@@ -282,6 +291,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _priceAlertService.initialize();
     _visualMode = appVisualModeFromName(widget.initialThemeModeName);
     _themeStyle = appThemeStyleFromName(widget.initialThemeStyleName);
+    _analyticsConsent = widget.initialAnalyticsEnabled;
+    _crashlyticsConsent = widget.initialCrashlyticsEnabled;
     _loadFirebaseAuthUser();
     unawaited(_loadCloudStateUploadMetadata());
     if (_firebaseUser != null) {
@@ -315,6 +326,36 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (_) {
       _googleSignInInitFuture = null;
       rethrow;
+    }
+  }
+
+  Future<void> _setAnalyticsConsent(BuildContext pageContext, bool enabled) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_analyticsConsentKey, enabled);
+    try {
+      await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(enabled);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _analyticsConsent = enabled);
+    if (pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(content: Text('Preferencia de privacidad actualizada.')),
+      );
+    }
+  }
+
+  Future<void> _setCrashlyticsConsent(BuildContext pageContext, bool enabled) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_crashlyticsConsentKey, enabled);
+    try {
+      await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(enabled);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _crashlyticsConsent = enabled);
+    if (pageContext.mounted) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(content: Text('Preferencia de privacidad actualizada.')),
+      );
     }
   }
 
@@ -3946,7 +3987,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   _automaticLocalAlertsIntervalMinutes,
               notificationsAllowed: _notificationsAllowed,
               firebaseStatus: widget.firebaseStatus,
-              analyticsEnabled: widget.initialAnalyticsEnabled,
+              analyticsEnabled: _analyticsConsent,
+              crashlyticsEnabled: _crashlyticsConsent,
               firebaseAuthEmail: _firebaseUser?.email,
               firebaseAuthDisplayName: _firebaseUser?.displayName,
               firebaseAuthUid: _firebaseUser?.uid,
@@ -4032,6 +4074,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onResetPriceAlertReferences: () =>
                   _resetPriceAlertReferences(pageContext),
               onOpenFinancialReset: () => _resetFinancialData(pageContext),
+              onAnalyticsConsentChanged: (bool enabled) =>
+                  _setAnalyticsConsent(pageContext, enabled),
+              onCrashlyticsConsentChanged: (bool enabled) =>
+                  _setCrashlyticsConsent(pageContext, enabled),
             ),
           ];
 
@@ -8788,6 +8834,7 @@ class MoreTab extends StatelessWidget {
   final bool notificationsAllowed;
   final String firebaseStatus;
   final bool analyticsEnabled;
+  final bool crashlyticsEnabled;
   final String? firebaseAuthEmail;
   final String? firebaseAuthDisplayName;
   final String? firebaseAuthUid;
@@ -8838,6 +8885,8 @@ class MoreTab extends StatelessWidget {
   final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final VoidCallback onResetPriceAlertReferences;
   final VoidCallback onOpenFinancialReset;
+  final ValueChanged<bool> onAnalyticsConsentChanged;
+  final ValueChanged<bool> onCrashlyticsConsentChanged;
 
   const MoreTab({
     super.key,
@@ -8865,6 +8914,7 @@ class MoreTab extends StatelessWidget {
     required this.notificationsAllowed,
     required this.firebaseStatus,
     required this.analyticsEnabled,
+    required this.crashlyticsEnabled,
     required this.firebaseAuthEmail,
     required this.firebaseAuthDisplayName,
     required this.firebaseAuthUid,
@@ -8915,11 +8965,14 @@ class MoreTab extends StatelessWidget {
     required this.onSnapshotRetentionChanged,
     required this.onResetPriceAlertReferences,
     required this.onOpenFinancialReset,
+    required this.onAnalyticsConsentChanged,
+    required this.onCrashlyticsConsentChanged,
   });
 
   static const String _priceSource = 'CoinGecko';
   bool get firebaseAuthConnected => firebaseAuthUid != null;
-  String get analyticsStatus => analyticsEnabled ? 'Activado' : 'Pendiente de consentimiento';
+  String get analyticsStatus => analyticsEnabled ? 'Activado' : 'Desactivado';
+  String get crashlyticsStatus => crashlyticsEnabled ? 'Activado' : 'Desactivado';
   String get firebaseAuthAccountLabel =>
       firebaseAuthEmail ?? firebaseAuthDisplayName ?? 'Cuenta Google';
   String get cloudStateUploadLabel => cloudStateUploadedAt == null
@@ -9018,6 +9071,12 @@ class MoreTab extends StatelessWidget {
         _CommandSection(
           title: 'Seguridad y datos',
           children: <Widget>[
+            _PrivacyMonitoringCard(
+              analyticsEnabled: analyticsEnabled,
+              crashlyticsEnabled: crashlyticsEnabled,
+              onAnalyticsChanged: onAnalyticsConsentChanged,
+              onCrashlyticsChanged: onCrashlyticsConsentChanged,
+            ),
             _CommandCard(
               icon: Icons.restart_alt_outlined,
               title: 'Restablecer datos financieros',
@@ -9607,10 +9666,7 @@ class MoreTab extends StatelessWidget {
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
               InfoLine('Firebase', firebaseStatus),
-              InfoLine(
-                'Crash reporting',
-                firebaseStatus == 'Inicializado' ? 'Configurado' : 'Pendiente',
-              ),
+              InfoLine('Crash reporting', crashlyticsStatus),
               InfoLine('Analytics', analyticsStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               if (firebaseAuthConnected)
@@ -9698,10 +9754,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Estado', 'Fase 1'),
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
               InfoLine('Firebase', firebaseStatus),
-              InfoLine(
-                'Crash reporting',
-                firebaseStatus == 'Inicializado' ? 'Configurado' : 'Pendiente',
-              ),
+              InfoLine('Crash reporting', crashlyticsStatus),
               InfoLine('Analytics', analyticsStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Cloud profile', cloudProfileStatus),
@@ -9713,7 +9766,7 @@ class MoreTab extends StatelessWidget {
               const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
               const InfoLine('Datos en copia', 'Movimientos, precios, comisión, snapshots y configuración financiera'),
               const InfoLine('Cuenta Google', 'Email visible para mostrar la cuenta conectada'),
-              const InfoLine('Privacidad', 'Sin venta de datos, analytics ni sync automático'),
+              const InfoLine('Privacidad', 'Monitoreo opcional; sin venta de datos ni sync automático'),
               InfoLine('Copia de seguridad', 'Creación y restauración locales disponibles'),
               InfoLine('Aviso', 'No es asesoría financiera'),
               const SizedBox(height: 12),
@@ -10093,6 +10146,76 @@ class _HeaderMetric extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PrivacyMonitoringCard extends StatelessWidget {
+  const _PrivacyMonitoringCard({
+    required this.analyticsEnabled,
+    required this.crashlyticsEnabled,
+    required this.onAnalyticsChanged,
+    required this.onCrashlyticsChanged,
+  });
+
+  final bool analyticsEnabled;
+  final bool crashlyticsEnabled;
+  final ValueChanged<bool> onAnalyticsChanged;
+  final ValueChanged<bool> onCrashlyticsChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.privacy_tip_outlined, color: colors.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Privacidad y monitoreo',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'CriptoControlMx puede enviar reportes de errores y datos básicos de uso solo si lo autorizas.',
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'No se envían movimientos, montos, precios, OCR, copias de seguridad, email ni UID.',
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Enviar reportes de errores'),
+              subtitle: const Text(
+                'Ayuda a detectar cierres inesperados. No se envían movimientos, montos, precios ni copias de seguridad.',
+              ),
+              value: crashlyticsEnabled,
+              onChanged: onCrashlyticsChanged,
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Enviar datos de uso'),
+              subtitle: const Text(
+                'Ayuda a entender qué funciones se usan. No se envían cantidades, cartera, OCR, backup, email ni UID.',
+              ),
+              value: analyticsEnabled,
+              onChanged: onAnalyticsChanged,
+            ),
+          ],
+        ),
       ),
     );
   }
