@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xl;
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -113,6 +114,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   static const String _googleDriveBackupFileIdKey = 'google_drive_backup_file_id_v1';
   static const String _googleDriveBackupUpdatedAtKey = 'google_drive_backup_updated_at_ms_v1';
   static const String _googleDriveBackupAccountEmailKey = 'google_drive_backup_account_email_v1';
+  static const String _firebaseDeviceIdKey = 'firebase_device_id_v1';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -171,6 +173,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   GoogleSignInAccount? _googleAccount;
   User? _firebaseUser;
   bool _isFirebaseAuthBusy = false;
+  String _cloudProfileStatus = 'Pendiente';
+  String? _firebaseDeviceId;
   bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
@@ -189,6 +193,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _visualMode = appVisualModeFromName(widget.initialThemeModeName);
     _themeStyle = appThemeStyleFromName(widget.initialThemeStyleName);
     _loadFirebaseAuthUser();
+    if (_firebaseUser != null) {
+      unawaited(_ensureCloudProfile(showError: false));
+    }
     unawaited(_ensureGoogleSignInInitialized().catchError((_) {}));
     _loadData();
   }
@@ -222,8 +229,92 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   void _loadFirebaseAuthUser() {
     try {
       _firebaseUser = FirebaseAuth.instance.currentUser;
+      _cloudProfileStatus = _firebaseUser == null ? 'Pendiente' : 'Pendiente';
     } catch (_) {
       _firebaseUser = null;
+      _cloudProfileStatus = 'Error';
+    }
+  }
+
+  Future<String> _localFirebaseDeviceId() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? saved = prefs.getString(_firebaseDeviceIdKey);
+    if (saved != null && saved.trim().isNotEmpty) {
+      return saved;
+    }
+
+    final String suffix = math.Random().nextInt(0xFFFFFF).toRadixString(16);
+    final String deviceId =
+        'android-${DateTime.now().millisecondsSinceEpoch}-$suffix';
+    await prefs.setString(_firebaseDeviceIdKey, deviceId);
+    return deviceId;
+  }
+
+  Future<void> _ensureCloudProfile({
+    BuildContext? pageContext,
+    bool showError = true,
+  }) async {
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) setState(() => _cloudProfileStatus = 'Pendiente');
+      return;
+    }
+
+    try {
+      final String deviceId = await _localFirebaseDeviceId();
+      final FirebaseFirestore firestore = FirebaseFirestore.instance;
+      final DocumentReference<Map<String, dynamic>> userRef =
+          firestore.collection('users').doc(user.uid);
+      final DocumentSnapshot<Map<String, dynamic>> userSnapshot =
+          await userRef.get();
+      final DocumentReference<Map<String, dynamic>> deviceRef =
+          userRef.collection('devices').doc(deviceId);
+      final DocumentSnapshot<Map<String, dynamic>> deviceSnapshot =
+          await deviceRef.get();
+
+      final Map<String, dynamic> userData = <String, dynamic>{
+        'uid': user.uid,
+        'email': user.email,
+        'displayName': user.displayName,
+        if (user.photoURL != null) 'photoUrl': user.photoURL,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'appName': 'CriptoControlMx',
+        'cloudSchemaVersion': 1,
+      };
+      if (!userSnapshot.exists) {
+        userData['createdAt'] = FieldValue.serverTimestamp();
+      }
+
+      final Map<String, dynamic> deviceData = <String, dynamic>{
+        'deviceId': deviceId,
+        'platform': 'android',
+        'lastSeenAt': FieldValue.serverTimestamp(),
+        'deviceLabel': 'Android',
+        'syncEnabled': false,
+        'syncStatus': 'not_configured',
+      };
+      if (!deviceSnapshot.exists) {
+        deviceData['firstSeenAt'] = FieldValue.serverTimestamp();
+      }
+
+      await userRef.set(userData, SetOptions(merge: true));
+      await deviceRef.set(deviceData, SetOptions(merge: true));
+
+      if (!mounted) return;
+      setState(() {
+        _firebaseDeviceId = deviceId;
+        _cloudProfileStatus = 'Configurado';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cloudProfileStatus = 'Error');
+      if (showError && pageContext != null) {
+        ScaffoldMessenger.of(pageContext).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo preparar el perfil en la nube.'),
+          ),
+        );
+      }
     }
   }
 
@@ -257,6 +348,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
       if (!mounted) return;
       setState(() => _firebaseUser = credential.user);
+      await _ensureCloudProfile(pageContext: pageContext);
+      if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('Sesión iniciada.')),
       );
@@ -289,7 +382,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     try {
       await FirebaseAuth.instance.signOut();
       if (!mounted) return;
-      setState(() => _firebaseUser = null);
+      setState(() {
+        _firebaseUser = null;
+        _cloudProfileStatus = 'Pendiente';
+      });
       messenger.showSnackBar(
         const SnackBar(content: Text('Sesión cerrada.')),
       );
@@ -3340,6 +3436,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               firebaseAuthEmail: _firebaseUser?.email,
               firebaseAuthDisplayName: _firebaseUser?.displayName,
               firebaseAuthUid: _firebaseUser?.uid,
+              cloudProfileStatus: _cloudProfileStatus,
+              hasLocalFirebaseDeviceId: _firebaseDeviceId != null,
               googleAccountEmail: _googleAccount?.email,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isFirebaseAuthBusy: _isFirebaseAuthBusy,
@@ -8130,6 +8228,8 @@ class MoreTab extends StatelessWidget {
   final String? firebaseAuthEmail;
   final String? firebaseAuthDisplayName;
   final String? firebaseAuthUid;
+  final String cloudProfileStatus;
+  final bool hasLocalFirebaseDeviceId;
   final String? googleAccountEmail;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isFirebaseAuthBusy;
@@ -8197,6 +8297,8 @@ class MoreTab extends StatelessWidget {
     required this.firebaseAuthEmail,
     required this.firebaseAuthDisplayName,
     required this.firebaseAuthUid,
+    required this.cloudProfileStatus,
+    required this.hasLocalFirebaseDeviceId,
     required this.googleAccountEmail,
     required this.googleDriveBackupUpdatedAt,
     required this.isFirebaseAuthBusy,
@@ -8273,7 +8375,7 @@ class MoreTab extends StatelessWidget {
               icon: Icons.account_circle_outlined,
               title: 'Cuenta en la nube',
               subtitle: firebaseAuthConnected
-                  ? 'Conectado: $firebaseAuthAccountLabel'
+                  ? 'Conectado: $firebaseAuthAccountLabel · Perfil cloud: $cloudProfileStatus'
                   : 'No conectado · Inicia sesión con Google',
               badge: firebaseAuthConnected ? 'Conectado' : 'No conectado',
               loading: isFirebaseAuthBusy,
@@ -8422,6 +8524,20 @@ class MoreTab extends StatelessWidget {
             title: 'Sincronización inactiva',
             subtitle:
                 'La sincronización todavía no está activa. Esta cuenta solo prepara el acceso en la nube.',
+            onTap: null,
+          ),
+          _SheetAction(
+            icon: Icons.cloud_done_outlined,
+            title: 'Perfil cloud: $cloudProfileStatus',
+            subtitle: firebaseAuthConnected
+                ? 'Estructura preparada en users/{uid}; sync no activo todavía.'
+                : 'Inicia sesión para preparar el perfil.',
+            onTap: null,
+          ),
+          _SheetAction(
+            icon: Icons.phone_android_outlined,
+            title: 'DeviceId local',
+            subtitle: hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente',
             onTap: null,
           ),
           if (firebaseAuthConnected && firebaseAuthDisplayName != null)
@@ -8868,6 +8984,8 @@ class MoreTab extends StatelessWidget {
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               if (firebaseAuthConnected)
                 InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
+              InfoLine('Cloud profile', cloudProfileStatus),
+              InfoLine('DeviceId local', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
               const InfoLine('Scope Drive', 'appDataFolder'),
@@ -8945,6 +9063,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Datos', 'Guardados localmente en este dispositivo'),
               InfoLine('Firebase', firebaseStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
+              InfoLine('Cloud profile', cloudProfileStatus),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
               const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
