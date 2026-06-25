@@ -2,9 +2,9 @@ name: Build experimental debug APK
 
 on:
   push:
-    branches: [experimental, fase-1-v2, fase-2-core]
+    branches: [experimental, fase-1-v2, fase-2-core, fase-2.1-tech-debt]
   pull_request:
-    branches: [experimental, fase-1-v2, fase-2-core]
+    branches: [experimental, fase-1-v2, fase-2-core, fase-2.1-tech-debt]
   workflow_dispatch:
 
 jobs:
@@ -13,11 +13,14 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/experimental') ||
       (github.event_name == 'push' && github.ref == 'refs/heads/fase-1-v2') ||
       (github.event_name == 'push' && github.ref == 'refs/heads/fase-2-core') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/fase-2.1-tech-debt') ||
       (github.event_name == 'pull_request' && github.base_ref == 'experimental') ||
       (github.event_name == 'pull_request' && github.base_ref == 'fase-1-v2') ||
       (github.event_name == 'pull_request' && github.base_ref == 'fase-2-core') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'fase-2.1-tech-debt') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/experimental') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fase-2-core')
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fase-2-core') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fase-2.1-tech-debt')
     runs-on: ubuntu-latest
 
     steps:
@@ -46,3 +49,4 @@ jobs:
         with:
           name: cripto-control-mx-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
+
