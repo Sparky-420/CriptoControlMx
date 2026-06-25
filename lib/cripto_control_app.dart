@@ -285,6 +285,62 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return deviceId;
   }
 
+  bool _movementJsonNeedsSyncMetadata(Map<String, dynamic> json) {
+    return textFromJson(json['id']).isEmpty ||
+        DateTime.tryParse(json['createdAt']?.toString() ?? '') == null ||
+        DateTime.tryParse(json['updatedAt']?.toString() ?? '') == null ||
+        textFromJson(json['deviceId']).isEmpty;
+  }
+
+  bool _normalizeMovementSyncMetadata(
+    List<Movement> movements,
+    String deviceId,
+  ) {
+    var changed = false;
+    final Set<String> seenIds = <String>{};
+
+    for (var i = 0; i < movements.length; i++) {
+      final Movement movement = movements[i];
+      var id = movement.id.trim();
+      final bool duplicate = id.isEmpty || seenIds.contains(id);
+      if (duplicate) {
+        id = _generateMovementId();
+        changed = true;
+      }
+      seenIds.add(id);
+
+      final String? normalizedDeviceId =
+          movement.deviceId == null || movement.deviceId!.trim().isEmpty
+              ? deviceId
+              : movement.deviceId;
+      if (movement.id != id || movement.deviceId != normalizedDeviceId) {
+        movements[i] = movement.copyWith(
+          id: id,
+          deviceId: normalizedDeviceId,
+        );
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  Future<Movement> _movementWithCurrentSyncMetadata(
+    Movement movement, {
+    Movement? existing,
+  }) async {
+    final DateTime now = DateTime.now();
+    final String deviceId = await _localFirebaseDeviceId();
+    return movement.copyWith(
+      id: existing?.id ?? movement.id,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      deletedAt: existing?.deletedAt,
+      deviceId: existing?.deviceId ?? movement.deviceId ?? deviceId,
+      schemaVersion: 1,
+    );
+  }
+
   Future<void> _ensureCloudProfile({
     BuildContext? pageContext,
     bool showError = true,
@@ -929,14 +985,28 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         try {
           final dynamic decoded = jsonDecode(movementsRaw);
           if (decoded is List) {
+            var migratedMovementMetadata = false;
+            final List<Movement> loadedMovements = <Movement>[];
+            for (final dynamic raw in decoded) {
+              final Map<String, dynamic> json =
+                  Map<String, dynamic>.from(raw as Map);
+              migratedMovementMetadata =
+                  migratedMovementMetadata || _movementJsonNeedsSyncMetadata(json);
+              loadedMovements.add(Movement.fromJson(json));
+            }
+            final String deviceId = await _localFirebaseDeviceId();
+            migratedMovementMetadata =
+                _normalizeMovementSyncMetadata(loadedMovements, deviceId) ||
+                    migratedMovementMetadata;
             _movements
               ..clear()
-              ..addAll(
-                decoded.map(
-                  (dynamic e) =>
-                      Movement.fromJson(Map<String, dynamic>.from(e as Map)),
-                ),
+              ..addAll(loadedMovements);
+            if (migratedMovementMetadata) {
+              await prefs.setString(
+                _movementsKey,
+                jsonEncode(_movements.map((Movement m) => m.toJson()).toList()),
               );
+            }
           }
         } catch (_) {}
       }
@@ -2139,17 +2209,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                 return;
                               }
 
-                              final Movement movement = Movement(
-                                type: selectedType,
-                                coin: selectedCoin,
-                                date: selectedDate,
-                                quantity: quantity,
-                                unitPrice: unitPrice,
-                                fee: fee,
-                                source: sourceController.text.trim(),
-                                wallet: walletController.text.trim(),
-                                network: networkController.text.trim(),
-                                note: noteController.text.trim(),
+                              final Movement movement =
+                                  await _movementWithCurrentSyncMetadata(
+                                Movement(
+                                  type: selectedType,
+                                  coin: selectedCoin,
+                                  date: selectedDate,
+                                  quantity: quantity,
+                                  unitPrice: unitPrice,
+                                  fee: fee,
+                                  source: sourceController.text.trim(),
+                                  wallet: walletController.text.trim(),
+                                  network: networkController.text.trim(),
+                                  note: noteController.text.trim(),
+                                ),
+                                existing: existing,
                               );
 
                               if (_wouldCreateInvalidPosition(
@@ -3079,10 +3153,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (pricesRaw is! Map) throw const FormatException('La copia no contiene precios válidos');
     if (hasSnapshots && snapshotsRaw is! List) throw const FormatException('Las instantáneas de la copia no son válidas');
 
-    final List<Movement> imported = <Movement>[
-      for (int i = 0; i < movementsRaw.length; i++)
-        Movement.fromJson(_validatedImportMovement(movementsRaw[i], i)),
-    ];
+    var importedMovementMetadataWarning = false;
+    final List<Movement> imported = <Movement>[];
+    for (int i = 0; i < movementsRaw.length; i++) {
+      final Map<String, dynamic> json = _validatedImportMovement(
+        movementsRaw[i],
+        i,
+      );
+      importedMovementMetadataWarning =
+          importedMovementMetadataWarning || _movementJsonNeedsSyncMetadata(json);
+      imported.add(Movement.fromJson(json));
+    }
+    final String importDeviceId = await _localFirebaseDeviceId();
+    importedMovementMetadataWarning =
+        _normalizeMovementSyncMetadata(imported, importDeviceId) ||
+            importedMovementMetadataWarning;
     final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
     final Map<String, String> importedPriceModes = <String, String>{
       for (final String coin in _coins) coin: PriceService.automaticMode,
@@ -3124,6 +3209,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         : null;
     final List<String> warnings = <String>[
       if (!hasSnapshots) 'Copia sin instantáneas',
+      if (importedMovementMetadataWarning) 'IDs de movimientos normalizados',
       ...FinancialEngine.diagnostics(
         coins: _coins,
         movements: imported,
@@ -3172,9 +3258,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       prefs,
       _manualPriceUpdatedAtMs,
     );
-    if (importedSnapshots == null) {
-      await _saveData();
-    } else {
+    await _saveData();
+    if (importedSnapshots != null) {
       await _saveSnapshots();
     }
     return _ImportResult(movementCount: imported.length, snapshotCount: importedSnapshots?.length ?? 0, warnings: warnings);
@@ -3641,6 +3726,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               visualMode: _visualMode,
               themeStyle: _themeStyle,
               movementCount: _movements.length,
+              movementsWithIdCount: _movements
+                  .where((Movement movement) => movement.id.trim().isNotEmpty)
+                  .length,
               snapshotCount: _snapshots.length,
               latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first.createdAt,
               activeCoins: stats.values.where((CoinStats s) => s.quantity > 0).length,
@@ -8448,6 +8536,7 @@ class MoreTab extends StatelessWidget {
   final AppVisualMode visualMode;
   final AppThemeStyle themeStyle;
   final int movementCount;
+  final int movementsWithIdCount;
   final int snapshotCount;
   final DateTime? latestSnapshot;
   final int activeCoins;
@@ -8523,6 +8612,7 @@ class MoreTab extends StatelessWidget {
     required this.visualMode,
     required this.themeStyle,
     required this.movementCount,
+    required this.movementsWithIdCount,
     required this.snapshotCount,
     required this.latestSnapshot,
     required this.activeCoins,
@@ -9230,6 +9320,10 @@ class MoreTab extends StatelessWidget {
               Text('Actividad local', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               InfoLine('Movimientos totales', movementCount.toString()),
+              InfoLine(
+                'Movimientos con ID',
+                '$movementsWithIdCount/$movementCount',
+              ),
               InfoLine('Instantáneas guardadas', snapshotCount.toString()),
               InfoLine(
                 'Última instantánea guardada',
@@ -12308,6 +12402,7 @@ class FinancialEngine {
 }
 
 class Movement {
+  final String id;
   final MovementType type;
   final String coin;
   final DateTime date;
@@ -12318,8 +12413,14 @@ class Movement {
   final String wallet;
   final String network;
   final String note;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final String? deviceId;
+  final int schemaVersion;
 
   Movement({
+    String? id,
     required this.type,
     required this.coin,
     required this.date,
@@ -12330,11 +12431,19 @@ class Movement {
     this.wallet = '',
     this.network = '',
     required this.note,
-  });
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    this.deletedAt,
+    this.deviceId,
+    this.schemaVersion = 1,
+  })  : id = id == null || id.trim().isEmpty ? _generateMovementId() : id,
+        createdAt = createdAt ?? date,
+        updatedAt = updatedAt ?? createdAt ?? date;
 
   double get grossTotal => quantity * unitPrice;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
     'type': type.name,
     'coin': coin,
     'date': date.toIso8601String(),
@@ -12345,7 +12454,50 @@ class Movement {
     'wallet': wallet,
     'network': network,
     'note': note,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+    if (deviceId != null && deviceId!.isNotEmpty) 'deviceId': deviceId,
+    'schemaVersion': schemaVersion,
   };
+
+  Movement copyWith({
+    String? id,
+    MovementType? type,
+    String? coin,
+    DateTime? date,
+    double? quantity,
+    double? unitPrice,
+    double? fee,
+    String? source,
+    String? wallet,
+    String? network,
+    String? note,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? deletedAt,
+    String? deviceId,
+    int? schemaVersion,
+  }) {
+    return Movement(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      coin: coin ?? this.coin,
+      date: date ?? this.date,
+      quantity: quantity ?? this.quantity,
+      unitPrice: unitPrice ?? this.unitPrice,
+      fee: fee ?? this.fee,
+      source: source ?? this.source,
+      wallet: wallet ?? this.wallet,
+      network: network ?? this.network,
+      note: note ?? this.note,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      deviceId: deviceId ?? this.deviceId,
+      schemaVersion: schemaVersion ?? this.schemaVersion,
+    );
+  }
 
   bool isFinanciallyIdenticalTo(Movement other) {
     return type == other.type &&
@@ -12359,10 +12511,15 @@ class Movement {
   }
 
   factory Movement.fromJson(Map<String, dynamic> json) {
+    final DateTime date =
+        DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now();
+    final DateTime createdAt =
+        DateTime.tryParse(json['createdAt']?.toString() ?? '') ?? date;
     return Movement(
+      id: json['id']?.toString(),
       type: movementTypeFromAny(json['type']),
       coin: (json['coin'] ?? json['crypto'] ?? 'BTC').toString().toUpperCase(),
-      date: DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now(),
+      date: date,
       quantity: numberFromJson(json['quantity']),
       unitPrice: numberFromJson(json['unitPrice'] ?? json['unit_price']),
       fee: numberFromJson(json['fee'] ?? json['commission']),
@@ -12370,6 +12527,16 @@ class Movement {
       wallet: textFromJson(json['wallet'] ?? json['cartera']),
       network: textFromJson(json['network'] ?? json['red']),
       note: json['note']?.toString() ?? '',
+      createdAt: createdAt,
+      updatedAt:
+          DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? createdAt,
+      deletedAt: DateTime.tryParse(json['deletedAt']?.toString() ?? ''),
+      deviceId: textFromJson(json['deviceId']).isEmpty
+          ? null
+          : textFromJson(json['deviceId']),
+      schemaVersion: json['schemaVersion'] is num
+          ? (json['schemaVersion'] as num).toInt()
+          : int.tryParse(json['schemaVersion']?.toString() ?? '') ?? 1,
     );
   }
 }
@@ -12591,6 +12758,12 @@ double numberFromJson(dynamic value) {
 }
 
 String textFromJson(dynamic value) => value?.toString().trim() ?? '';
+
+String _generateMovementId() {
+  final int timestamp = DateTime.now().millisecondsSinceEpoch;
+  final String suffix = math.Random().nextInt(0xFFFFFFF).toRadixString(16);
+  return 'mov_${timestamp}_$suffix';
+}
 
 DateTime dateOnly(DateTime value) {
   return DateTime(value.year, value.month, value.day);
