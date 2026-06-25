@@ -115,6 +115,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   static const String _googleDriveBackupUpdatedAtKey = 'google_drive_backup_updated_at_ms_v1';
   static const String _googleDriveBackupAccountEmailKey = 'google_drive_backup_account_email_v1';
   static const String _firebaseDeviceIdKey = 'firebase_device_id_v1';
+  static const String _firebaseCloudStateUploadedAtKey =
+      'firebase_cloud_state_uploaded_at_ms_v1';
+  static const String _firebaseCloudStateDeviceIdKey =
+      'firebase_cloud_state_device_id_v1';
 
   final List<Movement> _movements = <Movement>[];
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
@@ -173,8 +177,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   GoogleSignInAccount? _googleAccount;
   User? _firebaseUser;
   bool _isFirebaseAuthBusy = false;
+  bool _isCloudUploading = false;
   String _cloudProfileStatus = 'Pendiente';
   String? _firebaseDeviceId;
+  DateTime? _cloudStateUploadedAt;
   bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
@@ -193,6 +199,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _visualMode = appVisualModeFromName(widget.initialThemeModeName);
     _themeStyle = appThemeStyleFromName(widget.initialThemeStyleName);
     _loadFirebaseAuthUser();
+    unawaited(_loadCloudStateUploadMetadata());
     if (_firebaseUser != null) {
       unawaited(_ensureCloudProfile(showError: false));
     }
@@ -234,6 +241,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _firebaseUser = null;
       _cloudProfileStatus = 'Error';
     }
+  }
+
+  Future<void> _loadCloudStateUploadMetadata() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final int? uploadedAtMs = prefs.getInt(_firebaseCloudStateUploadedAtKey);
+    final String? uploadedDeviceId =
+        prefs.getString(_firebaseCloudStateDeviceIdKey);
+    final String? localDeviceId = prefs.getString(_firebaseDeviceIdKey);
+    if (!mounted) return;
+    setState(() {
+      _cloudStateUploadedAt = uploadedAtMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(uploadedAtMs);
+      _firebaseDeviceId = uploadedDeviceId ?? localDeviceId;
+    });
   }
 
   Future<String> _localFirebaseDeviceId() async {
@@ -315,6 +337,98 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           ),
         );
       }
+    }
+  }
+
+  Future<bool> _confirmCloudStateUpload(BuildContext pageContext) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: pageContext,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Subir estado a la nube'),
+        content: const Text(
+          'Esto guardará una copia de tus datos financieros actuales en tu '
+          'cuenta en la nube. No se descargarán ni mezclarán datos en esta fase.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Subir'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _uploadFinancialStateToFirebase(BuildContext pageContext) async {
+    if (_isCloudUploading) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
+    final User? user = FirebaseAuth.instance.currentUser;
+
+    if (widget.firebaseStatus != 'Inicializado' || user == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Inicia sesión para subir tu estado a la nube.'),
+        ),
+      );
+      return;
+    }
+
+    if (!await _confirmCloudStateUpload(pageContext)) return;
+
+    setState(() => _isCloudUploading = true);
+    try {
+      await _ensureCloudProfile(pageContext: pageContext);
+      final String deviceId = await _localFirebaseDeviceId();
+      final Object? decoded = jsonDecode(_buildBackupJson());
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Payload financiero inválido');
+      }
+
+      final DateTime uploadedAt = DateTime.now();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('cloudState')
+          .doc('current')
+          .set(<String, dynamic>{
+        'schemaVersion': 1,
+        'uploadedAt': FieldValue.serverTimestamp(),
+        'uploadedAtLocal': uploadedAt.toIso8601String(),
+        'uploadedByDeviceId': deviceId,
+        'appName': 'CriptoControlMx',
+        if (decoded['version'] != null) 'backupVersion': decoded['version'],
+        'payload': decoded,
+      }, SetOptions(merge: true));
+
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        _firebaseCloudStateUploadedAtKey,
+        uploadedAt.millisecondsSinceEpoch,
+      );
+      await prefs.setString(_firebaseCloudStateDeviceIdKey, deviceId);
+
+      if (!mounted) return;
+      setState(() {
+        _cloudStateUploadedAt = uploadedAt;
+        _firebaseDeviceId = deviceId;
+      });
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Estado financiero subido a la nube.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo subir el estado a la nube.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isCloudUploading = false);
     }
   }
 
@@ -3438,9 +3552,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               firebaseAuthUid: _firebaseUser?.uid,
               cloudProfileStatus: _cloudProfileStatus,
               hasLocalFirebaseDeviceId: _firebaseDeviceId != null,
+              cloudStateUploadedAt: _cloudStateUploadedAt,
               googleAccountEmail: _googleAccount?.email,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isFirebaseAuthBusy: _isFirebaseAuthBusy,
+              isCloudUploading: _isCloudUploading,
               isGoogleConnecting: _isGoogleConnecting,
               isGoogleDriveCreating: _isGoogleDriveCreating,
               isGoogleDriveRestoring: _isGoogleDriveRestoring,
@@ -3496,6 +3612,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onSignInFirebaseWithGoogle: () =>
                   _signInFirebaseWithGoogle(pageContext),
               onSignOutFirebase: () => _signOutFirebase(pageContext),
+              onUploadFinancialStateToFirebase: () =>
+                  _uploadFinancialStateToFirebase(pageContext),
               onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
               onDisconnectGoogleDrive: () =>
                   _disconnectGoogleDrive(pageContext),
@@ -8230,9 +8348,11 @@ class MoreTab extends StatelessWidget {
   final String? firebaseAuthUid;
   final String cloudProfileStatus;
   final bool hasLocalFirebaseDeviceId;
+  final DateTime? cloudStateUploadedAt;
   final String? googleAccountEmail;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isFirebaseAuthBusy;
+  final bool isCloudUploading;
   final bool isGoogleConnecting;
   final bool isGoogleDriveCreating;
   final bool isGoogleDriveRestoring;
@@ -8259,6 +8379,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onImportBackupFile;
   final VoidCallback onSignInFirebaseWithGoogle;
   final VoidCallback onSignOutFirebase;
+  final VoidCallback onUploadFinancialStateToFirebase;
   final VoidCallback onConnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onCreateGoogleDriveBackup;
@@ -8299,9 +8420,11 @@ class MoreTab extends StatelessWidget {
     required this.firebaseAuthUid,
     required this.cloudProfileStatus,
     required this.hasLocalFirebaseDeviceId,
+    required this.cloudStateUploadedAt,
     required this.googleAccountEmail,
     required this.googleDriveBackupUpdatedAt,
     required this.isFirebaseAuthBusy,
+    required this.isCloudUploading,
     required this.isGoogleConnecting,
     required this.isGoogleDriveCreating,
     required this.isGoogleDriveRestoring,
@@ -8328,6 +8451,7 @@ class MoreTab extends StatelessWidget {
     required this.onImportBackupFile,
     required this.onSignInFirebaseWithGoogle,
     required this.onSignOutFirebase,
+    required this.onUploadFinancialStateToFirebase,
     required this.onConnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
     required this.onCreateGoogleDriveBackup,
@@ -8344,6 +8468,9 @@ class MoreTab extends StatelessWidget {
   bool get firebaseAuthConnected => firebaseAuthUid != null;
   String get firebaseAuthAccountLabel =>
       firebaseAuthEmail ?? firebaseAuthDisplayName ?? 'Cuenta Google';
+  String get cloudStateUploadLabel => cloudStateUploadedAt == null
+      ? 'Sin subir'
+      : longDate(cloudStateUploadedAt!);
   bool get googleDriveConnected => googleAccountEmail != null;
   bool get googleDriveBusy =>
       isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
@@ -8525,6 +8652,24 @@ class MoreTab extends StatelessWidget {
             subtitle:
                 'La sincronización todavía no está activa. Esta cuenta solo prepara el acceso en la nube.',
             onTap: null,
+          ),
+          _SheetAction(
+            icon: Icons.history_outlined,
+            title: 'Última subida: $cloudStateUploadLabel',
+            subtitle: 'Cloud state manual; sin descarga ni mezcla de datos.',
+            onTap: null,
+          ),
+          _SheetAction(
+            icon: isCloudUploading
+                ? Icons.hourglass_top_outlined
+                : Icons.cloud_upload_outlined,
+            title: isCloudUploading ? 'Subiendo...' : 'Subir estado a la nube',
+            subtitle: firebaseAuthConnected
+                ? 'La sincronización automática todavía no está activa.'
+                : 'Inicia sesión para usar la nube.',
+            onTap: firebaseAuthConnected && !isCloudUploading
+                ? onUploadFinancialStateToFirebase
+                : null,
           ),
           _SheetAction(
             icon: Icons.cloud_done_outlined,
@@ -8986,6 +9131,8 @@ class MoreTab extends StatelessWidget {
                 InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
               InfoLine('Cloud profile', cloudProfileStatus),
               InfoLine('DeviceId local', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
+              InfoLine('Cloud state', cloudStateUploadLabel),
+              const InfoLine('Sync automático Firebase', 'No'),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
               const InfoLine('Scope Drive', 'appDataFolder'),
@@ -9064,6 +9211,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Firebase', firebaseStatus),
               InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
               InfoLine('Cloud profile', cloudProfileStatus),
+              InfoLine('Cloud state', cloudStateUploadLabel),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
               const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
