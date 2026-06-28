@@ -1355,12 +1355,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<void> _evaluatePriceAlerts(SharedPreferences prefs) async {
+    final Map<String, CoinStats> stats = _computeStats();
+    final List<String> activeCoins = _activeAlertCoins(stats).toList();
     final PriceAlertEvaluation evaluation = await _priceAlertService
         .evaluatePrices(
           prefs: prefs,
           currentPrices: _currentPrices,
-          coins: _coins,
-          recoveryPositions: _recoveryAlertPositions(_computeStats()),
+          coins: activeCoins,
+          recoveryPositions: _recoveryAlertPositions(stats),
         );
     final bool notificationsAllowed = await _priceAlertService
         .areNotificationsAllowed();
@@ -1393,6 +1395,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           sellFeePercent: _sellFeePercent,
         ),
     };
+  }
+
+  Iterable<String> _activeAlertCoins(Map<String, CoinStats> stats) sync* {
+    for (final String coin in _coins) {
+      final CoinStats? stat = stats[coin];
+      if (stat != null && stat.quantity > 0) yield coin;
+    }
   }
 
   Future<void> _togglePriceAlerts(
@@ -1611,8 +1620,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _resetPriceAlertReferences(BuildContext pageContext) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final Map<String, CoinStats> stats = _computeStats();
+    final List<String> activeCoins = _activeAlertCoins(stats).toList();
     final PriceAlertSettings settings = await _priceAlertService
-        .resetReferences(prefs, _currentPrices, _coins);
+        .resetReferences(prefs, _currentPrices, activeCoins);
 
     if (!mounted) return;
     setState(() {
@@ -1630,11 +1641,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _resetRecoveryAlertReferences(BuildContext pageContext) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final Map<String, CoinStats> stats = _computeStats();
+    final List<String> activeCoins = _activeAlertCoins(stats).toList();
     final PriceAlertSettings settings = await _priceAlertService
         .resetRecoveryReferences(
           prefs,
-          _recoveryAlertPositions(_computeStats()),
-          _coins,
+          _recoveryAlertPositions(stats),
+          activeCoins,
         );
 
     if (!mounted) return;
@@ -4843,6 +4856,238 @@ class _MovementsTabState extends State<MovementsTab> {
         ).hasMatch(value);
   }
 
+  String _foldOcrText(String value) => value
+      .toLowerCase()
+      .replaceAll('\u00e1', 'a')
+      .replaceAll('\u00e9', 'e')
+      .replaceAll('\u00ed', 'i')
+      .replaceAll('\u00f3', 'o')
+      .replaceAll('\u00fa', 'u')
+      .replaceAll('\u00fc', 'u');
+
+  bool _looksLikeBitsoCapture(String rawText) {
+    final String value = _foldOcrText(rawText).replaceAll(RegExp(r'\s+'), ' ');
+    int score = 0;
+    if (RegExp(r'\bbitso\b').hasMatch(value)) score += 2;
+    if (RegExp(r'\b(buy|sell|deposit|receive|withdrawal|withdraw|send)\b').hasMatch(value)) score++;
+    if (value.contains('monto gastado') || value.contains('monto recibido')) score++;
+    if (value.contains('tipo de cambio')) score++;
+    if (value.contains('comision')) score++;
+    if (RegExp(r'\bdate\b').hasMatch(value)) score++;
+    return score >= 3;
+  }
+
+  _OcrMovementCandidate _parseOcrMovementText(String rawText) {
+    if (_looksLikeBitsoCapture(rawText)) {
+      return _parseBitsoOcrText(rawText);
+    }
+    return _parseMercadoPagoOcrText(rawText);
+  }
+
+  _OcrMovementCandidate _parseBitsoOcrText(String rawText) {
+    final String text = rawText
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\n{2,}'), '\n')
+        .trim();
+    final String lower = _foldOcrText(text).replaceAll(RegExp(r'\s+'), ' ');
+    final List<String> warnings = <String>[];
+    const List<String> supportedCoins = <String>[
+      'BTC',
+      'ETH',
+      'LINK',
+      'LTC',
+      'UNI',
+      'USDT',
+      'USDC',
+      'XRP',
+      'SOL',
+      'ATOM',
+    ];
+    final RegExp cryptoAmount = RegExp(
+      r'\b([0-9]+(?:[.,][0-9]+)?)\s*(BTC|ETH|LINK|LTC|UNI|USDT|USDC|XRP|SOL|ATOM)\b',
+      caseSensitive: false,
+    );
+
+    void addWarning(String warning) {
+      if (!warnings.contains(warning)) warnings.add(warning);
+    }
+
+    double? parseDecimal(String raw) {
+      String value = raw.replaceAll(RegExp(r'[^0-9,.-]'), '');
+      final int comma = value.lastIndexOf(',');
+      final int dot = value.lastIndexOf('.');
+      if (comma >= 0 && dot >= 0) {
+        value = comma > dot
+            ? value.replaceAll('.', '').replaceAll(',', '.')
+            : value.replaceAll(',', '');
+      } else if (comma >= 0) {
+        value = value.replaceAll(',', '.');
+      }
+      return double.tryParse(value);
+    }
+
+    double? firstNumber(RegExp pattern, [int group = 1]) {
+      final RegExpMatch? match = pattern.firstMatch(lower);
+      return match == null ? null : parseDecimal(match.group(group) ?? '');
+    }
+
+    MovementType? type;
+    if (RegExp(r'\bbuy\b').hasMatch(lower)) {
+      type = MovementType.buy;
+    } else if (RegExp(r'\bsell\b').hasMatch(lower)) {
+      type = MovementType.sell;
+    } else if (RegExp(r'\b(deposit|receive)\b').hasMatch(lower)) {
+      type = MovementType.transferIn;
+    } else if (RegExp(r'\b(withdrawal|withdraw|send)\b').hasMatch(lower)) {
+      type = MovementType.transferOut;
+    }
+
+    String? coin;
+    double? grossQuantity;
+    double? cryptoFee;
+    String? cryptoFeeCoin;
+    final List<String> lines = text
+        .split(RegExp(r'\r?\n'))
+        .map((String line) => line.trim())
+        .where((String line) => line.isNotEmpty)
+        .toList();
+    for (int i = 0; i < lines.length; i++) {
+      final String line = lines[i];
+      final String foldedLine = _foldOcrText(line);
+      final RegExpMatch? match = cryptoAmount.firstMatch(line);
+      if (match == null) continue;
+      final String previous = i == 0 ? '' : _foldOcrText(lines[i - 1]);
+      final bool isFeeLine = foldedLine.contains('comision') ||
+          previous.contains('comision');
+      final bool isRateLine = foldedLine.contains('tipo de cambio') ||
+          foldedLine.contains('=');
+      final double? value = parseDecimal(match.group(1) ?? '');
+      final String matchedCoin = (match.group(2) ?? '').toUpperCase();
+      if (isFeeLine) {
+        cryptoFee ??= value;
+        cryptoFeeCoin ??= matchedCoin;
+      } else if (!isRateLine && value != null && value > 0) {
+        grossQuantity ??= value;
+        coin ??= matchedCoin;
+      }
+    }
+
+    final RegExpMatch? unitPriceMatch = RegExp(
+      r'\b1\s*(BTC|ETH|LINK|LTC|UNI|USDT|USDC|XRP|SOL|ATOM)\s*=\s*([0-9]+(?:[.,][0-9]+)?)\s*mxn\b',
+      caseSensitive: false,
+    ).firstMatch(lower);
+    if (unitPriceMatch != null) {
+      coin ??= (unitPriceMatch.group(1) ?? '').toUpperCase();
+    }
+    if (coin != null && !supportedCoins.contains(coin)) {
+      addWarning('Moneda no soportada; selecciona la moneda correcta.');
+    }
+
+    final double? amountMxn = firstNumber(
+      RegExp(r'monto\s+(?:gastado|recibido)\s*([0-9]+(?:[.,][0-9]+)?)\s*mxn'),
+    );
+    final double? unitPrice = unitPriceMatch == null
+        ? null
+        : parseDecimal(unitPriceMatch.group(2) ?? '');
+    bool quantityWasCorrected = false;
+    double? correctedGrossQuantity = grossQuantity;
+    if (grossQuantity != null &&
+        amountMxn != null &&
+        amountMxn > 0 &&
+        unitPrice != null &&
+        unitPrice > 0 &&
+        grossQuantity! * unitPrice > amountMxn * 2) {
+      double divisor = 10;
+      double? bestCandidate;
+      double bestRelativeDiff = double.infinity;
+      for (int i = 0; i < 8; i++) {
+        final double candidate = grossQuantity! / divisor;
+        final double relativeDiff =
+            ((candidate * unitPrice) - amountMxn).abs() / amountMxn;
+        if (relativeDiff < bestRelativeDiff) {
+          bestRelativeDiff = relativeDiff;
+          bestCandidate = candidate;
+        }
+        divisor *= 10;
+      }
+      if (bestCandidate != null && bestRelativeDiff <= 0.05) {
+        correctedGrossQuantity = bestCandidate;
+        quantityWasCorrected = true;
+      }
+    }
+    final bool hasCryptoFee =
+        cryptoFee != null && cryptoFee! > 0 && cryptoFeeCoin == coin;
+    final bool shouldSuggestNetQuantity =
+        hasCryptoFee && type == MovementType.buy;
+    final double? quantity = correctedGrossQuantity == null
+        ? null
+        : shouldSuggestNetQuantity
+            ? correctedGrossQuantity! - cryptoFee!
+            : correctedGrossQuantity;
+    final DateTime date = _parseBitsoDate(lower) ?? DateTime.now();
+
+    if (coin == null) addWarning('Moneda no detectada.');
+    if (type == null) addWarning('Tipo no detectado.');
+    if (quantity == null || quantity <= 0) addWarning('Cantidad cripto no detectada.');
+    if (amountMxn == null) addWarning('Monto MXN no detectado.');
+    if (unitPrice == null) addWarning('Tipo de cambio no detectado.');
+    if (quantityWasCorrected) {
+      addWarning('Cantidad cripto corregida por OCR; revisa el decimal antes de guardar.');
+    }
+    if (hasCryptoFee) {
+      addWarning('Comisión detectada en cripto; revisa cantidad neta antes de guardar.');
+    }
+
+    return _OcrMovementCandidate(
+      type: type,
+      coin: coin,
+      quantity: quantity == null || quantity <= 0 ? null : quantity,
+      amountMxn: amountMxn,
+      unitPrice: unitPrice,
+      fee: 0,
+      date: date,
+      source: 'Bitso',
+      note: hasCryptoFee
+          ? shouldSuggestNetQuantity
+              ? 'OCR / captura Bitso · Comisión Bitso ${compact(cryptoFee!)} $coin descontada en cripto.'
+              : 'OCR / captura Bitso · Comisión Bitso ${compact(cryptoFee!)} $coin detectada en cripto.'
+          : 'OCR / captura Bitso',
+      warnings: warnings,
+      rawText: rawText,
+    );
+  }
+
+  DateTime? _parseBitsoDate(String lower) {
+    final RegExpMatch? match = RegExp(
+      r'\b([0-9]{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\s+([0-9]{4})\s+([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?\s*([ap])?\.?\s*m?\.?',
+    ).firstMatch(lower);
+    if (match == null) return null;
+    const Map<String, int> months = <String, int>{
+      'ene': 1,
+      'feb': 2,
+      'mar': 3,
+      'abr': 4,
+      'may': 5,
+      'jun': 6,
+      'jul': 7,
+      'ago': 8,
+      'sep': 9,
+      'oct': 10,
+      'nov': 11,
+      'dic': 12,
+    };
+    final int day = int.parse(match.group(1)!);
+    final int month = months[match.group(2)]!;
+    final int year = int.parse(match.group(3)!);
+    int hour = int.parse(match.group(4)!);
+    final int minute = int.parse(match.group(5)!);
+    final int second = int.tryParse(match.group(6) ?? '') ?? 0;
+    final String meridiem = match.group(7) ?? '';
+    if (meridiem == 'p' && hour < 12) hour += 12;
+    if (meridiem == 'a' && hour == 12) hour = 0;
+    return DateTime(year, month, day, hour, minute, second);
+  }
+
   _OcrMovementCandidate _parseMercadoPagoOcrText(String rawText) {
     final String text = rawText
         .replaceAll(RegExp(r'[ \t]+'), ' ')
@@ -5271,6 +5516,7 @@ class _MovementsTabState extends State<MovementsTab> {
 
   _OcrMovementCandidate _manualOcrCandidate(String rawText) {
     final bool looksLikeMercadoPago = _looksLikeMercadoPagoCapture(rawText);
+    final bool looksLikeBitso = _looksLikeBitsoCapture(rawText);
     return _OcrMovementCandidate(
       type: null,
       coin: null,
@@ -5279,8 +5525,16 @@ class _MovementsTabState extends State<MovementsTab> {
       unitPrice: null,
       fee: 0,
       date: DateTime.now(),
-      source: looksLikeMercadoPago ? 'Mercado Pago' : '',
-      note: looksLikeMercadoPago ? 'OCR / captura Mercado Pago' : 'OCR / captura',
+      source: looksLikeBitso
+          ? 'Bitso'
+          : looksLikeMercadoPago
+              ? 'Mercado Pago'
+              : '',
+      note: looksLikeBitso
+          ? 'OCR / captura Bitso'
+          : looksLikeMercadoPago
+              ? 'OCR / captura Mercado Pago'
+              : 'OCR / captura',
       warnings: const <String>['Captura manual: completa los datos desde el texto OCR.'],
       rawText: rawText,
     );
@@ -5308,7 +5562,7 @@ class _MovementsTabState extends State<MovementsTab> {
 
   void _showOcrPreview(String detectedText) {
     final String previewText = detectedText.trim();
-    final _OcrMovementCandidate candidate = _parseMercadoPagoOcrText(previewText);
+    final _OcrMovementCandidate candidate = _parseOcrMovementText(previewText);
     final _OcrReadQuality quality = _ocrReadQuality(candidate);
     final bool isWeak = quality == _OcrReadQuality.weak;
     final List<String> visibleWarnings = candidate.warnings.take(6).toList();

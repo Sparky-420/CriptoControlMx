@@ -228,19 +228,26 @@ class PriceAlertService {
     final Map<String, DateTime> recoveryNotifiedAt = Map<String, DateTime>.from(
       settings.recoveryLastNotifiedAt,
     );
+    final Set<String> activeCoins = coins.toSet();
+    references.removeWhere((String coin, _) => !activeCoins.contains(coin));
+    notifiedPrices.removeWhere((String coin, _) => !activeCoins.contains(coin));
+    notifiedAt.removeWhere((String coin, _) => !activeCoins.contains(coin));
+    recoveryReferences.removeWhere(
+      (String coin, _) => !activeCoins.contains(coin),
+    );
+    recoveryNotifiedAt.removeWhere(
+      (String coin, _) => !activeCoins.contains(coin),
+    );
 
     var notificationCount = 0;
 
     if (settings.enabled) {
-      for (final String coin in coins) {
+      for (final String coin in activeCoins) {
         final double currentPrice = currentPrices[coin] ?? 0.0;
         if (currentPrice <= 0) continue;
 
         final double referencePrice = references[coin] ?? 0.0;
-        if (referencePrice <= 0) {
-          references[coin] = currentPrice;
-          continue;
-        }
+        if (referencePrice <= 0) continue;
 
         final double changePct =
             (currentPrice - referencePrice) / referencePrice * 100;
@@ -268,7 +275,7 @@ class PriceAlertService {
         0.01,
         settings.recoveryThresholdPoints,
       );
-      for (final String coin in coins) {
+      for (final String coin in activeCoins) {
         final RecoveryAlertPosition? position = recoveryPositions[coin];
         if (position == null || !position.hasPosition) continue;
 

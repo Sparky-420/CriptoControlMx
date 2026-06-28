@@ -54,17 +54,22 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         val references = readDoubleMap(prefs.getString(pref(priceReferenceKey), null))
         val notifiedPrices = readDoubleMap(prefs.getString(pref(priceLastNotifiedPricesKey), null))
         val notifiedAt = readStringMap(prefs.getString(pref(priceLastNotifiedAtKey), null))
+        val stats = computeStats(prefs.getString(pref(movementsKey), null), prices)
+        val activeCoins = coins.filter { (stats[it]?.quantity ?: 0.0) > 0.0 && references.containsKey(it) }.toSet()
         var changed = false
 
-        for (coin in coins) {
+        for (coin in references.keys.filter { it !in activeCoins }.toList()) {
+            references.remove(coin)
+            notifiedPrices.remove(coin)
+            notifiedAt.remove(coin)
+            changed = true
+        }
+
+        for (coin in activeCoins) {
             val currentPrice = prices[coin] ?: continue
             if (currentPrice <= 0) continue
             val reference = references[coin] ?: 0.0
-            if (reference <= 0) {
-                references[coin] = currentPrice
-                changed = true
-                continue
-            }
+            if (reference <= 0) continue
             val changePct = (currentPrice - reference) / reference * 100.0
             if (changePct >= threshold || changePct <= -threshold) {
                 val up = changePct > 0
