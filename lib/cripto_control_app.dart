@@ -25,20 +25,79 @@ import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
 
-const Set<String> _safeCrashAreas = <String>{'cloud', 'drive', 'export', 'import', 'ocr', 'price_refresh', 'reset', 'unknown'};
-const Set<String> _safeCrashCodes = <String>{'network_error', 'permission_denied', 'invalid_backup', 'auth_cancelled', 'ocr_failed', 'drive_error', 'cloud_error', 'export_error', 'import_error', 'price_refresh_error', 'reset_error', 'unknown'};
+const Set<String> _safeCrashAreas = <String>{
+  'cloud',
+  'drive',
+  'export',
+  'import',
+  'ocr',
+  'price_refresh',
+  'reset',
+  'unknown',
+};
+const Set<String> _safeCrashCodes = <String>{
+  'network_error',
+  'permission_denied',
+  'unavailable',
+  'auth_required',
+  'not_found',
+  'invalid_backup',
+  'auth_cancelled',
+  'ocr_failed',
+  'drive_error',
+  'cloud_error',
+  'export_error',
+  'import_error',
+  'price_refresh_error',
+  'reset_error',
+  'unknown',
+};
 const String _analyticsConsentKey = 'analytics_consent_v1';
 const String _crashlyticsConsentKey = 'crashlytics_consent_v1';
-const Set<String> _safeAnalyticsEvents = <String>{'app_opened', 'tab_view', 'feature_used', 'backup_created', 'backup_restored', 'drive_backup_created', 'drive_backup_restored', 'cloud_upload', 'cloud_download', 'ocr_result', 'movement_form_opened', 'movement_saved', 'price_refresh', 'export_created', 'financial_reset_opened', 'financial_reset_completed'};
-const Map<String, Set<Object>> _safeAnalyticsParameterValues = <String, Set<Object>>{
-  'source': <Object>{'local', 'drive', 'firebase', 'ocr', 'manual'},
-  'status': <Object>{'started', 'completed', 'failed', 'cancelled'},
-  'error_code': <Object>{'network_error', 'permission_denied', 'invalid_backup', 'auth_cancelled', 'ocr_failed', 'drive_error', 'cloud_error', 'export_error', 'import_error', 'price_refresh_error', 'reset_error', 'unknown'},
-  'sync_mode': <Object>{'manual'},
-  'platform': <Object>{'android'},
-  'movement_count_bucket': <Object>{'0', '1_10', '11_50', '51_plus'},
-  'active_coin_count_bucket': <Object>{'0', '1_3', '4_6', '7_plus'},
+const Set<String> _safeAnalyticsEvents = <String>{
+  'app_opened',
+  'tab_view',
+  'feature_used',
+  'backup_created',
+  'backup_restored',
+  'drive_backup_created',
+  'drive_backup_restored',
+  'cloud_upload',
+  'cloud_download',
+  'ocr_result',
+  'movement_form_opened',
+  'movement_saved',
+  'price_refresh',
+  'export_created',
+  'financial_reset_opened',
+  'financial_reset_completed',
 };
+const Map<String, Set<Object>> _safeAnalyticsParameterValues =
+    <String, Set<Object>>{
+      'source': <Object>{'local', 'drive', 'firebase', 'ocr', 'manual'},
+      'status': <Object>{'started', 'completed', 'failed', 'cancelled'},
+      'error_code': <Object>{
+        'network_error',
+        'permission_denied',
+        'unavailable',
+        'auth_required',
+        'not_found',
+        'invalid_backup',
+        'auth_cancelled',
+        'ocr_failed',
+        'drive_error',
+        'cloud_error',
+        'export_error',
+        'import_error',
+        'price_refresh_error',
+        'reset_error',
+        'unknown',
+      },
+      'sync_mode': <Object>{'manual'},
+      'platform': <Object>{'android'},
+      'movement_count_bucket': <Object>{'0', '1_10', '11_50', '51_plus'},
+      'active_coin_count_bucket': <Object>{'0', '1_3', '4_6', '7_plus'},
+    };
 
 class _SafeCrashError {
   const _SafeCrashError(this.area, this.code);
@@ -46,6 +105,69 @@ class _SafeCrashError {
   final String code;
   @override
   String toString() => 'safe_error:$area:$code';
+}
+
+String _firebaseOperationCode(Object error) {
+  if (error is FirebaseException) {
+    final String code = error.code.trim().toLowerCase().replaceAll('-', '_');
+    switch (code) {
+      case 'permission_denied':
+      case 'unavailable':
+      case 'not_found':
+        return code;
+      case 'unauthenticated':
+      case 'user_token_expired':
+        return 'auth_required';
+    }
+  }
+  final String description = error.toString().toLowerCase();
+  if (description.contains('network') ||
+      description.contains('socket') ||
+      description.contains('timeout')) {
+    return 'network_error';
+  }
+  return 'cloud_error';
+}
+
+String _driveOperationCode(Object error) {
+  if (error is GoogleSignInException) {
+    return error.code == GoogleSignInExceptionCode.canceled ||
+            error.code == GoogleSignInExceptionCode.interrupted ||
+            error.code == GoogleSignInExceptionCode.uiUnavailable
+        ? 'auth_cancelled'
+        : 'auth_required';
+  }
+  if (error is StateError) return 'auth_required';
+  final String description = error.toString().toLowerCase();
+  if (description.contains('401') ||
+      description.contains('unauthorized') ||
+      description.contains('invalid credential') ||
+      description.contains('login required')) {
+    return 'auth_required';
+  }
+  if (description.contains('403') ||
+      description.contains('permission') ||
+      description.contains('forbidden') ||
+      description.contains('access denied')) {
+    return 'permission_denied';
+  }
+  if (description.contains('network') ||
+      description.contains('socket') ||
+      description.contains('timeout') ||
+      description.contains('503')) {
+    return 'network_error';
+  }
+  if (description.contains('404') || description.contains('not found')) {
+    return 'not_found';
+  }
+  return 'drive_error';
+}
+
+String _maskedIdentifier(String value) {
+  final String trimmed = value.trim();
+  if (trimmed.isEmpty) return 'No disponible';
+  final int visibleLength = trimmed.length < 6 ? trimmed.length : 6;
+  return '${trimmed.substring(0, visibleLength)}…';
 }
 
 Future<void> recordSafeError({
@@ -120,17 +242,83 @@ class CryptoAssetMetadata {
 
 const Map<String, CryptoAssetMetadata> cryptoAssetMetadata =
     <String, CryptoAssetMetadata>{
-      'BTC': CryptoAssetMetadata(symbol: 'BTC', name: 'Bitcoin', coingeckoId: 'bitcoin', hasLocalIcon: true, isActive: true),
-      'ETH': CryptoAssetMetadata(symbol: 'ETH', name: 'Ethereum', coingeckoId: 'ethereum', hasLocalIcon: true, isActive: true),
-      'LINK': CryptoAssetMetadata(symbol: 'LINK', name: 'Chainlink', coingeckoId: 'chainlink', hasLocalIcon: true, isActive: true),
-      'LTC': CryptoAssetMetadata(symbol: 'LTC', name: 'Litecoin', coingeckoId: 'litecoin', hasLocalIcon: true, isActive: true),
-      'UNI': CryptoAssetMetadata(symbol: 'UNI', name: 'Uniswap', coingeckoId: 'uniswap', hasLocalIcon: true, isActive: true),
-      'USDT': CryptoAssetMetadata(symbol: 'USDT', name: 'Tether', coingeckoId: 'tether', hasLocalIcon: true, isActive: true),
-      'USDC': CryptoAssetMetadata(symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', hasLocalIcon: true, isActive: true),
-      'XRP': CryptoAssetMetadata(symbol: 'XRP', name: 'XRP', coingeckoId: 'ripple', hasLocalIcon: true, isActive: true),
-      'SOL': CryptoAssetMetadata(symbol: 'SOL', name: 'Solana', coingeckoId: 'solana', hasLocalIcon: true, isActive: true),
-      'ATOM': CryptoAssetMetadata(symbol: 'ATOM', name: 'Cosmos', coingeckoId: 'cosmos', hasLocalIcon: true, isActive: true),
-      'EURC': CryptoAssetMetadata(symbol: 'EURC', name: 'EURC', coingeckoId: 'eurc', hasLocalIcon: true, isActive: false),
+      'BTC': CryptoAssetMetadata(
+        symbol: 'BTC',
+        name: 'Bitcoin',
+        coingeckoId: 'bitcoin',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'ETH': CryptoAssetMetadata(
+        symbol: 'ETH',
+        name: 'Ethereum',
+        coingeckoId: 'ethereum',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'LINK': CryptoAssetMetadata(
+        symbol: 'LINK',
+        name: 'Chainlink',
+        coingeckoId: 'chainlink',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'LTC': CryptoAssetMetadata(
+        symbol: 'LTC',
+        name: 'Litecoin',
+        coingeckoId: 'litecoin',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'UNI': CryptoAssetMetadata(
+        symbol: 'UNI',
+        name: 'Uniswap',
+        coingeckoId: 'uniswap',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'USDT': CryptoAssetMetadata(
+        symbol: 'USDT',
+        name: 'Tether',
+        coingeckoId: 'tether',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'USDC': CryptoAssetMetadata(
+        symbol: 'USDC',
+        name: 'USD Coin',
+        coingeckoId: 'usd-coin',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'XRP': CryptoAssetMetadata(
+        symbol: 'XRP',
+        name: 'XRP',
+        coingeckoId: 'ripple',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'SOL': CryptoAssetMetadata(
+        symbol: 'SOL',
+        name: 'Solana',
+        coingeckoId: 'solana',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'ATOM': CryptoAssetMetadata(
+        symbol: 'ATOM',
+        name: 'Cosmos',
+        coingeckoId: 'cosmos',
+        hasLocalIcon: true,
+        isActive: true,
+      ),
+      'EURC': CryptoAssetMetadata(
+        symbol: 'EURC',
+        name: 'EURC',
+        coingeckoId: 'eurc',
+        hasLocalIcon: true,
+        isActive: false,
+      ),
     };
 
 class CriptoControlApp extends StatefulWidget {
@@ -154,10 +342,16 @@ class CriptoControlApp extends StatefulWidget {
 }
 
 class _ImportResult {
-  const _ImportResult({required this.movementCount, required this.snapshotCount, this.warnings = const <String>[], this.errors = const <String>[]});
+  const _ImportResult({
+    required this.movementCount,
+    required this.snapshotCount,
+    this.warnings = const <String>[],
+    this.errors = const <String>[],
+  });
   final int movementCount, snapshotCount;
   final List<String> warnings, errors;
-  bool get hasWarnings => warnings.isNotEmpty; bool get hasErrors => errors.isNotEmpty;
+  bool get hasWarnings => warnings.isNotEmpty;
+  bool get hasErrors => errors.isNotEmpty;
 }
 
 class _CriptoControlAppState extends State<CriptoControlApp>
@@ -192,11 +386,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'price_refresh_after_movement_v1';
   static const String _priceRefreshForegroundModeKey =
       'price_refresh_foreground_mode_v1';
-  static const List<String> _googleDriveScopes = <String>['https://www.googleapis.com/auth/drive.appdata'];
-  static const String _googleDriveBackupFileName = 'criptocontrolmx_respaldo.json';
-  static const String _googleDriveBackupFileIdKey = 'google_drive_backup_file_id_v1';
-  static const String _googleDriveBackupUpdatedAtKey = 'google_drive_backup_updated_at_ms_v1';
-  static const String _googleDriveBackupAccountEmailKey = 'google_drive_backup_account_email_v1';
+  static const List<String> _googleDriveScopes = <String>[
+    'https://www.googleapis.com/auth/drive.appdata',
+  ];
+  static const String _googleDriveBackupFileName =
+      'criptocontrolmx_respaldo.json';
+  static const String _googleDriveBackupFileIdKey =
+      'google_drive_backup_file_id_v1';
+  static const String _googleDriveBackupUpdatedAtKey =
+      'google_drive_backup_updated_at_ms_v1';
+  static const String _googleDriveBackupAccountEmailKey =
+      'google_drive_backup_account_email_v1';
   static const String _firebaseDeviceIdKey = 'firebase_device_id_v1';
   static const String _firebaseCloudStateUploadedAtKey =
       'firebase_cloud_state_uploaded_at_ms_v1';
@@ -266,6 +466,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   GoogleSignInAccount? _googleAccount;
   User? _firebaseUser;
   bool _isFirebaseAuthBusy = false;
+  bool _isCloudProfilePreparing = false;
   bool _isCloudUploading = false;
   bool _isCloudDownloading = false;
   String _cloudProfileStatus = 'Pendiente';
@@ -299,7 +500,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       unawaited(_ensureCloudProfile(showError: false));
     }
     unawaited(_ensureGoogleSignInInitialized().catchError((_) {}));
-    unawaited(_logSafeAnalyticsEvent(name: 'app_opened', parameters: <String, Object>{'platform': 'android'}));
+    unawaited(
+      _logSafeAnalyticsEvent(
+        name: 'app_opened',
+        parameters: <String, Object>{'platform': 'android'},
+      ),
+    );
     _loadData();
   }
 
@@ -329,7 +535,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
   }
 
-  Future<void> _setAnalyticsConsent(BuildContext pageContext, bool enabled) async {
+  Future<void> _setAnalyticsConsent(
+    BuildContext pageContext,
+    bool enabled,
+  ) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_analyticsConsentKey, enabled);
     try {
@@ -344,11 +553,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
   }
 
-  Future<void> _setCrashlyticsConsent(BuildContext pageContext, bool enabled) async {
+  Future<void> _setCrashlyticsConsent(
+    BuildContext pageContext,
+    bool enabled,
+  ) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_crashlyticsConsentKey, enabled);
     try {
-      await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(enabled);
+      await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+        enabled,
+      );
     } catch (_) {}
     if (!mounted) return;
     setState(() => _crashlyticsConsent = enabled);
@@ -372,13 +586,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<void> _loadCloudStateUploadMetadata() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final int? uploadedAtMs = prefs.getInt(_firebaseCloudStateUploadedAtKey);
-    final int? downloadedAtMs =
-        prefs.getInt(_firebaseCloudStateDownloadedAtKey);
+    final int? downloadedAtMs = prefs.getInt(
+      _firebaseCloudStateDownloadedAtKey,
+    );
     final String? uploadedDeviceId =
         prefs.getString(_firebaseCloudStateUploadedByDeviceIdKey) ??
-            prefs.getString(_firebaseCloudStateDeviceIdKey);
-    final String? downloadedDeviceId =
-        prefs.getString(_firebaseCloudStateDownloadedFromDeviceIdKey);
+        prefs.getString(_firebaseCloudStateDeviceIdKey);
+    final String? downloadedDeviceId = prefs.getString(
+      _firebaseCloudStateDownloadedFromDeviceIdKey,
+    );
     final String? localDeviceId = prefs.getString(_firebaseDeviceIdKey);
     if (!mounted) return;
     setState(() {
@@ -388,7 +604,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _cloudStateDownloadedAt = downloadedAtMs == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(downloadedAtMs);
-      _firebaseDeviceId = downloadedDeviceId ?? uploadedDeviceId ?? localDeviceId;
+      _firebaseDeviceId =
+          downloadedDeviceId ?? uploadedDeviceId ?? localDeviceId;
     });
   }
 
@@ -432,13 +649,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
       final String? normalizedDeviceId =
           movement.deviceId == null || movement.deviceId!.trim().isEmpty
-              ? deviceId
-              : movement.deviceId;
+          ? deviceId
+          : movement.deviceId;
       if (movement.id != id || movement.deviceId != normalizedDeviceId) {
-        movements[i] = movement.copyWith(
-          id: id,
-          deviceId: normalizedDeviceId,
-        );
+        movements[i] = movement.copyWith(id: id, deviceId: normalizedDeviceId);
         changed = true;
       }
     }
@@ -489,15 +703,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }) {
     if (_movements.isEmpty) return false;
     final DateTime? latestLocal = _latestLocalMovementUpdatedAt();
-    final DateTime? latestSync = <DateTime?>[
-      _cloudStateUploadedAt,
-      _cloudStateDownloadedAt,
-    ].whereType<DateTime>().fold<DateTime?>(
+    final DateTime? latestSync =
+        <DateTime?>[
+          _cloudStateUploadedAt,
+          _cloudStateDownloadedAt,
+        ].whereType<DateTime>().fold<DateTime?>(
           null,
           (DateTime? current, DateTime value) =>
               current == null || value.isAfter(current) ? value : current,
         );
-    final bool fromOtherDevice = uploadedByDeviceId != null &&
+    final bool fromOtherDevice =
+        uploadedByDeviceId != null &&
         uploadedByDeviceId.isNotEmpty &&
         uploadedByDeviceId != localDeviceId;
     final bool cloudOlderThanLocal =
@@ -510,27 +726,38 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return fromOtherDevice || cloudOlderThanLocal || localAfterLastSync;
   }
 
-  Future<void> _ensureCloudProfile({
-    BuildContext? pageContext,
+  Future<bool> _ensureCloudProfile({
+    ScaffoldMessengerState? messenger,
     bool showError = true,
   }) async {
     final User? user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) setState(() => _cloudProfileStatus = 'Pendiente');
-      return;
+      return false;
     }
 
+    if (mounted) {
+      setState(() {
+        _isCloudProfilePreparing = true;
+        _cloudProfileStatus = 'Preparando…';
+      });
+    }
     try {
       final String deviceId = await _localFirebaseDeviceId();
+      if (!mounted) return false;
       final FirebaseFirestore firestore = FirebaseFirestore.instance;
-      final DocumentReference<Map<String, dynamic>> userRef =
-          firestore.collection('users').doc(user.uid);
-      final DocumentSnapshot<Map<String, dynamic>> userSnapshot =
-          await userRef.get();
-      final DocumentReference<Map<String, dynamic>> deviceRef =
-          userRef.collection('devices').doc(deviceId);
+      final DocumentReference<Map<String, dynamic>> userRef = firestore
+          .collection('users')
+          .doc(user.uid);
+      final DocumentSnapshot<Map<String, dynamic>> userSnapshot = await userRef
+          .get();
+      if (!mounted) return false;
+      final DocumentReference<Map<String, dynamic>> deviceRef = userRef
+          .collection('devices')
+          .doc(deviceId);
       final DocumentSnapshot<Map<String, dynamic>> deviceSnapshot =
           await deviceRef.get();
+      if (!mounted) return false;
 
       final Map<String, dynamic> userData = <String, dynamic>{
         'uid': user.uid,
@@ -558,28 +785,35 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       }
 
       await userRef.set(userData, SetOptions(merge: true));
+      if (!mounted) return false;
       await deviceRef.set(deviceData, SetOptions(merge: true));
 
-      if (!mounted) return;
+      if (!mounted) return true;
       setState(() {
         _firebaseDeviceId = deviceId;
         _cloudProfileStatus = 'Configurado';
       });
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
-      if (!mounted) return;
-      setState(() => _cloudProfileStatus = 'Error');
-      if (showError && pageContext != null) {
-        ScaffoldMessenger.of(pageContext).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo preparar el perfil en la nube.'),
-          ),
+      return true;
+    } catch (error, stackTrace) {
+      final String code = _firebaseOperationCode(error);
+      unawaited(
+        recordSafeError(area: 'cloud', code: code, stackTrace: stackTrace),
+      );
+      if (!mounted) return false;
+      setState(() => _cloudProfileStatus = 'Error · $code');
+      if (showError && messenger != null && messenger.mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('No se pudo preparar perfil cloud: $code')),
         );
       }
+      return false;
+    } finally {
+      if (mounted) setState(() => _isCloudProfilePreparing = false);
     }
   }
 
   Future<bool> _confirmCloudStateUpload(BuildContext pageContext) async {
+    if (!pageContext.mounted) return false;
     final bool? confirmed = await showDialog<bool>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -591,11 +825,29 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () {
+              final NavigatorState? navigator = Navigator.maybeOf(
+                dialogContext,
+              );
+              if (dialogContext.mounted &&
+                  navigator != null &&
+                  navigator.canPop()) {
+                navigator.pop(false);
+              }
+            },
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: () {
+              final NavigatorState? navigator = Navigator.maybeOf(
+                dialogContext,
+              );
+              if (dialogContext.mounted &&
+                  navigator != null &&
+                  navigator.canPop()) {
+                navigator.pop(true);
+              }
+            },
             child: const Text('Subir y reemplazar nube'),
           ),
         ],
@@ -611,22 +863,28 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     if (widget.firebaseStatus != 'Inicializado' || user == null) {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Inicia sesión para usar la nube.'),
-        ),
+        const SnackBar(content: Text('Inicia sesión para usar la nube.')),
       );
       return;
     }
 
     if (!await _confirmCloudStateUpload(pageContext)) return;
+    if (!mounted || !pageContext.mounted) return;
 
     setState(() => _isCloudUploading = true);
     try {
-      await _ensureCloudProfile(pageContext: pageContext);
+      final bool profileReady = await _ensureCloudProfile(messenger: messenger);
+      if (!mounted || !pageContext.mounted || !profileReady) return;
       final String deviceId = await _localFirebaseDeviceId();
+      if (!mounted || !pageContext.mounted) return;
       final Object? decoded = jsonDecode(_buildBackupJson());
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Payload financiero inválido');
+      }
+      final Object? movements = decoded['movements'];
+      final Object? snapshots = decoded['snapshots'];
+      if (movements is! List || snapshots is! List) {
+        throw const FormatException('Payload financiero incompleto');
       }
 
       final DateTime uploadedAt = DateTime.now();
@@ -636,40 +894,71 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           .collection('cloudState')
           .doc('current')
           .set(<String, dynamic>{
-        'schemaVersion': 1,
-        'uploadedAt': FieldValue.serverTimestamp(),
-        'uploadedAtLocal': uploadedAt.toIso8601String(),
-        'uploadedByDeviceId': deviceId,
-        'appName': 'CriptoControlMx',
-        if (decoded['version'] != null) 'backupVersion': decoded['version'],
-        'payload': decoded,
-      }, SetOptions(merge: true));
+            'schemaVersion': 1,
+            'uploadedAt': FieldValue.serverTimestamp(),
+            'uploadedAtLocal': uploadedAt.toIso8601String(),
+            'uploadedByDeviceId': deviceId,
+            'appName': 'CriptoControlMx',
+            if (decoded['version'] != null) 'backupVersion': decoded['version'],
+            'payload': decoded,
+          }, SetOptions(merge: true));
+      if (!mounted || !pageContext.mounted) return;
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
+      if (!mounted || !pageContext.mounted) return;
       await prefs.setInt(
         _firebaseCloudStateUploadedAtKey,
         uploadedAt.millisecondsSinceEpoch,
       );
+      if (!mounted || !pageContext.mounted) return;
       await prefs.setString(_firebaseCloudStateDeviceIdKey, deviceId);
+      if (!mounted || !pageContext.mounted) return;
       await prefs.setString(_firebaseCloudStateUploadedByDeviceIdKey, deviceId);
 
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       setState(() {
         _cloudStateUploadedAt = uploadedAt;
         _firebaseDeviceId = deviceId;
       });
       messenger.showSnackBar(
-        const SnackBar(content: Text('Estado financiero subido a la nube.')),
-      );
-      unawaited(_logSafeAnalyticsEvent(name: 'cloud_upload', parameters: <String, Object>{'source': 'firebase', 'status': 'completed', 'sync_mode': 'manual'}));
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'cloud_upload', parameters: <String, Object>{'source': 'firebase', 'status': 'failed', 'sync_mode': 'manual', 'error_code': 'cloud_error'}));
-      if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo subir el estado a la nube.'),
+        SnackBar(
+          content: Text(
+            'Estado subido a Firebase: ${movements.length} movimientos, '
+            '${snapshots.length} instantáneas.',
+          ),
         ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'cloud_upload',
+          parameters: <String, Object>{
+            'source': 'firebase',
+            'status': 'completed',
+            'sync_mode': 'manual',
+          },
+        ),
+      );
+    } catch (error, stackTrace) {
+      final String code = error is FormatException
+          ? 'invalid_backup'
+          : _firebaseOperationCode(error);
+      unawaited(
+        recordSafeError(area: 'cloud', code: code, stackTrace: stackTrace),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'cloud_upload',
+          parameters: <String, Object>{
+            'source': 'firebase',
+            'status': 'failed',
+            'sync_mode': 'manual',
+            'error_code': code,
+          },
+        ),
+      );
+      if (!mounted || !pageContext.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('No se pudo subir a Firebase: $code')),
       );
     } finally {
       if (mounted) setState(() => _isCloudUploading = false);
@@ -682,11 +971,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }) async {
     final String message = hasPossibleConflict
         ? 'Esto reemplazará tus datos financieros actuales con el estado '
-            'guardado en Firebase. No se mezclarán datos en esta fase.\n\n'
-            'Se detectaron posibles cambios locales no sincronizados. Crea una '
-            'copia antes de continuar.'
+              'guardado en Firebase. No se mezclarán datos en esta fase.\n\n'
+              'Se detectaron posibles cambios locales no sincronizados. Crea una '
+              'copia antes de continuar.'
         : 'Esto reemplazará tus datos financieros actuales con el estado '
-            'guardado en Firebase. No se mezclarán datos en esta fase.';
+              'guardado en Firebase. No se mezclarán datos en esta fase.';
+    if (!pageContext.mounted) return false;
     final bool? confirmed = await showDialog<bool>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -694,11 +984,29 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         content: Text(message),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () {
+              final NavigatorState? navigator = Navigator.maybeOf(
+                dialogContext,
+              );
+              if (dialogContext.mounted &&
+                  navigator != null &&
+                  navigator.canPop()) {
+                navigator.pop(false);
+              }
+            },
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: () {
+              final NavigatorState? navigator = Navigator.maybeOf(
+                dialogContext,
+              );
+              if (dialogContext.mounted &&
+                  navigator != null &&
+                  navigator.canPop()) {
+                navigator.pop(true);
+              }
+            },
             child: const Text('Descargar y reemplazar'),
           ),
         ],
@@ -707,16 +1015,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return confirmed ?? false;
   }
 
-  Future<void> _downloadFinancialStateFromFirebase(BuildContext pageContext) async {
+  Future<void> _downloadFinancialStateFromFirebase(
+    BuildContext pageContext,
+  ) async {
     if (_isCloudDownloading) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     final User? user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Inicia sesión para usar la nube.'),
-        ),
+        const SnackBar(content: Text('Inicia sesión para usar la nube.')),
       );
       return;
     }
@@ -730,11 +1038,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               .collection('cloudState')
               .doc('current')
               .get();
+      if (!mounted || !pageContext.mounted) return;
 
       if (!snapshot.exists) {
-        if (!mounted) return;
+        if (!mounted || !pageContext.mounted) return;
         messenger.showSnackBar(
-          const SnackBar(content: Text('No hay estado financiero en la nube.')),
+          const SnackBar(content: Text('No hay copia en Firebase todavía.')),
         );
         return;
       }
@@ -746,10 +1055,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       }
 
       final String localDeviceId = await _localFirebaseDeviceId();
+      if (!mounted || !pageContext.mounted) return;
       final DateTime? cloudUploadedAt =
           _cloudDateTime(data?['uploadedAt']) ??
-              _cloudDateTime(data?['uploadedAtLocal']);
-      final String? uploadedByDeviceId = data?['uploadedByDeviceId']?.toString();
+          _cloudDateTime(data?['uploadedAtLocal']);
+      final String? uploadedByDeviceId = data?['uploadedByDeviceId']
+          ?.toString();
       final bool hasPossibleConflict = _hasPossibleCloudDownloadConflict(
         cloudUploadedAt: cloudUploadedAt,
         uploadedByDeviceId: uploadedByDeviceId,
@@ -761,46 +1072,87 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       )) {
         return;
       }
+      if (!mounted || !pageContext.mounted) return;
 
       final _ImportResult result = await _applyBackupJson(jsonEncode(payload));
+      if (!mounted || !pageContext.mounted) return;
       final DateTime downloadedAt = DateTime.now();
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
+      if (!mounted || !pageContext.mounted) return;
       await prefs.setInt(
         _firebaseCloudStateDownloadedAtKey,
         downloadedAt.millisecondsSinceEpoch,
       );
+      if (!mounted || !pageContext.mounted) return;
       if (uploadedByDeviceId != null && uploadedByDeviceId.isNotEmpty) {
         await prefs.setString(
           _firebaseCloudStateDownloadedFromDeviceIdKey,
           uploadedByDeviceId,
         );
+        if (!mounted || !pageContext.mounted) return;
       }
 
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       setState(() {
         _cloudStateDownloadedAt = downloadedAt;
         _firebaseDeviceId = uploadedByDeviceId ?? _firebaseDeviceId;
       });
       _showImportResult(messenger, result, fileName: 'Firebase');
-      unawaited(_logSafeAnalyticsEvent(name: 'cloud_download', parameters: <String, Object>{'source': 'firebase', 'status': 'completed', 'sync_mode': 'manual'}));
-    } on FormatException catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'cloud', code: 'invalid_backup', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'cloud_download', parameters: <String, Object>{'source': 'firebase', 'status': 'failed', 'sync_mode': 'manual', 'error_code': 'invalid_backup'}));
-      if (!mounted) return;
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'cloud_download',
+          parameters: <String, Object>{
+            'source': 'firebase',
+            'status': 'completed',
+            'sync_mode': 'manual',
+          },
+        ),
+      );
+    } on FormatException catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'cloud',
+          code: 'invalid_backup',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'cloud_download',
+          parameters: <String, Object>{
+            'source': 'firebase',
+            'status': 'failed',
+            'sync_mode': 'manual',
+            'error_code': 'invalid_backup',
+          },
+        ),
+      );
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
         const SnackBar(
           content: Text('El estado guardado en la nube no es válido.'),
         ),
       );
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'cloud', code: 'cloud_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'cloud_download', parameters: <String, Object>{'source': 'firebase', 'status': 'failed', 'sync_mode': 'manual', 'error_code': 'cloud_error'}));
-      if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo descargar el estado de la nube.'),
+    } catch (error, stackTrace) {
+      final String code = _firebaseOperationCode(error);
+      unawaited(
+        recordSafeError(area: 'cloud', code: code, stackTrace: stackTrace),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'cloud_download',
+          parameters: <String, Object>{
+            'source': 'firebase',
+            'status': 'failed',
+            'sync_mode': 'manual',
+            'error_code': code,
+          },
         ),
+      );
+      if (!mounted || !pageContext.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('No se pudo descargar de Firebase: $code')),
       );
     } finally {
       if (mounted) setState(() => _isCloudDownloading = false);
@@ -819,31 +1171,39 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     setState(() => _isFirebaseAuthBusy = true);
     try {
       await _ensureGoogleSignInInitialized();
+      if (!mounted || !pageContext.mounted) return;
       if (!GoogleSignIn.instance.supportsAuthenticate()) {
         throw UnsupportedError('Google Sign-In no disponible');
       }
 
-      final GoogleSignInAccount account =
-          await GoogleSignIn.instance.authenticate();
+      final GoogleSignInAccount account = await GoogleSignIn.instance
+          .authenticate();
+      if (!mounted || !pageContext.mounted) return;
       final String? idToken = account.authentication.idToken;
       if (idToken == null || idToken.isEmpty) {
         throw StateError('Google ID token no disponible');
       }
 
-      final UserCredential credential =
-          await FirebaseAuth.instance.signInWithCredential(
-        GoogleAuthProvider.credential(idToken: idToken),
-      );
+      final UserCredential credential = await FirebaseAuth.instance
+          .signInWithCredential(
+            GoogleAuthProvider.credential(idToken: idToken),
+          );
 
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       setState(() => _firebaseUser = credential.user);
-      await _ensureCloudProfile(pageContext: pageContext);
-      if (!mounted) return;
+      final bool profileReady = await _ensureCloudProfile(messenger: messenger);
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
-        const SnackBar(content: Text('Sesión iniciada.')),
+        SnackBar(
+          content: Text(
+            profileReady
+                ? 'Sesión iniciada y perfil cloud preparado.'
+                : 'Sesión iniciada; el perfil cloud requiere reintento.',
+          ),
+        ),
       );
     } on GoogleSignInException catch (error) {
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -854,7 +1214,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         ),
       );
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('No se pudo iniciar sesión.')),
       );
@@ -870,22 +1230,34 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     setState(() => _isFirebaseAuthBusy = true);
     try {
       await FirebaseAuth.instance.signOut();
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       setState(() {
         _firebaseUser = null;
         _cloudProfileStatus = 'Pendiente';
       });
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Sesión cerrada.')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('Sesión cerrada.')));
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('No se pudo cerrar sesión.')),
       );
     } finally {
       if (mounted) setState(() => _isFirebaseAuthBusy = false);
     }
+  }
+
+  Future<void> _retryCloudProfile(BuildContext pageContext) async {
+    if (_isCloudProfilePreparing) return;
+    final ScaffoldMessengerState? messenger = pageContext.mounted
+        ? ScaffoldMessenger.maybeOf(pageContext)
+        : null;
+    if (messenger == null) return;
+    final bool prepared = await _ensureCloudProfile(messenger: messenger);
+    if (!mounted) return;
+    if (!prepared || !messenger.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Perfil cloud preparado.')),
+    );
   }
 
   Future<void> _connectGoogleDrive(BuildContext pageContext) async {
@@ -902,29 +1274,37 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
       final GoogleSignInAccount account = await GoogleSignIn.instance
           .authenticate(scopeHint: _googleDriveScopes);
+      if (!mounted || !pageContext.mounted) return;
       errorMessage = 'No se pudo autorizar Google Drive.';
       final GoogleSignInClientAuthorization? currentAuthorization =
           await account.authorizationClient.authorizationForScopes(
-        _googleDriveScopes,
-      );
+            _googleDriveScopes,
+          );
+      if (!mounted || !pageContext.mounted) return;
       await (currentAuthorization == null
           ? account.authorizationClient.authorizeScopes(_googleDriveScopes)
           : Future<GoogleSignInClientAuthorization>.value(
               currentAuthorization,
             ));
 
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       setState(() => _googleAccount = account);
       messenger.showSnackBar(
         const SnackBar(content: Text('Google Drive conectado.')),
       );
-    } on GoogleSignInException catch (error, StackTrace stackTrace) {
+    } on GoogleSignInException catch (error, stackTrace) {
       final bool canceled =
           error.code == GoogleSignInExceptionCode.canceled ||
           error.code == GoogleSignInExceptionCode.interrupted ||
           error.code == GoogleSignInExceptionCode.uiUnavailable;
-      unawaited(recordSafeError(area: 'drive', code: canceled ? 'auth_cancelled' : 'drive_error', stackTrace: stackTrace));
-      if (!mounted) return;
+      unawaited(
+        recordSafeError(
+          area: 'drive',
+          code: canceled ? 'auth_cancelled' : 'drive_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      if (!mounted || !pageContext.mounted) return;
       if (canceled) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se conectó Google Drive.')),
@@ -936,17 +1316,26 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           content: Text(canceled ? 'Conexión cancelada.' : errorMessage),
         ),
       );
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
-      if (!mounted) return;
+    } catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'drive',
+          code: 'drive_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
     } finally {
       if (mounted) setState(() => _isGoogleConnecting = false);
     }
   }
 
-  commons.Media _googleDriveBackupMedia(List<int> bytes) =>
-      commons.Media(Stream<List<int>>.value(bytes), bytes.length, contentType: 'application/json');
+  commons.Media _googleDriveBackupMedia(List<int> bytes) => commons.Media(
+    Stream<List<int>>.value(bytes),
+    bytes.length,
+    contentType: 'application/json',
+  );
 
   Future<T> _withGoogleDriveApi<T>(
     BuildContext pageContext,
@@ -954,15 +1343,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   ) async {
     final GoogleSignInAccount? account = _googleAccount;
     if (account == null) {
-      ScaffoldMessenger.of(pageContext).showSnackBar(
-        const SnackBar(content: Text('Conecta Google Drive primero.')),
-      );
       throw StateError('Google Drive no conectado');
     }
     await _ensureGoogleSignInInitialized();
     final GoogleSignInClientAuthorization authorization =
-        await account.authorizationClient.authorizationForScopes(_googleDriveScopes) ??
-            await account.authorizationClient.authorizeScopes(_googleDriveScopes);
+        await account.authorizationClient.authorizationForScopes(
+          _googleDriveScopes,
+        ) ??
+        await account.authorizationClient.authorizeScopes(_googleDriveScopes);
     final client = authorization.authClient(scopes: _googleDriveScopes);
     try {
       return await action(drive.DriveApi(client), account);
@@ -986,10 +1374,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final String? fileId = _googleDriveBackupFileId;
     if (fileId != null && fileId.isNotEmpty) {
       try {
-        return await api.files.get(
-          fileId,
-          $fields: 'id,name,modifiedTime',
-        ) as drive.File;
+        return await api.files.get(fileId, $fields: 'id,name,modifiedTime')
+            as drive.File;
       } catch (_) {}
     }
     return _findGoogleDriveBackupFile(api);
@@ -1025,34 +1411,71 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     setState(() => _isGoogleDriveCreating = true);
     try {
-      await _withGoogleDriveApi(pageContext, (drive.DriveApi api, GoogleSignInAccount account) async {
+      await _withGoogleDriveApi(pageContext, (
+        drive.DriveApi api,
+        GoogleSignInAccount account,
+      ) async {
         final List<int> bytes = utf8.encode(_buildBackupJson());
         final drive.File uploaded = await _uploadGoogleDriveBackup(api, bytes);
+        if (!mounted || !pageContext.mounted) return;
         final DateTime updatedAt = uploaded.modifiedTime ?? DateTime.now();
         final SharedPreferences prefs = await SharedPreferences.getInstance();
+        if (!mounted || !pageContext.mounted) return;
         await prefs.setString(_googleDriveBackupFileIdKey, uploaded.id ?? '');
-        await prefs.setInt(_googleDriveBackupUpdatedAtKey, updatedAt.millisecondsSinceEpoch);
+        if (!mounted || !pageContext.mounted) return;
+        await prefs.setInt(
+          _googleDriveBackupUpdatedAtKey,
+          updatedAt.millisecondsSinceEpoch,
+        );
+        if (!mounted || !pageContext.mounted) return;
         await prefs.setString(_googleDriveBackupAccountEmailKey, account.email);
-        if (!mounted) return;
+        if (!mounted || !pageContext.mounted) return;
         setState(() {
           _googleDriveBackupFileId = uploaded.id;
           _googleDriveBackupUpdatedAt = updatedAt;
           _googleDriveBackupAccountEmail = account.email;
         });
       });
-      if (!mounted) return;
+      if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('Copia creada en Google Drive.')),
       );
-      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_created', parameters: <String, Object>{'source': 'drive', 'status': 'completed'}));
-    } on StateError {
-      // _withGoogleDriveApi already shows the user-facing message.
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_created', parameters: <String, Object>{'source': 'drive', 'status': 'failed', 'error_code': 'drive_error'}));
-      if (mounted) {
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'drive_backup_created',
+          parameters: <String, Object>{
+            'source': 'drive',
+            'status': 'completed',
+          },
+        ),
+      );
+    } catch (error, stackTrace) {
+      final String code = _driveOperationCode(error);
+      unawaited(
+        recordSafeError(area: 'drive', code: code, stackTrace: stackTrace),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'drive_backup_created',
+          parameters: <String, Object>{
+            'source': 'drive',
+            'status': 'failed',
+            'error_code': code,
+          },
+        ),
+      );
+      if (mounted && pageContext.mounted) {
+        if (code == 'auth_required') {
+          setState(() => _googleAccount = null);
+        }
         messenger.showSnackBar(
-          const SnackBar(content: Text('No se pudo crear la copia en Google Drive.')),
+          SnackBar(
+            content: Text(
+              code == 'auth_required'
+                  ? 'Reconecta Google Drive para crear copia.'
+                  : 'No se pudo crear copia Drive: $code',
+            ),
+          ),
         );
       }
     } finally {
@@ -1061,6 +1484,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   Future<bool> _confirmGoogleDriveRestore(BuildContext pageContext) async {
+    if (!pageContext.mounted) return false;
     return await showDialog<bool>(
           context: pageContext,
           builder: (BuildContext dialogContext) => AlertDialog(
@@ -1070,11 +1494,29 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             ),
             actions: <Widget>[
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
+                onPressed: () {
+                  final NavigatorState? navigator = Navigator.maybeOf(
+                    dialogContext,
+                  );
+                  if (dialogContext.mounted &&
+                      navigator != null &&
+                      navigator.canPop()) {
+                    navigator.pop(false);
+                  }
+                },
                 child: const Text('Cancelar'),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
+                onPressed: () {
+                  final NavigatorState? navigator = Navigator.maybeOf(
+                    dialogContext,
+                  );
+                  if (dialogContext.mounted &&
+                      navigator != null &&
+                      navigator.canPop()) {
+                    navigator.pop(true);
+                  }
+                },
                 child: const Text('Restaurar'),
               ),
             ],
@@ -1109,8 +1551,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     setState(() => _isGoogleDriveRestoring = true);
     try {
-      await _withGoogleDriveApi(pageContext, (drive.DriveApi api, GoogleSignInAccount account) async {
+      await _withGoogleDriveApi(pageContext, (
+        drive.DriveApi api,
+        GoogleSignInAccount account,
+      ) async {
         final drive.File? file = await _loadGoogleDriveBackupFile(api);
+        if (!mounted || !pageContext.mounted) return;
         if (file?.id == null) {
           messenger.showSnackBar(
             const SnackBar(content: Text('No hay copia en Google Drive.')),
@@ -1118,10 +1564,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           return;
         }
         if (!await _confirmGoogleDriveRestore(pageContext)) return;
+        if (!mounted || !pageContext.mounted) return;
         final Object downloaded = await api.files.get(
           file!.id!,
           downloadOptions: commons.DownloadOptions.fullMedia,
         );
+        if (!mounted || !pageContext.mounted) return;
         if (downloaded is! commons.Media) throw const FormatException();
         final List<int> bytes = <int>[];
         await for (final List<int> chunk in downloaded.stream) {
@@ -1129,30 +1577,72 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         }
         if (bytes.isEmpty) throw const FormatException();
         final _ImportResult result = await _applyBackupJson(utf8.decode(bytes));
+        if (!mounted || !pageContext.mounted) return;
         await _saveGoogleDriveBackupMetadata(file, account);
-        if (!mounted) return;
+        if (!mounted || !pageContext.mounted) return;
         _showImportResult(messenger, result, fileName: 'Google Drive');
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Copia restaurada desde Google Drive.')),
+        unawaited(
+          _logSafeAnalyticsEvent(
+            name: 'drive_backup_restored',
+            parameters: <String, Object>{
+              'source': 'drive',
+              'status': 'completed',
+            },
+          ),
         );
-        unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_restored', parameters: <String, Object>{'source': 'drive', 'status': 'completed'}));
       });
-    } on StateError {
-      // _withGoogleDriveApi already shows the user-facing message.
-    } on FormatException catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'drive', code: 'invalid_backup', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_restored', parameters: <String, Object>{'source': 'drive', 'status': 'failed', 'error_code': 'invalid_backup'}));
-      if (mounted) {
+    } on FormatException catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'drive',
+          code: 'invalid_backup',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'drive_backup_restored',
+          parameters: <String, Object>{
+            'source': 'drive',
+            'status': 'failed',
+            'error_code': 'invalid_backup',
+          },
+        ),
+      );
+      if (mounted && pageContext.mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('La copia de Google Drive no es válida.')),
+          const SnackBar(
+            content: Text('La copia de Google Drive no es válida.'),
+          ),
         );
       }
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'drive', code: 'drive_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'drive_backup_restored', parameters: <String, Object>{'source': 'drive', 'status': 'failed', 'error_code': 'drive_error'}));
-      if (mounted) {
+    } catch (error, stackTrace) {
+      final String code = _driveOperationCode(error);
+      unawaited(
+        recordSafeError(area: 'drive', code: code, stackTrace: stackTrace),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'drive_backup_restored',
+          parameters: <String, Object>{
+            'source': 'drive',
+            'status': 'failed',
+            'error_code': code,
+          },
+        ),
+      );
+      if (mounted && pageContext.mounted) {
+        if (code == 'auth_required') {
+          setState(() => _googleAccount = null);
+        }
         messenger.showSnackBar(
-          const SnackBar(content: Text('No se pudo restaurar la copia desde Google Drive.')),
+          SnackBar(
+            content: Text(
+              code == 'auth_required'
+                  ? 'Reconecta Google Drive para restaurar la copia.'
+                  : 'No se pudo restaurar copia Drive: $code',
+            ),
+          ),
         );
       }
     } finally {
@@ -1199,16 +1689,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             var migratedMovementMetadata = false;
             final List<Movement> loadedMovements = <Movement>[];
             for (final dynamic raw in decoded) {
-              final Map<String, dynamic> json =
-                  Map<String, dynamic>.from(raw as Map);
+              final Map<String, dynamic> json = Map<String, dynamic>.from(
+                raw as Map,
+              );
               migratedMovementMetadata =
-                  migratedMovementMetadata || _movementJsonNeedsSyncMetadata(json);
+                  migratedMovementMetadata ||
+                  _movementJsonNeedsSyncMetadata(json);
               loadedMovements.add(Movement.fromJson(json));
             }
             final String deviceId = await _localFirebaseDeviceId();
             migratedMovementMetadata =
                 _normalizeMovementSyncMetadata(loadedMovements, deviceId) ||
-                    migratedMovementMetadata;
+                migratedMovementMetadata;
             _movements
               ..clear()
               ..addAll(loadedMovements);
@@ -1248,7 +1740,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         } catch (_) {}
       }
 
-      _sellFeePercent = prefs.getDouble(_sellFeePercentKey) ??
+      _sellFeePercent =
+          prefs.getDouble(_sellFeePercentKey) ??
           FinancialEngine.defaultExitFeePercent;
       final String? savedVisualMode = prefs.getString(_themeModeKey);
       if (savedVisualMode != null) {
@@ -1282,13 +1775,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         prefs.getString(_priceRefreshForegroundModeKey),
       );
       _googleDriveBackupFileId = prefs.getString(_googleDriveBackupFileIdKey);
-      final int? driveBackupUpdatedAt =
-          prefs.getInt(_googleDriveBackupUpdatedAtKey);
+      final int? driveBackupUpdatedAt = prefs.getInt(
+        _googleDriveBackupUpdatedAtKey,
+      );
       _googleDriveBackupUpdatedAt = driveBackupUpdatedAt == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(driveBackupUpdatedAt);
-      _googleDriveBackupAccountEmail =
-          prefs.getString(_googleDriveBackupAccountEmailKey);
+      _googleDriveBackupAccountEmail = prefs.getString(
+        _googleDriveBackupAccountEmailKey,
+      );
       await _loadPriceAlertSettings(prefs);
 
       if (mounted) setState(() => _bootstrapped = true);
@@ -1326,8 +1821,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   String _priceModeFor(String coin) =>
       _priceModes[coin] == PriceService.manualMode
-          ? PriceService.manualMode
-          : PriceService.automaticMode;
+      ? PriceService.manualMode
+      : PriceService.automaticMode;
 
   String _priceModeLabel(String coin) =>
       _priceModeFor(coin) == PriceService.manualMode ? 'Manual' : 'Automático';
@@ -1548,10 +2043,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
               final SharedPreferences prefs =
                   await SharedPreferences.getInstance();
-              await _priceAlertService.setRecoveryThresholdPoints(
-                prefs,
-                value,
-              );
+              await _priceAlertService.setRecoveryThresholdPoints(prefs, value);
               await _loadPriceAlertSettings(prefs);
               if (mounted) setState(() {});
               if (dialogContext.mounted) Navigator.of(dialogContext).pop();
@@ -1633,9 +2125,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     });
 
     if (pageContext.mounted) {
-      ScaffoldMessenger.of(pageContext).showSnackBar(
-        const SnackBar(content: Text('Precios base reiniciados')),
-      );
+      ScaffoldMessenger.of(
+        pageContext,
+      ).showSnackBar(const SnackBar(content: Text('Precios base reiniciados')));
     }
   }
 
@@ -1659,9 +2151,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     if (pageContext.mounted) {
       ScaffoldMessenger.of(pageContext).showSnackBar(
-        const SnackBar(
-          content: Text('Base de recuperación reiniciada'),
-        ),
+        const SnackBar(content: Text('Base de recuperación reiniciada')),
       );
     }
   }
@@ -1694,14 +2184,35 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Precios actualizados')),
       );
-      unawaited(_logSafeAnalyticsEvent(name: 'price_refresh', parameters: <String, Object>{'status': 'completed'}));
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'price_refresh', code: 'price_refresh_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'price_refresh', parameters: <String, Object>{'status': 'failed', 'error_code': 'price_refresh_error'}));
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'price_refresh',
+          parameters: <String, Object>{'status': 'completed'},
+        ),
+      );
+    } catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'price_refresh',
+          code: 'price_refresh_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'price_refresh',
+          parameters: <String, Object>{
+            'status': 'failed',
+            'error_code': 'price_refresh_error',
+          },
+        ),
+      );
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(
-            content: Text('No se pudieron actualizar los precios. Revisa tu conexión e inténtalo de nuevo.'),
+            content: Text(
+              'No se pudieron actualizar los precios. Revisa tu conexión e inténtalo de nuevo.',
+            ),
           ),
         );
       }
@@ -2114,10 +2625,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               _priceModes[coin] = PriceService.manualMode;
               _manualPriceUpdatedAtMs[coin] = updatedAtMs;
               final PriceCache priceCache = await _priceService
-                  .saveManualPrices(
-                    prefs,
-                    _currentPrices,
-                  );
+                  .saveManualPrices(prefs, _currentPrices);
               await _priceService.savePriceModes(prefs, _priceModes);
               await _priceService.saveManualPriceUpdatedAtMs(
                 prefs,
@@ -2154,12 +2662,19 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       ocrWarnings.add('Moneda no soportada; selecciona la moneda correcta.');
     }
     final bool useOcr = existing == null && ocrCandidate != null;
-    unawaited(_logSafeAnalyticsEvent(name: 'movement_form_opened', parameters: <String, Object>{'source': useOcr ? 'ocr' : 'manual'}));
+    unawaited(
+      _logSafeAnalyticsEvent(
+        name: 'movement_form_opened',
+        parameters: <String, Object>{'source': useOcr ? 'ocr' : 'manual'},
+      ),
+    );
     MovementType selectedType =
         existing?.type ?? ocrCandidate?.type ?? MovementType.buy;
-    String selectedCoin = existing?.coin ??
+    String selectedCoin =
+        existing?.coin ??
         (ocrCoin != null && _coins.contains(ocrCoin) ? ocrCoin : _coins.first);
-    DateTime selectedDate = existing?.date ?? ocrCandidate?.date ?? DateTime.now();
+    DateTime selectedDate =
+        existing?.date ?? ocrCandidate?.date ?? DateTime.now();
     final bool ocrWalletExternal =
         useOcr && ocrCandidate.rawText.toLowerCase().contains('wallet externa');
 
@@ -2167,18 +2682,20 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       text: existing != null
           ? compact(existing.quantity)
           : ocrCandidate?.quantity == null
-              ? ''
-              : compact(ocrCandidate!.quantity!),
+          ? ''
+          : compact(ocrCandidate!.quantity!),
     );
     final TextEditingController priceController = TextEditingController(
       text: existing != null
           ? compact(existing.unitPrice)
           : ocrCandidate?.unitPrice == null
-              ? ''
-              : compact(ocrCandidate!.unitPrice!),
+          ? ''
+          : compact(ocrCandidate!.unitPrice!),
     );
     final TextEditingController feeController = TextEditingController(
-      text: existing != null ? compact(existing.fee) : compact(ocrCandidate?.fee ?? 0),
+      text: existing != null
+          ? compact(existing.fee)
+          : compact(ocrCandidate?.fee ?? 0),
     );
     final TextEditingController sourceController = TextEditingController(
       text: existing?.source ?? ocrCandidate?.source ?? '',
@@ -2231,7 +2748,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 6),
-                          ...ocrWarnings.map((String warning) => Text('• $warning')),
+                          ...ocrWarnings.map(
+                            (String warning) => Text('• $warning'),
+                          ),
                           const SizedBox(height: 12),
                         ],
                         DropdownButtonFormField<MovementType>(
@@ -2285,7 +2804,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                               onPressed: () async {
                                 final DateTime? picked = await showDatePicker(
                                   context: context,
-                                  initialDate: selectedDate.isAfter(DateTime.now())
+                                  initialDate:
+                                      selectedDate.isAfter(DateTime.now())
                                       ? DateTime.now()
                                       : selectedDate,
                                   firstDate: DateTime(2010),
@@ -2310,7 +2830,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                               onPressed: () async {
                                 final TimeOfDay? picked = await showTimePicker(
                                   context: context,
-                                  initialTime: TimeOfDay.fromDateTime(selectedDate),
+                                  initialTime: TimeOfDay.fromDateTime(
+                                    selectedDate,
+                                  ),
                                 );
                                 if (picked != null) {
                                   setModalState(
@@ -2415,17 +2937,28 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                               }
 
                               if (unitPrice == null || unitPrice <= 0) {
-                                _snack(pageContext, 'Pon un precio mayor a cero');
+                                _snack(
+                                  pageContext,
+                                  'Pon un precio mayor a cero',
+                                );
                                 return;
                               }
 
                               if (quantity * unitPrice <= 0) {
-                                _snack(pageContext, 'El total MXN debe ser mayor a cero');
+                                _snack(
+                                  pageContext,
+                                  'El total MXN debe ser mayor a cero',
+                                );
                                 return;
                               }
 
-                              if (selectedDate.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
-                                _snack(pageContext, 'La fecha no puede estar en el futuro');
+                              if (selectedDate.isAfter(
+                                DateTime.now().add(const Duration(minutes: 1)),
+                              )) {
+                                _snack(
+                                  pageContext,
+                                  'La fecha no puede estar en el futuro',
+                                );
                                 return;
                               }
 
@@ -2439,20 +2972,20 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
                               final Movement movement =
                                   await _movementWithCurrentSyncMetadata(
-                                Movement(
-                                  type: selectedType,
-                                  coin: selectedCoin,
-                                  date: selectedDate,
-                                  quantity: quantity,
-                                  unitPrice: unitPrice,
-                                  fee: fee,
-                                  source: sourceController.text.trim(),
-                                  wallet: walletController.text.trim(),
-                                  network: networkController.text.trim(),
-                                  note: noteController.text.trim(),
-                                ),
-                                existing: existing,
-                              );
+                                    Movement(
+                                      type: selectedType,
+                                      coin: selectedCoin,
+                                      date: selectedDate,
+                                      quantity: quantity,
+                                      unitPrice: unitPrice,
+                                      fee: fee,
+                                      source: sourceController.text.trim(),
+                                      wallet: walletController.text.trim(),
+                                      network: networkController.text.trim(),
+                                      note: noteController.text.trim(),
+                                    ),
+                                    existing: existing,
+                                  );
 
                               if (_wouldCreateInvalidPosition(
                                 movement,
@@ -2469,24 +3002,30 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                 movement,
                                 replaceIndex: existing == null ? null : index,
                               )) {
-                                final bool? continueAnyway = await showDialog<bool>(
+                                final bool?
+                                continueAnyway = await showDialog<bool>(
                                   context: sheetContext,
-                                  builder: (BuildContext dialogContext) => AlertDialog(
-                                    title: const Text('Posible duplicado'),
-                                    content: const Text(
-                                      'Ya existe un movimiento idéntico. ¿Quieres guardarlo de todos modos?',
-                                    ),
-                                    actions: <Widget>[
-                                      TextButton(
-                                        onPressed: () => Navigator.of(dialogContext).pop(false),
-                                        child: const Text('Revisar'),
+                                  builder: (BuildContext dialogContext) =>
+                                      AlertDialog(
+                                        title: const Text('Posible duplicado'),
+                                        content: const Text(
+                                          'Ya existe un movimiento idéntico. ¿Quieres guardarlo de todos modos?',
+                                        ),
+                                        actions: <Widget>[
+                                          TextButton(
+                                            onPressed: () => Navigator.of(
+                                              dialogContext,
+                                            ).pop(false),
+                                            child: const Text('Revisar'),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () => Navigator.of(
+                                              dialogContext,
+                                            ).pop(true),
+                                            child: const Text('Guardar'),
+                                          ),
+                                        ],
                                       ),
-                                      FilledButton(
-                                        onPressed: () => Navigator.of(dialogContext).pop(true),
-                                        child: const Text('Guardar'),
-                                      ),
-                                    ],
-                                  ),
                                 );
                                 if (continueAnyway != true) return;
                               }
@@ -2504,8 +3043,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
                               final Future<void> saveFuture =
                                   _saveMovementAndMaybeSnapshot(
-                                SnapshotTrigger.movementChange,
-                              );
+                                    SnapshotTrigger.movementChange,
+                                  );
                               unawaited(
                                 _refreshPricesAfterMovement
                                     ? saveFuture.then(
@@ -2513,7 +3052,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                       )
                                     : saveFuture,
                               );
-                              unawaited(_logSafeAnalyticsEvent(name: 'movement_saved', parameters: <String, Object>{'source': useOcr ? 'ocr' : 'manual'}));
+                              unawaited(
+                                _logSafeAnalyticsEvent(
+                                  name: 'movement_saved',
+                                  parameters: <String, Object>{
+                                    'source': useOcr ? 'ocr' : 'manual',
+                                  },
+                                ),
+                              );
                               Navigator.of(sheetContext).pop();
                             },
                             icon: Icon(
@@ -2610,7 +3156,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 children: <Widget>[
                   Text('Promedio = invertido actual / cantidad actual'),
                   SizedBox(height: 6),
-                  Text('P&L no realizado = valor de cartera - invertido actual'),
+                  Text(
+                    'P&L no realizado = valor de cartera - invertido actual',
+                  ),
                   SizedBox(height: 6),
                   Text(
                     'Precio para recuperar = promedio / (1 - comisión de salida)',
@@ -2669,7 +3217,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                           const EmptyState(
                             icon: Icons.photo_library_outlined,
                             title: 'Sin instantáneas',
-                            subtitle: 'Guarda una instantánea de cartera desde '
+                            subtitle:
+                                'Guarda una instantánea de cartera desde '
                                 'Más → Instantáneas.',
                           )
                         else ...<Widget>[
@@ -2693,7 +3242,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                               ),
                               child: Column(
                                 children: <Widget>[
-                                  InfoLine('Fecha', longDate(snapshot.createdAt)),
+                                  InfoLine(
+                                    'Fecha',
+                                    longDate(snapshot.createdAt),
+                                  ),
                                   InfoLine(
                                     'Valor de cartera',
                                     money(snapshot.totalCurrentValue),
@@ -2965,7 +3517,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             'realizedPL': stats[coin]!.realizedPL,
             'feesPaid': stats[coin]!.feesPaid,
             'breakEvenReal': stats[coin]!.breakEvenReal,
-            'breakEvenWithExitFee': stats[coin]!.breakEvenWithExitFee(_sellFeePercent),
+            'breakEvenWithExitFee': stats[coin]!.breakEvenWithExitFee(
+              _sellFeePercent,
+            ),
           },
       ],
     });
@@ -3208,11 +3762,34 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text(successMessage)));
       }
-      unawaited(_logSafeAnalyticsEvent(name: 'export_created', parameters: <String, Object>{'source': 'local', 'status': 'completed'}));
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'export_created',
+          parameters: <String, Object>{
+            'source': 'local',
+            'status': 'completed',
+          },
+        ),
+      );
       return true;
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'export', code: 'export_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'export_created', parameters: <String, Object>{'source': 'local', 'status': 'failed', 'error_code': 'export_error'}));
+    } catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'export',
+          code: 'export_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'export_created',
+          parameters: <String, Object>{
+            'source': 'local',
+            'status': 'failed',
+            'error_code': 'export_error',
+          },
+        ),
+      );
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo exportar el archivo')),
@@ -3316,17 +3893,40 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       bytes: utf8.encode(_buildBackupJson()),
       successMessage: 'Copia de seguridad lista para compartir',
     );
-    unawaited(_logSafeAnalyticsEvent(name: 'backup_created', parameters: <String, Object>{'source': 'local', 'status': exported ? 'completed' : 'failed'}));
+    unawaited(
+      _logSafeAnalyticsEvent(
+        name: 'backup_created',
+        parameters: <String, Object>{
+          'source': 'local',
+          'status': exported ? 'completed' : 'failed',
+        },
+      ),
+    );
     return exported;
   }
 
   bool _isKnownImportMovementType(dynamic value) {
     return <String>{
-      'buy', 'compra', 'comprar', 'sell', 'venta', 'vender', 'transferin',
-      'transfer_in', 'transferenciaentrada', 'transferencia_entrada',
-      'transferencia recibida', 'recibida', 'entrada', 'transferout',
-      'transfer_out', 'transferenciasalida', 'transferencia_salida',
-      'transferencia enviada', 'enviada', 'salida',
+      'buy',
+      'compra',
+      'comprar',
+      'sell',
+      'venta',
+      'vender',
+      'transferin',
+      'transfer_in',
+      'transferenciaentrada',
+      'transferencia_entrada',
+      'transferencia recibida',
+      'recibida',
+      'entrada',
+      'transferout',
+      'transfer_out',
+      'transferenciasalida',
+      'transferencia_salida',
+      'transferencia enviada',
+      'enviada',
+      'salida',
     }.contains(value?.toString().trim().toLowerCase() ?? '');
   }
 
@@ -3342,24 +3942,38 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       hasField = true;
       final dynamic value = json[key];
       if (value == null && key != keys.last) continue;
-      if (value is num || double.tryParse(value?.toString() ?? '') != null) return;
+      if (value is num || double.tryParse(value?.toString() ?? '') != null)
+        return;
       throw FormatException('Movimiento #$number tiene $label no numérico');
     }
-    if (hasField) throw FormatException('Movimiento #$number tiene $label no numérico');
+    if (hasField)
+      throw FormatException('Movimiento #$number tiene $label no numérico');
   }
 
   Map<String, dynamic> _validatedImportMovement(dynamic raw, int index) {
     final int number = index + 1;
-    if (raw is! Map) throw FormatException('Movimiento #$number no es un objeto válido');
+    if (raw is! Map)
+      throw FormatException('Movimiento #$number no es un objeto válido');
     final Map<String, dynamic> json = Map<String, dynamic>.from(raw);
     if (json.containsKey('type') && !_isKnownImportMovementType(json['type'])) {
       throw FormatException('Movimiento #$number tiene tipo desconocido');
     }
     final dynamic coin = json['coin'] ?? json['crypto'];
-    if (coin == null || coin.toString().trim().isEmpty) throw FormatException('Movimiento #$number no tiene moneda');
+    if (coin == null || coin.toString().trim().isEmpty)
+      throw FormatException('Movimiento #$number no tiene moneda');
     _requireImportNumber(json, <String>['quantity'], 'cantidad', number);
-    _requireImportNumber(json, <String>['unitPrice', 'unit_price'], 'precio unitario', number);
-    _requireImportNumber(json, <String>['fee', 'commission'], 'comisión', number);
+    _requireImportNumber(
+      json,
+      <String>['unitPrice', 'unit_price'],
+      'precio unitario',
+      number,
+    );
+    _requireImportNumber(
+      json,
+      <String>['fee', 'commission'],
+      'comisión',
+      number,
+    );
     if (json.containsKey('date') &&
         DateTime.tryParse(json['date']?.toString() ?? '') == null) {
       throw FormatException('Movimiento #$number tiene fecha inválida');
@@ -3369,12 +3983,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   String _importErrorMessage(Object error) =>
       error is FormatException && error.message.isNotEmpty
-          ? error.message
-          : 'Copia de seguridad inválida o incompleta. Revisa el contenido e inténtalo de nuevo.';
+      ? error.message
+      : 'Copia de seguridad inválida o incompleta. Revisa el contenido e inténtalo de nuevo.';
 
   Future<_ImportResult> _applyBackupJson(String rawJson) async {
     final dynamic decoded = jsonDecode(rawJson.trim());
-    if (decoded is! Map) throw const FormatException('La raíz de la copia no es un objeto válido');
+    if (decoded is! Map)
+      throw const FormatException('La raíz de la copia no es un objeto válido');
     final Map<String, dynamic> backup = Map<String, dynamic>.from(decoded);
 
     final dynamic movementsRaw = backup['movements'];
@@ -3383,9 +3998,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final bool hasSnapshots = backup.containsKey('snapshots');
     final dynamic snapshotsRaw = backup['snapshots'];
 
-    if (movementsRaw is! List) throw const FormatException('La copia no contiene movimientos válidos');
-    if (pricesRaw is! Map) throw const FormatException('La copia no contiene precios válidos');
-    if (hasSnapshots && snapshotsRaw is! List) throw const FormatException('Las instantáneas de la copia no son válidas');
+    if (movementsRaw is! List)
+      throw const FormatException('La copia no contiene movimientos válidos');
+    if (pricesRaw is! Map)
+      throw const FormatException('La copia no contiene precios válidos');
+    if (hasSnapshots && snapshotsRaw is! List)
+      throw const FormatException(
+        'Las instantáneas de la copia no son válidas',
+      );
 
     var importedMovementMetadataWarning = false;
     final List<Movement> imported = <Movement>[];
@@ -3395,33 +4015,40 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         i,
       );
       importedMovementMetadataWarning =
-          importedMovementMetadataWarning || _movementJsonNeedsSyncMetadata(json);
+          importedMovementMetadataWarning ||
+          _movementJsonNeedsSyncMetadata(json);
       imported.add(Movement.fromJson(json));
     }
     final String importDeviceId = await _localFirebaseDeviceId();
     importedMovementMetadataWarning =
         _normalizeMovementSyncMetadata(imported, importDeviceId) ||
-            importedMovementMetadataWarning;
+        importedMovementMetadataWarning;
     final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
     final Map<String, String> importedPriceModes = <String, String>{
       for (final String coin in _coins) coin: PriceService.automaticMode,
     };
     final Map<String, int> importedManualUpdatedAt = <String, int>{};
     if (settingsRaw is Map) {
-      final Map<String, dynamic> settings = Map<String, dynamic>.from(settingsRaw);
+      final Map<String, dynamic> settings = Map<String, dynamic>.from(
+        settingsRaw,
+      );
       final dynamic modesRaw = settings['priceModes'];
       if (modesRaw is Map) {
-        final Map<String, dynamic> modesMap = Map<String, dynamic>.from(modesRaw);
+        final Map<String, dynamic> modesMap = Map<String, dynamic>.from(
+          modesRaw,
+        );
         for (final String coin in _coins) {
           importedPriceModes[coin] =
               modesMap[coin]?.toString() == PriceService.manualMode
-                  ? PriceService.manualMode
-                  : PriceService.automaticMode;
+              ? PriceService.manualMode
+              : PriceService.automaticMode;
         }
       }
       final dynamic manualRaw = settings['manualPricesUpdatedAtMs'];
       if (manualRaw is Map) {
-        final Map<String, dynamic> manualMap = Map<String, dynamic>.from(manualRaw);
+        final Map<String, dynamic> manualMap = Map<String, dynamic>.from(
+          manualRaw,
+        );
         for (final String coin in _coins) {
           final dynamic value = manualMap[coin];
           if (value is int) {
@@ -3434,12 +4061,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
     final List<PortfolioSnapshot>? importedSnapshots = hasSnapshots
         ? (snapshotsRaw as List)
-            .map(
-              (dynamic e) => PortfolioSnapshot.fromJson(
-                Map<String, dynamic>.from(e as Map),
-              ),
-            )
-            .toList()
+              .map(
+                (dynamic e) => PortfolioSnapshot.fromJson(
+                  Map<String, dynamic>.from(e as Map),
+                ),
+              )
+              .toList()
         : null;
     final List<String> warnings = <String>[
       if (!hasSnapshots) 'Copia sin instantáneas',
@@ -3496,19 +4123,34 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (importedSnapshots != null) {
       await _saveSnapshots();
     }
-    return _ImportResult(movementCount: imported.length, snapshotCount: importedSnapshots?.length ?? 0, warnings: warnings);
+    return _ImportResult(
+      movementCount: imported.length,
+      snapshotCount: importedSnapshots?.length ?? 0,
+      warnings: warnings,
+    );
   }
 
-  void _showImportResult(ScaffoldMessengerState messenger, _ImportResult result, {String? fileName}) {
+  void _showImportResult(
+    ScaffoldMessengerState messenger,
+    _ImportResult result, {
+    String? fileName,
+  }) {
     final String source = fileName == null ? '' : ': $fileName';
-    final String counts = '${result.movementCount} movimientos, ${result.snapshotCount} instantáneas';
+    final String counts =
+        '${result.movementCount} movimientos, ${result.snapshotCount} instantáneas';
     if (!result.hasWarnings) {
-      messenger.showSnackBar(SnackBar(content: Text('Copia restaurada$source: $counts.')));
+      messenger.showSnackBar(
+        SnackBar(content: Text('Copia restaurada$source: $counts.')),
+      );
       return;
     }
 
     final String warnings = result.warnings.take(5).join(' · ');
-    messenger.showSnackBar(SnackBar(content: Text('Copia restaurada con advertencias: $counts. $warnings')));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Copia restaurada con advertencias: $counts. $warnings'),
+      ),
+    );
   }
 
   Future<void> _importBackup(BuildContext pageContext) async {
@@ -3550,19 +4192,52 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 pageContext,
               );
               try {
-                final _ImportResult result = await _applyBackupJson(controller.text);
+                final _ImportResult result = await _applyBackupJson(
+                  controller.text,
+                );
 
                 if (!mounted) return;
                 navigator.pop();
                 await Future<void>.delayed(Duration.zero);
                 if (!mounted) return;
                 _showImportResult(messenger, result);
-                unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'completed'}));
+                unawaited(
+                  _logSafeAnalyticsEvent(
+                    name: 'backup_restored',
+                    parameters: <String, Object>{
+                      'source': 'local',
+                      'status': 'completed',
+                    },
+                  ),
+                );
               } catch (error, stackTrace) {
-                unawaited(recordSafeError(area: 'import', code: error is FormatException ? 'invalid_backup' : 'import_error', stackTrace: stackTrace));
-                unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'failed', 'error_code': error is FormatException ? 'invalid_backup' : 'import_error'}));
+                unawaited(
+                  recordSafeError(
+                    area: 'import',
+                    code: error is FormatException
+                        ? 'invalid_backup'
+                        : 'import_error',
+                    stackTrace: stackTrace,
+                  ),
+                );
+                unawaited(
+                  _logSafeAnalyticsEvent(
+                    name: 'backup_restored',
+                    parameters: <String, Object>{
+                      'source': 'local',
+                      'status': 'failed',
+                      'error_code': error is FormatException
+                          ? 'invalid_backup'
+                          : 'import_error',
+                    },
+                  ),
+                );
                 messenger.showSnackBar(
-                  SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
+                  SnackBar(
+                    content: Text(
+                      'No se pudo restaurar la copia. ${_importErrorMessage(error)}',
+                    ),
+                  ),
                 );
               }
             },
@@ -3589,17 +4264,48 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw const FormatException();
 
-      final _ImportResult importResult = await _applyBackupJson(utf8.decode(bytes));
+      final _ImportResult importResult = await _applyBackupJson(
+        utf8.decode(bytes),
+      );
       if (!mounted) return;
 
       _showImportResult(messenger, importResult, fileName: file.name);
-      unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'completed'}));
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'backup_restored',
+          parameters: <String, Object>{
+            'source': 'local',
+            'status': 'completed',
+          },
+        ),
+      );
     } catch (error, stackTrace) {
-      unawaited(recordSafeError(area: 'import', code: error is FormatException ? 'invalid_backup' : 'import_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'backup_restored', parameters: <String, Object>{'source': 'local', 'status': 'failed', 'error_code': error is FormatException ? 'invalid_backup' : 'import_error'}));
+      unawaited(
+        recordSafeError(
+          area: 'import',
+          code: error is FormatException ? 'invalid_backup' : 'import_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'backup_restored',
+          parameters: <String, Object>{
+            'source': 'local',
+            'status': 'failed',
+            'error_code': error is FormatException
+                ? 'invalid_backup'
+                : 'import_error',
+          },
+        ),
+      );
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('No se pudo restaurar la copia. ${_importErrorMessage(error)}')),
+          SnackBar(
+            content: Text(
+              'No se pudo restaurar la copia. ${_importErrorMessage(error)}',
+            ),
+          ),
         );
       }
     }
@@ -3682,11 +4388,30 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger.showSnackBar(
         const SnackBar(content: Text('Datos financieros restablecidos')),
       );
-      unawaited(_logSafeAnalyticsEvent(name: 'financial_reset_completed', parameters: <String, Object>{'status': 'completed'}));
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'financial_reset_completed',
+          parameters: <String, Object>{'status': 'completed'},
+        ),
+      );
       return true;
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'reset', code: 'reset_error', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'financial_reset_completed', parameters: <String, Object>{'status': 'failed', 'error_code': 'reset_error'}));
+    } catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'reset',
+          code: 'reset_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'financial_reset_completed',
+          parameters: <String, Object>{
+            'status': 'failed',
+            'error_code': 'reset_error',
+          },
+        ),
+      );
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se pudo restablecer la app')),
@@ -3698,11 +4423,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _resetFinancialData(BuildContext pageContext) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
-    unawaited(_logSafeAnalyticsEvent(name: 'financial_reset_opened', parameters: <String, Object>{'status': 'started'}));
+    unawaited(
+      _logSafeAnalyticsEvent(
+        name: 'financial_reset_opened',
+        parameters: <String, Object>{'status': 'started'},
+      ),
+    );
     await Navigator.of(pageContext).push(
       MaterialPageRoute<void>(
         builder: (BuildContext resetContext) => _FinancialResetScreen(
-          hasCloudState: _firebaseUser != null ||
+          hasCloudState:
+              _firebaseUser != null ||
               _cloudStateUploadedAt != null ||
               _cloudStateDownloadedAt != null,
           onExportBackup: () => _exportBackup(resetContext),
@@ -3720,8 +4451,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   @override
   Widget build(BuildContext context) {
-    final ccmx.CcmxThemeStyle themeStyle =
-        ccmx.CcmxThemeStyle.values.byName(_themeStyle.name);
+    final ccmx.CcmxThemeStyle themeStyle = ccmx.CcmxThemeStyle.values.byName(
+      _themeStyle.name,
+    );
 
     if (!_bootstrapped) {
       return MaterialApp(
@@ -3763,8 +4495,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       debugShowCheckedModeBanner: false,
       title: 'CriptoControlMx',
       themeMode: _visualMode.themeMode,
-      theme: ccmx.CcmxAppTheme.build(style: themeStyle, brightness: Brightness.light),
-      darkTheme: ccmx.CcmxAppTheme.build(style: themeStyle, brightness: Brightness.dark),
+      theme: ccmx.CcmxAppTheme.build(
+        style: themeStyle,
+        brightness: Brightness.light,
+      ),
+      darkTheme: ccmx.CcmxAppTheme.build(
+        style: themeStyle,
+        brightness: Brightness.dark,
+      ),
       home: Builder(
         builder: (BuildContext pageContext) {
           void openMorePage(
@@ -3774,16 +4512,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             Navigator.of(pageContext).push(
               MaterialPageRoute<void>(
                 builder: (_) => StatefulBuilder(
-                  builder: (
-                    BuildContext routeContext,
-                    void Function(void Function()) routeSetState,
-                  ) {
-                    void refresh() => routeSetState(() {});
-                    return Scaffold(
-                      appBar: AppBar(title: Text(title)),
-                      body: childBuilder(refresh),
-                    );
-                  },
+                  builder:
+                      (
+                        BuildContext routeContext,
+                        void Function(void Function()) routeSetState,
+                      ) {
+                        void refresh() => routeSetState(() {});
+                        return Scaffold(
+                          appBar: AppBar(title: Text(title)),
+                          body: childBuilder(refresh),
+                        );
+                      },
                 ),
               ),
             );
@@ -3862,7 +4601,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               refresh?.call();
             },
             onRefreshPricesOnOpenChanged: _changeRefreshPricesOnOpen,
-            onRefreshPricesAfterMovementChanged: _changeRefreshPricesAfterMovement,
+            onRefreshPricesAfterMovementChanged:
+                _changeRefreshPricesAfterMovement,
             onPriceRefreshForegroundModeChanged:
                 _changePriceRefreshForegroundMode,
             onEditSellFee: () => _showSellFeeDialog(pageContext),
@@ -3872,12 +4612,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 _automaticLocalAlertsIntervalMinutes,
             notificationsAllowed: _notificationsAllowed,
             onAutomaticLocalAlertsChanged: (bool enabled) {
-              _toggleAutomaticLocalAlerts(pageContext, enabled)
-                  .then((_) => refresh?.call());
+              _toggleAutomaticLocalAlerts(
+                pageContext,
+                enabled,
+              ).then((_) => refresh?.call());
             },
             onAutomaticLocalAlertIntervalChanged: (int minutes) {
-              _changeAutomaticLocalAlertInterval(minutes)
-                  .then((_) => refresh?.call());
+              _changeAutomaticLocalAlertInterval(
+                minutes,
+              ).then((_) => refresh?.call());
             },
             onSaveSnapshot: () {
               _saveSnapshot(pageContext).then((_) => refresh?.call());
@@ -3916,12 +4659,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onRefreshPrices: () => _refreshPricesNow(pageContext),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
-              onViewSnapshotEvolution: () =>
-                  openMorePage(
-                    'Gráficas',
-                    (VoidCallback refresh) =>
-                        buildChartsTab(refresh: refresh),
-                  ),
+              onViewSnapshotEvolution: () => openMorePage(
+                'Gráficas',
+                (VoidCallback refresh) => buildChartsTab(refresh: refresh),
+              ),
             ),
             CoinsTab(
               coins: _coins,
@@ -3977,8 +4718,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   .where((Movement movement) => movement.id.trim().isNotEmpty)
                   .length,
               snapshotCount: _snapshots.length,
-              latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first.createdAt,
-              activeCoins: stats.values.where((CoinStats s) => s.quantity > 0).length,
+              latestSnapshot: _snapshots.isEmpty
+                  ? null
+                  : _snapshots.first.createdAt,
+              activeCoins: stats.values
+                  .where((CoinStats s) => s.quantity > 0)
+                  .length,
               financialErrors: _financialDiagnostics(),
               snapshotAutomationMode: _snapshotAutomationMode,
               snapshotRetention: _snapshotRetention,
@@ -3990,7 +4735,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   .where((String coin) => (_currentPrices[coin] ?? 0.0) <= 0.0)
                   .toList(),
               manualPriceCoins: _coins
-                  .where((String coin) => _priceModeFor(coin) == PriceService.manualMode)
+                  .where(
+                    (String coin) =>
+                        _priceModeFor(coin) == PriceService.manualMode,
+                  )
                   .toList(),
               refreshPricesOnOpen: _refreshPricesOnOpen,
               refreshPricesAfterMovement: _refreshPricesAfterMovement,
@@ -4006,6 +4754,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               firebaseAuthDisplayName: _firebaseUser?.displayName,
               firebaseAuthUid: _firebaseUser?.uid,
               cloudProfileStatus: _cloudProfileStatus,
+              isCloudProfilePreparing: _isCloudProfilePreparing,
               hasLocalFirebaseDeviceId: _firebaseDeviceId != null,
               cloudStateUploadedAt: _cloudStateUploadedAt,
               cloudStateDownloadedAt: _cloudStateDownloadedAt,
@@ -4058,7 +4807,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onExportSnapshotsCsv: () => _exportSnapshotsCsv(pageContext),
               onExportMovementsJson: () => _exportMovementsJson(pageContext),
               onExportSnapshotsJson: () => _exportSnapshotsJson(pageContext),
-              onExportPortfolioSummaryJson: () => _exportPortfolioSummaryJson(pageContext),
+              onExportPortfolioSummaryJson: () =>
+                  _exportPortfolioSummaryJson(pageContext),
               onExportXlsx: () => _exportXlsx(pageContext),
               onExportPdf: () => _exportPdf(pageContext),
               onExportBackup: () {
@@ -4069,6 +4819,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onSignInFirebaseWithGoogle: () =>
                   _signInFirebaseWithGoogle(pageContext),
               onSignOutFirebase: () => _signOutFirebase(pageContext),
+              onPrepareCloudProfile: () => _retryCloudProfile(pageContext),
               onUploadFinancialStateToFirebase: () =>
                   _uploadFinancialStateToFirebase(pageContext),
               onDownloadFinancialStateFromFirebase: () =>
@@ -4387,7 +5138,8 @@ class SummaryTab extends StatelessWidget {
           ],
         ),
         _CommandSection(
-          title: 'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
+          title:
+              'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
           children: _buildVisiblePositionChildren(
             active: active,
             visibleActive: visibleActive,
@@ -4461,7 +5213,6 @@ class LatestSnapshotCard extends StatelessWidget {
   }
 }
 
-
 class CoinLogo extends StatelessWidget {
   final String coin;
   final double size;
@@ -4505,14 +5256,10 @@ class CoinLogo extends StatelessWidget {
                 width: size * 0.72,
                 height: size * 0.72,
                 fit: BoxFit.contain,
-                placeholderBuilder: (_) => _CoinLogoFallback(
-                  coin: normalized,
-                  size: size,
-                ),
-                errorBuilder: (_, _, _) => _CoinLogoFallback(
-                  coin: normalized,
-                  size: size,
-                ),
+                placeholderBuilder: (_) =>
+                    _CoinLogoFallback(coin: normalized, size: size),
+                errorBuilder: (_, _, _) =>
+                    _CoinLogoFallback(coin: normalized, size: size),
               ),
             )
           : _CoinLogoFallback(coin: normalized, size: size),
@@ -4578,8 +5325,9 @@ class CleanCoinCard extends StatelessWidget {
                     children: <Widget>[
                       Text(
                         money(stats.currentValue),
-                        style: Theme.of(context).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                       Text(
                         hasPrice
@@ -4605,7 +5353,11 @@ class CleanCoinCard extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: <Widget>[
-                MiniMetric(label: 'Resultado', value: money(stats.unrealizedPL), color: pnlColor(stats.unrealizedPL)),
+                MiniMetric(
+                  label: 'Resultado',
+                  value: money(stats.unrealizedPL),
+                  color: pnlColor(stats.unrealizedPL),
+                ),
                 MiniMetric(label: 'Falta', value: distance),
                 MiniMetric(label: 'Promedio', value: money(stats.avgPrice)),
               ],
@@ -4815,10 +5567,30 @@ class _MovementsTabState extends State<MovementsTab> {
 
       if (!mounted) return;
       _showOcrPreview(recognizedText.text);
-      unawaited(_logSafeAnalyticsEvent(name: 'ocr_result', parameters: <String, Object>{'source': 'ocr', 'status': 'completed'}));
-    } catch (_, StackTrace stackTrace) {
-      unawaited(recordSafeError(area: 'ocr', code: 'ocr_failed', stackTrace: stackTrace));
-      unawaited(_logSafeAnalyticsEvent(name: 'ocr_result', parameters: <String, Object>{'source': 'ocr', 'status': 'failed', 'error_code': 'ocr_failed'}));
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'ocr_result',
+          parameters: <String, Object>{'source': 'ocr', 'status': 'completed'},
+        ),
+      );
+    } catch (_, stackTrace) {
+      unawaited(
+        recordSafeError(
+          area: 'ocr',
+          code: 'ocr_failed',
+          stackTrace: stackTrace,
+        ),
+      );
+      unawaited(
+        _logSafeAnalyticsEvent(
+          name: 'ocr_result',
+          parameters: <String, Object>{
+            'source': 'ocr',
+            'status': 'failed',
+            'error_code': 'ocr_failed',
+          },
+        ),
+      );
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('No se pudo leer la captura.')),
@@ -4869,8 +5641,12 @@ class _MovementsTabState extends State<MovementsTab> {
     final String value = _foldOcrText(rawText).replaceAll(RegExp(r'\s+'), ' ');
     int score = 0;
     if (RegExp(r'\bbitso\b').hasMatch(value)) score += 2;
-    if (RegExp(r'\b(buy|sell|deposit|receive|withdrawal|withdraw|send)\b').hasMatch(value)) score++;
-    if (value.contains('monto gastado') || value.contains('monto recibido')) score++;
+    if (RegExp(
+      r'\b(buy|sell|deposit|receive|withdrawal|withdraw|send)\b',
+    ).hasMatch(value))
+      score++;
+    if (value.contains('monto gastado') || value.contains('monto recibido'))
+      score++;
     if (value.contains('tipo de cambio')) score++;
     if (value.contains('comision')) score++;
     if (RegExp(r'\bdate\b').hasMatch(value)) score++;
@@ -4957,10 +5733,10 @@ class _MovementsTabState extends State<MovementsTab> {
       final RegExpMatch? match = cryptoAmount.firstMatch(line);
       if (match == null) continue;
       final String previous = i == 0 ? '' : _foldOcrText(lines[i - 1]);
-      final bool isFeeLine = foldedLine.contains('comision') ||
-          previous.contains('comision');
-      final bool isRateLine = foldedLine.contains('tipo de cambio') ||
-          foldedLine.contains('=');
+      final bool isFeeLine =
+          foldedLine.contains('comision') || previous.contains('comision');
+      final bool isRateLine =
+          foldedLine.contains('tipo de cambio') || foldedLine.contains('=');
       final double? value = parseDecimal(match.group(1) ?? '');
       final String matchedCoin = (match.group(2) ?? '').toUpperCase();
       if (isFeeLine) {
@@ -5022,20 +5798,25 @@ class _MovementsTabState extends State<MovementsTab> {
     final double? quantity = correctedGrossQuantity == null
         ? null
         : shouldSuggestNetQuantity
-            ? correctedGrossQuantity! - cryptoFee!
-            : correctedGrossQuantity;
+        ? correctedGrossQuantity! - cryptoFee!
+        : correctedGrossQuantity;
     final DateTime date = _parseBitsoDate(lower) ?? DateTime.now();
 
     if (coin == null) addWarning('Moneda no detectada.');
     if (type == null) addWarning('Tipo no detectado.');
-    if (quantity == null || quantity <= 0) addWarning('Cantidad cripto no detectada.');
+    if (quantity == null || quantity <= 0)
+      addWarning('Cantidad cripto no detectada.');
     if (amountMxn == null) addWarning('Monto MXN no detectado.');
     if (unitPrice == null) addWarning('Tipo de cambio no detectado.');
     if (quantityWasCorrected) {
-      addWarning('Cantidad cripto corregida por OCR; revisa el decimal antes de guardar.');
+      addWarning(
+        'Cantidad cripto corregida por OCR; revisa el decimal antes de guardar.',
+      );
     }
     if (hasCryptoFee) {
-      addWarning('Comisión detectada en cripto; revisa cantidad neta antes de guardar.');
+      addWarning(
+        'Comisión detectada en cripto; revisa cantidad neta antes de guardar.',
+      );
     }
 
     return _OcrMovementCandidate(
@@ -5049,8 +5830,8 @@ class _MovementsTabState extends State<MovementsTab> {
       source: 'Bitso',
       note: hasCryptoFee
           ? shouldSuggestNetQuantity
-              ? 'OCR / captura Bitso · Comisión Bitso ${compact(cryptoFee!)} $coin descontada en cripto.'
-              : 'OCR / captura Bitso · Comisión Bitso ${compact(cryptoFee!)} $coin detectada en cripto.'
+                ? 'OCR / captura Bitso · Comisión Bitso ${compact(cryptoFee!)} $coin descontada en cripto.'
+                : 'OCR / captura Bitso · Comisión Bitso ${compact(cryptoFee!)} $coin detectada en cripto.'
           : 'OCR / captura Bitso',
       warnings: warnings,
       rawText: rawText,
@@ -5107,6 +5888,7 @@ class _MovementsTabState extends State<MovementsTab> {
     void addWarning(String warning) {
       if (!warnings.contains(warning)) warnings.add(warning);
     }
+
     double? parseNumber(String raw) {
       String value = raw.replaceAll(RegExp(r'[^0-9,.-]'), '');
       final int comma = value.lastIndexOf(',');
@@ -5142,7 +5924,9 @@ class _MovementsTabState extends State<MovementsTab> {
     if (hasBuy && hasSell) {
       addWarning('Tipo detectado con baja confianza.');
       final int buyIndex = lower.indexOf(RegExp(r'compr|compra'));
-      final int sellIndex = lower.indexOf(RegExp(r'vendi|venta|recibiste por venta'));
+      final int sellIndex = lower.indexOf(
+        RegExp(r'vendi|venta|recibiste por venta'),
+      );
       if (buyIndex >= 0 && sellIndex >= 0) {
         type = buyIndex < sellIndex ? MovementType.buy : MovementType.sell;
       }
@@ -5183,7 +5967,9 @@ class _MovementsTabState extends State<MovementsTab> {
       'sol': 'SOL',
       'atom': 'ATOM',
     };
-    if (RegExp(r'\b(eurc|musd|meli\s*dolar|melidolar|eurocoin)\b').hasMatch(lower)) {
+    if (RegExp(
+      r'\b(eurc|musd|meli\s*dolar|melidolar|eurocoin)\b',
+    ).hasMatch(lower)) {
       addWarning('Moneda detectada no soportada por OCR.');
     }
     String? coin;
@@ -5209,17 +5995,36 @@ class _MovementsTabState extends State<MovementsTab> {
           }
         }
       }
-      addQuantity(RegExp('(?:cantidad|cripto|recibiste|compraste|vendiste)[^\\d\$]{0,24}(${number.pattern})\\s*(?:$c)', caseSensitive: false));
-      addQuantity(RegExp('(?:^|[^\\\$\\d])(${number.pattern})\\s*(?:$c)', caseSensitive: false));
-      for (final RegExpMatch match in RegExp('(?:$c)\\s*(${number.pattern})', caseSensitive: false).allMatches(lower)) {
-        final String tail = lower.substring(match.end, math.min(lower.length, match.end + 8));
+
+      addQuantity(
+        RegExp(
+          '(?:cantidad|cripto|recibiste|compraste|vendiste)[^\\d\$]{0,24}(${number.pattern})\\s*(?:$c)',
+          caseSensitive: false,
+        ),
+      );
+      addQuantity(
+        RegExp(
+          '(?:^|[^\\\$\\d])(${number.pattern})\\s*(?:$c)',
+          caseSensitive: false,
+        ),
+      );
+      for (final RegExpMatch match in RegExp(
+        '(?:$c)\\s*(${number.pattern})',
+        caseSensitive: false,
+      ).allMatches(lower)) {
+        final String tail = lower.substring(
+          match.end,
+          math.min(lower.length, match.end + 8),
+        );
         final double? value = parseNumber(match.group(1) ?? '');
         if (value != null && value > 0 && !tail.contains('mxn')) {
           quantityOptions.add(value);
         }
       }
       quantityOptions.sort((double a, double b) {
-        final int decimalCompare = b.toString().length.compareTo(a.toString().length);
+        final int decimalCompare = b.toString().length.compareTo(
+          a.toString().length,
+        );
         return decimalCompare != 0 ? decimalCompare : a.compareTo(b);
       });
       quantity = quantityOptions.isEmpty ? null : quantityOptions.first;
@@ -5228,7 +6033,10 @@ class _MovementsTabState extends State<MovementsTab> {
 
     bool hasPercentContext(String source, int start, int end) {
       final String before = source.substring(math.max(0, start - 4), start);
-      final String after = source.substring(end, math.min(source.length, end + 4));
+      final String after = source.substring(
+        end,
+        math.min(source.length, end + 4),
+      );
       return before.contains('%') || after.contains('%');
     }
 
@@ -5240,7 +6048,9 @@ class _MovementsTabState extends State<MovementsTab> {
     final List<double> realMoneyAmounts = <double>[];
     void addMoneyAmount(double? value) {
       if (value == null || value <= 0 || value < 0.01) return;
-      if (!realMoneyAmounts.any((double seen) => (seen - value).abs() < 0.005)) {
+      if (!realMoneyAmounts.any(
+        (double seen) => (seen - value).abs() < 0.005,
+      )) {
         realMoneyAmounts.add(value);
       }
     }
@@ -5266,7 +6076,10 @@ class _MovementsTabState extends State<MovementsTab> {
       return parseNumber(bestMatch.group(bestGroup) ?? '');
     }
 
-    double? firstMoneyAfterLabel(RegExp label, {List<RegExp> stopLabels = const <RegExp>[]}) {
+    double? firstMoneyAfterLabel(
+      RegExp label, {
+      List<RegExp> stopLabels = const <RegExp>[],
+    }) {
       for (final RegExpMatch labelMatch in label.allMatches(lower)) {
         final int end = math.min(lower.length, labelMatch.end + 140);
         String segment = lower.substring(labelMatch.end, end);
@@ -5286,24 +6099,38 @@ class _MovementsTabState extends State<MovementsTab> {
 
     for (final RegExpMatch match in moneyWithSymbol.allMatches(lower)) {
       if (hasPercentContext(lower, match.start, match.end)) continue;
-      final String before = lower.substring(math.max(0, match.start - 32), match.start);
-      if (RegExp(r'(comision|cargo|fee|costo de servicio|precio|cotizacion)').hasMatch(before)) {
+      final String before = lower.substring(
+        math.max(0, match.start - 32),
+        match.start,
+      );
+      if (RegExp(
+        r'(comision|cargo|fee|costo de servicio|precio|cotizacion)',
+      ).hasMatch(before)) {
         continue;
       }
       addMoneyAmount(parseNumber(match.group(1) ?? ''));
     }
     for (final RegExpMatch match in moneyWithCurrency.allMatches(lower)) {
       if (hasPercentContext(lower, match.start, match.end)) continue;
-      final String before = lower.substring(math.max(0, match.start - 32), match.start);
-      if (RegExp(r'(comision|cargo|fee|costo de servicio|precio|cotizacion)').hasMatch(before)) {
+      final String before = lower.substring(
+        math.max(0, match.start - 32),
+        match.start,
+      );
+      if (RegExp(
+        r'(comision|cargo|fee|costo de servicio|precio|cotizacion)',
+      ).hasMatch(before)) {
         continue;
       }
       addMoneyAmount(parseNumber(match.group(1) ?? ''));
     }
 
-    final RegExp amountLabel = RegExp(r'\b(monto|pagaste|recibiste|equivalencia)\b');
+    final RegExp amountLabel = RegExp(
+      r'\b(monto|pagaste|recibiste|equivalencia)\b',
+    );
     final RegExp totalLabel = RegExp(r'\btotal(?: pagado)?\b');
-    final RegExp feeLabel = RegExp(r'\b(comision(?: de compra| mercado pago)?|cargo|fee|costo de servicio)\b');
+    final RegExp feeLabel = RegExp(
+      r'\b(comision(?: de compra| mercado pago)?|cargo|fee|costo de servicio)\b',
+    );
     final RegExp priceLabel = RegExp(r'\b(precio|cotizacion|valor de 1)\b');
     final double? explicitAmount = firstMoneyAfterLabel(
       amountLabel,
@@ -5335,12 +6162,13 @@ class _MovementsTabState extends State<MovementsTab> {
     final String coinTerms = coin == null
         ? coins.keys.map(RegExp.escape).join('|')
         : coins.entries
-            .where((MapEntry<String, String> entry) => entry.value == coin)
-            .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
-            .join('|');
+              .where((MapEntry<String, String> entry) => entry.value == coin)
+              .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
+              .join('|');
     double? unitPrice;
     if (coin != null) {
-      unitPrice = firstGroup(
+      unitPrice =
+          firstGroup(
             RegExp(
               '(?:\\b$coin\\b|$coinTerms)\\s+1\\b[^\\d\$]{0,12}\\\$\\s*(${number.pattern})',
               caseSensitive: false,
@@ -5353,7 +6181,8 @@ class _MovementsTabState extends State<MovementsTab> {
             ),
           );
     }
-    unitPrice ??= firstGroup(
+    unitPrice ??=
+        firstGroup(
           RegExp(
             '(?:precio(?: de (?:compra|venta))?|precio por|cotizacion|valor de 1 (?:$coinTerms))[^\\d\$]{0,36}\\\$\\s*(${number.pattern})',
             caseSensitive: false,
@@ -5367,13 +6196,18 @@ class _MovementsTabState extends State<MovementsTab> {
         );
     if (unitPrice != null && unitPrice <= 0) unitPrice = null;
     bool unitPriceWasDerived = false;
-    final double? derivedUnitPrice = amountMxn != null && quantity != null && quantity > 0
+    final double? derivedUnitPrice =
+        amountMxn != null && quantity != null && quantity > 0
         ? amountMxn / quantity
         : null;
     if (unitPrice != null && derivedUnitPrice != null) {
-      final double delta = (unitPrice - derivedUnitPrice).abs() / math.max(unitPrice, derivedUnitPrice);
+      final double delta =
+          (unitPrice - derivedUnitPrice).abs() /
+          math.max(unitPrice, derivedUnitPrice);
       if (unitPrice > 1.0000001 && delta > 0.35) {
-        addWarning('Precio detectado no coincide con monto/cantidad; revisa antes de guardar.');
+        addWarning(
+          'Precio detectado no coincide con monto/cantidad; revisa antes de guardar.',
+        );
       }
     } else if (unitPrice == null && derivedUnitPrice != null) {
       unitPrice = derivedUnitPrice;
@@ -5407,11 +6241,30 @@ class _MovementsTabState extends State<MovementsTab> {
       );
     } else {
       const Map<String, int> months = <String, int>{
-        'ene': 1, 'enero': 1, 'feb': 2, 'febrero': 2, 'mar': 3,
-        'marzo': 3, 'abr': 4, 'abril': 4, 'may': 5, 'mayo': 5,
-        'jun': 6, 'junio': 6, 'jul': 7, 'julio': 7, 'ago': 8,
-        'agosto': 8, 'sep': 9, 'septiembre': 9, 'setiembre': 9, 'oct': 10,
-        'octubre': 10, 'nov': 11, 'noviembre': 11, 'dic': 12,
+        'ene': 1,
+        'enero': 1,
+        'feb': 2,
+        'febrero': 2,
+        'mar': 3,
+        'marzo': 3,
+        'abr': 4,
+        'abril': 4,
+        'may': 5,
+        'mayo': 5,
+        'jun': 6,
+        'junio': 6,
+        'jul': 7,
+        'julio': 7,
+        'ago': 8,
+        'agosto': 8,
+        'sep': 9,
+        'septiembre': 9,
+        'setiembre': 9,
+        'oct': 10,
+        'octubre': 10,
+        'nov': 11,
+        'noviembre': 11,
+        'dic': 12,
         'diciembre': 12,
       };
       final RegExpMatch? namedDate = RegExp(
@@ -5453,8 +6306,8 @@ class _MovementsTabState extends State<MovementsTab> {
       source: looksLikeMercadoPago ? 'Mercado Pago' : '',
       note: looksLikeMercadoPago
           ? hasReceive && lower.contains('wallet externa')
-              ? 'OCR / captura Mercado Pago · Recepción desde Wallet externa'
-              : 'OCR / captura Mercado Pago'
+                ? 'OCR / captura Mercado Pago · Recepción desde Wallet externa'
+                : 'OCR / captura Mercado Pago'
           : 'OCR / captura',
       warnings: warnings,
       rawText: rawText,
@@ -5528,14 +6381,16 @@ class _MovementsTabState extends State<MovementsTab> {
       source: looksLikeBitso
           ? 'Bitso'
           : looksLikeMercadoPago
-              ? 'Mercado Pago'
-              : '',
+          ? 'Mercado Pago'
+          : '',
       note: looksLikeBitso
           ? 'OCR / captura Bitso'
           : looksLikeMercadoPago
-              ? 'OCR / captura Mercado Pago'
-              : 'OCR / captura',
-      warnings: const <String>['Captura manual: completa los datos desde el texto OCR.'],
+          ? 'OCR / captura Mercado Pago'
+          : 'OCR / captura',
+      warnings: const <String>[
+        'Captura manual: completa los datos desde el texto OCR.',
+      ],
       rawText: rawText,
     );
   }
@@ -5566,7 +6421,8 @@ class _MovementsTabState extends State<MovementsTab> {
     final _OcrReadQuality quality = _ocrReadQuality(candidate);
     final bool isWeak = quality == _OcrReadQuality.weak;
     final List<String> visibleWarnings = candidate.warnings.take(6).toList();
-    final int hiddenWarningCount = candidate.warnings.length - visibleWarnings.length;
+    final int hiddenWarningCount =
+        candidate.warnings.length - visibleWarnings.length;
 
     showModalBottomSheet<void>(
       context: context,
@@ -5586,7 +6442,10 @@ class _MovementsTabState extends State<MovementsTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text('Texto detectado', style: Theme.of(sheetContext).textTheme.titleLarge),
+              Text(
+                'Texto detectado',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
               const SizedBox(height: 6),
               Text(
                 _ocrReadTitle(quality),
@@ -5595,21 +6454,39 @@ class _MovementsTabState extends State<MovementsTab> {
               const SizedBox(height: 4),
               Text(_ocrReadCopy(quality)),
               const SizedBox(height: 12),
-              Text('Datos detectados', style: Theme.of(sheetContext).textTheme.titleMedium),
+              Text(
+                'Datos detectados',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               InfoLine('Tipo', _ocrMovementTypeLabel(candidate.type)),
               InfoLine('Moneda', candidate.coin ?? 'No detectada'),
               InfoLine(
                 'Cantidad',
-                candidate.quantity == null ? 'No detectada' : fixed(candidate.quantity!, 8),
+                candidate.quantity == null
+                    ? 'No detectada'
+                    : fixed(candidate.quantity!, 8),
               ),
-              InfoLine('Monto MXN', candidate.amountMxn == null ? 'No detectado' : money(candidate.amountMxn!)),
-              InfoLine('Precio unitario MXN', candidate.unitPrice == null ? 'No detectado' : money(candidate.unitPrice!)),
+              InfoLine(
+                'Monto MXN',
+                candidate.amountMxn == null
+                    ? 'No detectado'
+                    : money(candidate.amountMxn!),
+              ),
+              InfoLine(
+                'Precio unitario MXN',
+                candidate.unitPrice == null
+                    ? 'No detectado'
+                    : money(candidate.unitPrice!),
+              ),
               InfoLine('Comisión MXN', money(candidate.fee)),
               InfoLine('Fecha', shortDate(candidate.date)),
               InfoLine('Plataforma', candidate.source),
               const SizedBox(height: 16),
-              Text('Texto OCR', style: Theme.of(sheetContext).textTheme.titleMedium),
+              Text(
+                'Texto OCR',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
@@ -5623,12 +6500,17 @@ class _MovementsTabState extends State<MovementsTab> {
                 ),
                 child: SingleChildScrollView(
                   child: SelectableText(
-                    previewText.isEmpty ? 'No se detectó texto útil' : previewText,
+                    previewText.isEmpty
+                        ? 'No se detectó texto útil'
+                        : previewText,
                   ),
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Advertencias', style: Theme.of(sheetContext).textTheme.titleMedium),
+              Text(
+                'Advertencias',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               if (visibleWarnings.isEmpty)
                 const Text('Sin advertencias.')
@@ -5653,7 +6535,9 @@ class _MovementsTabState extends State<MovementsTab> {
                         Navigator.of(sheetContext).pop();
                         await Future<void>.delayed(Duration.zero);
                         if (!mounted) return;
-                        await widget.onAddFromOcr(_manualOcrCandidate(previewText));
+                        await widget.onAddFromOcr(
+                          _manualOcrCandidate(previewText),
+                        );
                         if (mounted) setState(() {});
                       },
                       icon: const Icon(Icons.edit_note_outlined),
@@ -5710,9 +6594,9 @@ class _MovementsTabState extends State<MovementsTab> {
             children: <Widget>[
               Text(
                 'Detalle de movimiento',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               InfoLine('Moneda', movement.coin),
@@ -5981,7 +6865,8 @@ class _MovementsTabState extends State<MovementsTab> {
                           money(m.quantity * m.unitPrice),
                           emphasized: true,
                         ),
-                        if (m.source.isNotEmpty) InfoLine('Plataforma', m.source),
+                        if (m.source.isNotEmpty)
+                          InfoLine('Plataforma', m.source),
                         if (m.wallet.isNotEmpty) InfoLine('Cartera', m.wallet),
                         if (m.network.isNotEmpty) InfoLine('Red', m.network),
                         if (m.note.isNotEmpty) InfoLine('Nota', m.note),
@@ -6102,41 +6987,44 @@ class _SimulationTabState extends State<SimulationTab> {
     super.dispose();
   }
 
-
   String get _modeLabel => switch (_mode) {
-    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
-        ? 'Operación · Compra'
-        : 'Operación · Venta',
+    SimulationMode.operation =>
+      _operationMode == OperationSimulationMode.buy
+          ? 'Operación · Compra'
+          : 'Operación · Venta',
     SimulationMode.rotation => 'Rotación',
   };
 
   String get _simulationPairLabel => switch (_mode) {
-    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
-        ? _buyCoin
-        : _sellCoin,
+    SimulationMode.operation =>
+      _operationMode == OperationSimulationMode.buy ? _buyCoin : _sellCoin,
     SimulationMode.rotation => '$_rotationOriginCoin → $_rotationTargetCoin',
   };
 
   String get _activeFeeLabel => switch (_mode) {
-    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
-        ? '${_buyFeeController.text.trim()}% / ${_buySellFeeController.text.trim()}%'
-        : '${_sellFeeController.text.trim()}%',
-    SimulationMode.rotation => '${_rotationSellFeeController.text.trim()}% / ${_rotationBuyFeeController.text.trim()}%',
+    SimulationMode.operation =>
+      _operationMode == OperationSimulationMode.buy
+          ? '${_buyFeeController.text.trim()}% / ${_buySellFeeController.text.trim()}%'
+          : '${_sellFeeController.text.trim()}%',
+    SimulationMode.rotation =>
+      '${_rotationSellFeeController.text.trim()}% / ${_rotationBuyFeeController.text.trim()}%',
   };
 
   String get _simulationScenarioLabel => switch (_mode) {
-    SimulationMode.operation => _operationMode == OperationSimulationMode.buy
-        ? moneyShort(_parseInput(_buyGrossAmountController))
-        : _sellMethod == SimulationSellMethod.percent
-            ? '${_sellPercentController.text.trim()}% de posición'
-            : _sellMethod == SimulationSellMethod.quantity
-                ? '${_sellQuantityController.text.trim()} cripto'
-                : moneyShort(_parseInput(_sellGrossController)),
-    SimulationMode.rotation => _rotationMethod == SimulationRotationMethod.percent
-        ? '${_rotationPercentController.text.trim()}% origen'
-        : _rotationMethod == SimulationRotationMethod.quantity
-            ? '${_rotationQuantityController.text.trim()} cripto'
-            : moneyShort(_parseInput(_rotationGrossController)),
+    SimulationMode.operation =>
+      _operationMode == OperationSimulationMode.buy
+          ? moneyShort(_parseInput(_buyGrossAmountController))
+          : _sellMethod == SimulationSellMethod.percent
+          ? '${_sellPercentController.text.trim()}% de posición'
+          : _sellMethod == SimulationSellMethod.quantity
+          ? '${_sellQuantityController.text.trim()} cripto'
+          : moneyShort(_parseInput(_sellGrossController)),
+    SimulationMode.rotation =>
+      _rotationMethod == SimulationRotationMethod.percent
+          ? '${_rotationPercentController.text.trim()}% origen'
+          : _rotationMethod == SimulationRotationMethod.quantity
+          ? '${_rotationQuantityController.text.trim()} cripto'
+          : moneyShort(_parseInput(_rotationGrossController)),
   };
 
   @override
@@ -6180,7 +7068,8 @@ class _SimulationTabState extends State<SimulationTab> {
       children: <Widget>[
         PremiumDashboardHero(
           title: 'Simulación táctica',
-          subtitle: 'Prueba compra, venta o rotación sin alterar tu cartera real',
+          subtitle:
+              'Prueba compra, venta o rotación sin alterar tu cartera real',
           icon: Icons.tune_outlined,
           metrics: <PremiumMetricData>[
             PremiumMetricData(
@@ -6251,9 +7140,10 @@ class _SimulationTabState extends State<SimulationTab> {
         ],
         const SizedBox(height: 14),
         ...switch (_mode) {
-          SimulationMode.operation => _operationMode == OperationSimulationMode.buy
-              ? _buildBuyMode(buyStats, buyResult)
-              : _buildSellMode(sellStats, sellResult),
+          SimulationMode.operation =>
+            _operationMode == OperationSimulationMode.buy
+                ? _buildBuyMode(buyStats, buyResult)
+                : _buildSellMode(sellStats, sellResult),
           SimulationMode.rotation => _buildRotationMode(
             rotationOriginStats,
             rotationTargetStats,
@@ -6423,10 +7313,22 @@ class _SimulationTabState extends State<SimulationTab> {
                 spacing: 10,
                 runSpacing: 10,
                 children: <Widget>[
-                  MiniMetric(label: 'Cantidad estimada', value: crypto(result.quantityBought)),
-                  MiniMetric(label: 'Costo después', value: money(result.costBaseAfter)),
-                  MiniMetric(label: 'Break even', value: money(result.breakEvenNetAfter)),
-                  MiniMetric(label: 'Comisión total', value: money(result.buyCommission)),
+                  MiniMetric(
+                    label: 'Cantidad estimada',
+                    value: crypto(result.quantityBought),
+                  ),
+                  MiniMetric(
+                    label: 'Costo después',
+                    value: money(result.costBaseAfter),
+                  ),
+                  MiniMetric(
+                    label: 'Break even',
+                    value: money(result.breakEvenNetAfter),
+                  ),
+                  MiniMetric(
+                    label: 'Comisión total',
+                    value: money(result.buyCommission),
+                  ),
                 ],
               )
             : const SizedBox.shrink(),
@@ -6622,14 +7524,23 @@ class _SimulationTabState extends State<SimulationTab> {
                 spacing: 10,
                 runSpacing: 10,
                 children: <Widget>[
-                  MiniMetric(label: 'Neto recibido', value: money(result.netReceived)),
+                  MiniMetric(
+                    label: 'Neto recibido',
+                    value: money(result.netReceived),
+                  ),
                   MiniMetric(
                     label: 'P&L realizado',
                     value: money(result.realizedPLEstimate),
                     color: pnlColor(result.realizedPLEstimate),
                   ),
-                  MiniMetric(label: 'Cantidad restante', value: crypto(result.quantityRemaining)),
-                  MiniMetric(label: 'Comisión total', value: money(result.sellCommission)),
+                  MiniMetric(
+                    label: 'Cantidad restante',
+                    value: crypto(result.quantityRemaining),
+                  ),
+                  MiniMetric(
+                    label: 'Comisión total',
+                    value: money(result.sellCommission),
+                  ),
                 ],
               )
             : const SizedBox.shrink(),
@@ -6970,7 +7881,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   InfoLine(
                     'Promedio $_rotationOriginCoin removido',
                     '\$${result.originRemovedAveragePrice.toStringAsFixed(2)}'
-                    '/$_rotationOriginCoin',
+                        '/$_rotationOriginCoin',
                   ),
                   InfoLine(
                     'P&L realizado estimado',
@@ -7702,10 +8613,9 @@ class CoinsTab extends StatelessWidget {
             return PremiumCoinCard(
               stat: stat,
               sellFeePercent: sellFeePercent,
-              priceMode:
-                  priceModes[coin] == PriceService.manualMode
-                      ? PriceService.manualMode
-                      : PriceService.automaticMode,
+              priceMode: priceModes[coin] == PriceService.manualMode
+                  ? PriceService.manualMode
+                  : PriceService.automaticMode,
               manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
               onEditPrice: () => onEditPrice(coin),
               onDetails: () => onDetails(stat),
@@ -7746,8 +8656,8 @@ class PremiumCoinCard extends StatelessWidget {
         : DateTime.fromMillisecondsSinceEpoch(manualPriceUpdatedAtMs!);
     final String priceModeLabel = isManual
         ? manualUpdatedAt == null
-            ? 'Precio manual'
-            : 'Manual · ${longDate(manualUpdatedAt)}'
+              ? 'Precio manual'
+              : 'Manual · ${longDate(manualUpdatedAt)}'
         : 'Precio automático';
     return Card(
       margin: EdgeInsets.zero,
@@ -7765,9 +8675,12 @@ class PremiumCoinCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        hasPosition ? 'Posición abierta' : 'Sin posición activa',
-                        style: Theme.of(context).textTheme.labelLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
+                        hasPosition
+                            ? 'Posición abierta'
+                            : 'Sin posición activa',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -7777,7 +8690,10 @@ class PremiumCoinCard extends StatelessWidget {
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 6),
-                      StatusPill(label: isManual ? 'Manual' : 'Automático', positive: !isManual),
+                      StatusPill(
+                        label: isManual ? 'Manual' : 'Automático',
+                        positive: !isManual,
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         priceModeLabel,
@@ -7798,10 +8714,23 @@ class PremiumCoinCard extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: <Widget>[
-                MiniMetric(label: 'Precio', value: priceDisplay(stat.currentPrice)),
-                MiniMetric(label: 'Valor actual', value: money(stat.currentValue)),
-                MiniMetric(label: 'Resultado', value: money(stat.unrealizedPL), color: pnlColor(stat.unrealizedPL)),
-                MiniMetric(label: 'Break even', value: money(stat.netBreakEvenPrice(sellFeePercent))),
+                MiniMetric(
+                  label: 'Precio',
+                  value: priceDisplay(stat.currentPrice),
+                ),
+                MiniMetric(
+                  label: 'Valor actual',
+                  value: money(stat.currentValue),
+                ),
+                MiniMetric(
+                  label: 'Resultado',
+                  value: money(stat.unrealizedPL),
+                  color: pnlColor(stat.unrealizedPL),
+                ),
+                MiniMetric(
+                  label: 'Break even',
+                  value: money(stat.netBreakEvenPrice(sellFeePercent)),
+                ),
               ],
             ),
             if (!hasPrice) ...<Widget>[
@@ -7836,7 +8765,6 @@ class PremiumCoinCard extends StatelessWidget {
     );
   }
 }
-
 
 class AlertsTab extends StatefulWidget {
   final List<String> coins;
@@ -7903,7 +8831,8 @@ class _AlertsTabState extends State<AlertsTab> {
     final int watchedCount = widget.coins
         .where((String coin) => (widget.stats[coin]?.currentPrice ?? 0) > 0)
         .length;
-    final String globalState = widget.priceAlertsEnabled || widget.recoveryAlertsEnabled
+    final String globalState =
+        widget.priceAlertsEnabled || widget.recoveryAlertsEnabled
         ? 'Activas'
         : 'En pausa';
     final String autoState = widget.automaticLocalAlertsEnabled
@@ -7973,7 +8902,6 @@ class _AlertsTabState extends State<AlertsTab> {
     );
   }
 
-
   Widget _buildAutomaticNotificationsCard(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
 
@@ -8011,11 +8939,14 @@ class _AlertsTabState extends State<AlertsTab> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: PriceAlertService.automaticIntervalOptions.map((int minutes) {
+            children: PriceAlertService.automaticIntervalOptions.map((
+              int minutes,
+            ) {
               return ChoiceChip(
                 selected: widget.automaticLocalAlertsIntervalMinutes == minutes,
                 label: Text(intervalLabel(minutes)),
-                onSelected: (_) => widget.onAutomaticLocalAlertIntervalChanged(minutes),
+                onSelected: (_) =>
+                    widget.onAutomaticLocalAlertIntervalChanged(minutes),
               );
             }).toList(),
           ),
@@ -8033,7 +8964,8 @@ class _AlertsTabState extends State<AlertsTab> {
       children: <Widget>[
         CardPanel(
           title: 'Alertas internas de mercado',
-          subtitle: '${pct(widget.priceAlertThresholdPercent)} · ${priceUpdatedLabel(widget.pricesUpdatedAt)}',
+          subtitle:
+              '${pct(widget.priceAlertThresholdPercent)} · ${priceUpdatedLabel(widget.pricesUpdatedAt)}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -8049,18 +8981,25 @@ class _AlertsTabState extends State<AlertsTab> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
                     'Falta permiso de notificaciones.',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 ),
               InfoLine('Umbral actual', pct(widget.priceAlertThresholdPercent)),
-              InfoLine('Monitoreo', '${watchedCoins.length} monedas monitoreadas'),
+              InfoLine(
+                'Monitoreo',
+                '${watchedCoins.length} monedas monitoreadas',
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonalIcon(
-                    onPressed: widget.isRefreshingPrices ? null : widget.onRefreshPrices,
+                    onPressed: widget.isRefreshingPrices
+                        ? null
+                        : widget.onRefreshPrices,
                     icon: widget.isRefreshingPrices
                         ? const SizedBox(
                             width: 18,
@@ -8068,7 +9007,9 @@ class _AlertsTabState extends State<AlertsTab> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.sync),
-                    label: Text(widget.isRefreshingPrices ? 'Actualizando' : 'Precios'),
+                    label: Text(
+                      widget.isRefreshingPrices ? 'Actualizando' : 'Precios',
+                    ),
                   ),
                   FilledButton.tonal(
                     onPressed: widget.onEditPriceAlertThreshold,
@@ -8085,15 +9026,19 @@ class _AlertsTabState extends State<AlertsTab> {
         ),
         CardPanel(
           title: 'Monedas',
-          subtitle: watchedCoins.isEmpty ? 'Sin precios cargados.' : '${watchedCoins.length} monedas monitoreadas',
+          subtitle: watchedCoins.isEmpty
+              ? 'Sin precios cargados.'
+              : '${watchedCoins.length} monedas monitoreadas',
           child: Column(
             children: widget.coins.map((String coin) {
-              final CoinStats stat = widget.stats[coin] ?? CoinStats(coin: coin);
+              final CoinStats stat =
+                  widget.stats[coin] ?? CoinStats(coin: coin);
               final double reference = widget.priceAlertReferences[coin] ?? 0.0;
               final double variation = reference <= 0
                   ? 0.0
                   : ((stat.currentPrice - reference) / reference) * 100;
-              final bool triggered = reference > 0 &&
+              final bool triggered =
+                  reference > 0 &&
                   variation.abs() >= widget.priceAlertThresholdPercent;
 
               return AlertCoinRow(
@@ -8183,18 +9128,21 @@ class _AlertsTabState extends State<AlertsTab> {
                 )
               else
                 ...coinsToShow.map((String coin) {
-                  final CoinStats stat = widget.stats[coin] ?? CoinStats(coin: coin);
+                  final CoinStats stat =
+                      widget.stats[coin] ?? CoinStats(coin: coin);
                   final RecoveryAlertPosition position = RecoveryAlertPosition(
                     quantity: stat.quantity,
                     investmentNet: stat.costBase,
                     currentPrice: stat.currentPrice,
                     sellFeePercent: widget.sellFeePercent,
                   );
-                  final double? reference = widget.recoveryAlertReferences[coin];
+                  final double? reference =
+                      widget.recoveryAlertReferences[coin];
                   final double delta = reference == null
                       ? 0.0
                       : position.pnlPercent - reference;
-                  final bool triggered = reference != null &&
+                  final bool triggered =
+                      reference != null &&
                       delta.abs() >= widget.recoveryAlertThresholdPoints;
 
                   return RecoveryAlertCoinRow(
@@ -8263,7 +9211,10 @@ class AlertCoinRow extends StatelessWidget {
               ],
             ),
           ),
-          StatusPill(label: triggered ? 'Revisar' : 'Normal', positive: !triggered),
+          StatusPill(
+            label: triggered ? 'Revisar' : 'Normal',
+            positive: !triggered,
+          ),
         ],
       ),
     );
@@ -8289,7 +9240,9 @@ class RecoveryAlertCoinRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool hasPosition = position.hasPosition;
-    final String pnlText = hasPosition ? pct(position.pnlPercent) : 'Sin posición activa';
+    final String pnlText = hasPosition
+        ? pct(position.pnlPercent)
+        : 'Sin posición activa';
     final String referenceText = referencePnlPercent == null
         ? 'Sin ref'
         : pct(referencePnlPercent!);
@@ -8316,11 +9269,16 @@ class RecoveryAlertCoinRow extends StatelessWidget {
                   pnlText,
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
-                    color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
+                    color: hasPosition
+                        ? pnlColor(position.unrealizedPnl)
+                        : null,
                   ),
                 ),
               ),
-              StatusPill(label: triggered ? 'Revisar' : 'Normal', positive: !triggered),
+              StatusPill(
+                label: triggered ? 'Revisar' : 'Normal',
+                positive: !triggered,
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -8330,7 +9288,9 @@ class RecoveryAlertCoinRow extends StatelessWidget {
             children: <Widget>[
               MiniMetric(
                 label: 'P&L no realizado',
-                value: hasPosition ? money(position.unrealizedPnl) : 'Sin posición activa',
+                value: hasPosition
+                    ? money(position.unrealizedPnl)
+                    : 'Sin posición activa',
                 color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
               ),
               MiniMetric(label: 'P&L base', value: referenceText),
@@ -8349,14 +9309,11 @@ class RecoveryAlertCoinRow extends StatelessWidget {
   }
 }
 
-
-
 String _btcDominance(Map<String, CoinStats> stats, PortfolioTotals totals) {
   if (totals.currentValue <= 0) return '—';
   final double btcValue = stats['BTC']?.currentValue ?? 0;
   return pct((btcValue / totals.currentValue) * 100);
 }
-
 
 enum SnapshotMetric {
   portfolioValue,
@@ -8476,7 +9433,9 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
     final DateTime latest = ordered.last.createdAt;
     final DateTime from = latest.subtract(Duration(days: _range.days!));
     return ordered
-        .where((PortfolioSnapshot snapshot) => !snapshot.createdAt.isBefore(from))
+        .where(
+          (PortfolioSnapshot snapshot) => !snapshot.createdAt.isBefore(from),
+        )
         .toList();
   }
 
@@ -8488,7 +9447,9 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
       case SnapshotMetric.invested:
         return colors.tertiary;
       case SnapshotMetric.unrealizedPnl:
-        final double value = filtered.isEmpty ? 0 : _metric.valueFor(filtered.last);
+        final double value = filtered.isEmpty
+            ? 0
+            : _metric.valueFor(filtered.last);
         return pnlColor(value);
       case SnapshotMetric.realizedPnl:
         return colors.secondary;
@@ -8501,15 +9462,20 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
   Widget build(BuildContext context) {
     final List<PortfolioSnapshot> filtered = _filteredSnapshots();
     final Color metricColor = _metricColor(context, filtered);
-    final double? latestValue = filtered.isEmpty ? null : _metric.valueFor(filtered.last);
-    final double? firstValue = filtered.isEmpty ? null : _metric.valueFor(filtered.first);
+    final double? latestValue = filtered.isEmpty
+        ? null
+        : _metric.valueFor(filtered.last);
+    final double? firstValue = filtered.isEmpty
+        ? null
+        : _metric.valueFor(filtered.first);
     final double? delta = latestValue == null || firstValue == null
         ? null
         : latestValue - firstValue;
 
     return CardPanel(
       title: 'Evolución histórica',
-      subtitle: 'Filtra instantáneas por rango y elige la métrica que quieres leer.',
+      subtitle:
+          'Filtra instantáneas por rango y elige la métrica que quieres leer.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -8591,7 +9557,9 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
               MiniMetric(
                 label: 'Último dato',
                 value: latestValue == null ? '—' : _metric.format(latestValue),
-                color: _metric == SnapshotMetric.unrealizedPnl && latestValue != null
+                color:
+                    _metric == SnapshotMetric.unrealizedPnl &&
+                        latestValue != null
                     ? pnlColor(latestValue)
                     : null,
               ),
@@ -8630,12 +9598,11 @@ class ChartsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<CoinStats> active = stats.values
-        .where((CoinStats s) => s.currentValue > 0)
-        .toList()
-      ..sort(
-        (CoinStats a, CoinStats b) => b.currentValue.compareTo(a.currentValue),
-      );
+    final List<CoinStats> active =
+        stats.values.where((CoinStats s) => s.currentValue > 0).toList()..sort(
+          (CoinStats a, CoinStats b) =>
+              b.currentValue.compareTo(a.currentValue),
+        );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -8688,7 +9655,8 @@ class ChartsTab extends StatelessWidget {
               ? const EmptyState(
                   icon: Icons.pie_chart_outline,
                   title: 'Sin valor de cartera para graficar',
-                  subtitle: 'Carga precios y movimientos para activar una '
+                  subtitle:
+                      'Carga precios y movimientos para activar una '
                       'lectura visual premium.',
                 )
               : Column(
@@ -8728,7 +9696,8 @@ class ChartsTab extends StatelessWidget {
         if (snapshots.isEmpty)
           CardPanel(
             title: 'Histórico de instantáneas',
-            subtitle: 'Aún no hay instantáneas guardadas. Crea una manual para comenzar el histórico.',
+            subtitle:
+                'Aún no hay instantáneas guardadas. Crea una manual para comenzar el histórico.',
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -8783,7 +9752,12 @@ class AllocationBar extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
               Text('${pct(share * 100)} · $value'),
             ],
           ),
@@ -8792,7 +9766,9 @@ class AllocationBar extends StatelessWidget {
             value: share.clamp(0.0, 1.0),
             minHeight: 10,
             color: pnlColor(result),
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
           ),
         ],
       ),
@@ -8818,13 +9794,21 @@ class ResultBar extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: <Widget>[
-          SizedBox(width: 48, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
+          SizedBox(
+            width: 48,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
           Expanded(
             child: LinearProgressIndicator(
               value: intensity.clamp(0.0, 1.0),
               minHeight: 10,
               color: pnlColor(amount),
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
             ),
           ),
           const SizedBox(width: 10),
@@ -8833,7 +9817,10 @@ class ResultBar extends StatelessWidget {
             child: Text(
               money(amount),
               textAlign: TextAlign.right,
-              style: TextStyle(color: pnlColor(amount), fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: pnlColor(amount),
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -8858,8 +9845,7 @@ class _FinancialResetScreen extends StatefulWidget {
 }
 
 class _FinancialResetScreenState extends State<_FinancialResetScreen> {
-  final TextEditingController _confirmationController =
-      TextEditingController();
+  final TextEditingController _confirmationController = TextEditingController();
   bool _backupReady = false;
   bool _exportingBackup = false;
   bool _resetInProgress = false;
@@ -8867,8 +9853,7 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
   bool get _confirmationReady =>
       _confirmationController.text.trim() == 'RESTABLECER';
 
-  bool get _canReset =>
-      _backupReady && _confirmationReady && !_resetInProgress;
+  bool get _canReset => _backupReady && _confirmationReady && !_resetInProgress;
 
   @override
   void initState() {
@@ -8949,7 +9934,10 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  const InfoLine('Se borra', 'Movimientos, precios y snapshots'),
+                  const InfoLine(
+                    'Se borra',
+                    'Movimientos, precios y snapshots',
+                  ),
                   const InfoLine('También se borra', 'Alertas y referencias'),
                   const InfoLine('Se conserva', 'Tema y preferencias visuales'),
                   if (widget.hasCloudState)
@@ -8994,8 +9982,7 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                     'Copia previa',
                     _backupReady ? 'Listo para continuar' : 'Pendiente',
                     emphasized: true,
-                    valueColor:
-                        _backupReady ? colors.primary : colors.error,
+                    valueColor: _backupReady ? colors.primary : colors.error,
                   ),
                 ],
               ),
@@ -9040,8 +10027,9 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Icon(Icons.delete_forever_outlined),
                           label: Text(
@@ -9093,6 +10081,7 @@ class MoreTab extends StatelessWidget {
   final String? firebaseAuthDisplayName;
   final String? firebaseAuthUid;
   final String cloudProfileStatus;
+  final bool isCloudProfilePreparing;
   final bool hasLocalFirebaseDeviceId;
   final DateTime? cloudStateUploadedAt;
   final DateTime? cloudStateDownloadedAt;
@@ -9127,6 +10116,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onImportBackupFile;
   final VoidCallback onSignInFirebaseWithGoogle;
   final VoidCallback onSignOutFirebase;
+  final VoidCallback onPrepareCloudProfile;
   final VoidCallback onUploadFinancialStateToFirebase;
   final VoidCallback onDownloadFinancialStateFromFirebase;
   final VoidCallback onConnectGoogleDrive;
@@ -9173,6 +10163,7 @@ class MoreTab extends StatelessWidget {
     required this.firebaseAuthDisplayName,
     required this.firebaseAuthUid,
     required this.cloudProfileStatus,
+    required this.isCloudProfilePreparing,
     required this.hasLocalFirebaseDeviceId,
     required this.cloudStateUploadedAt,
     required this.cloudStateDownloadedAt,
@@ -9207,6 +10198,7 @@ class MoreTab extends StatelessWidget {
     required this.onImportBackupFile,
     required this.onSignInFirebaseWithGoogle,
     required this.onSignOutFirebase,
+    required this.onPrepareCloudProfile,
     required this.onUploadFinancialStateToFirebase,
     required this.onDownloadFinancialStateFromFirebase,
     required this.onConnectGoogleDrive,
@@ -9226,7 +10218,8 @@ class MoreTab extends StatelessWidget {
   static const String _priceSource = 'CoinGecko';
   bool get firebaseAuthConnected => firebaseAuthUid != null;
   String get analyticsStatus => analyticsEnabled ? 'Activado' : 'Desactivado';
-  String get crashlyticsStatus => crashlyticsEnabled ? 'Activado' : 'Desactivado';
+  String get crashlyticsStatus =>
+      crashlyticsEnabled ? 'Activado' : 'Desactivado';
   String get firebaseAuthAccountLabel =>
       firebaseAuthEmail ?? firebaseAuthDisplayName ?? 'Cuenta Google';
   String get cloudStateUploadLabel => cloudStateUploadedAt == null
@@ -9269,7 +10262,11 @@ class MoreTab extends StatelessWidget {
                   ? 'Conectado: $firebaseAuthAccountLabel · Perfil cloud: $cloudProfileStatus'
                   : 'No conectado · Inicia sesión con Google',
               badge: firebaseAuthConnected ? 'Conectado' : 'No conectado',
-              loading: isFirebaseAuthBusy,
+              loading:
+                  isFirebaseAuthBusy ||
+                  isCloudProfilePreparing ||
+                  isCloudUploading ||
+                  isCloudDownloading,
               onTap: () => _showCloudAccountActions(context),
             ),
             _CommandCard(
@@ -9295,7 +10292,7 @@ class MoreTab extends StatelessWidget {
               subtitle: movementCount == 1
                   ? '1 movimiento registrado para auditoría, edición y borrado'
                   : '$movementCount movimientos registrados para auditoría, '
-                      'edición y borrado',
+                        'edición y borrado',
               badge: 'Clave',
               onTap: onOpenMovements,
             ),
@@ -9410,7 +10407,9 @@ class MoreTab extends StatelessWidget {
             icon: firebaseAuthConnected
                 ? Icons.verified_user_outlined
                 : Icons.account_circle_outlined,
-            title: firebaseAuthConnected ? 'Estado: Conectado' : 'Estado: No conectado',
+            title: firebaseAuthConnected
+                ? 'Estado: Conectado'
+                : 'Estado: No conectado',
             subtitle: firebaseAuthConnected
                 ? 'Email: ${firebaseAuthEmail ?? 'sin email visible'}'
                 : 'Inicia sesión con Google para preparar el acceso en la nube.',
@@ -9443,7 +10442,10 @@ class MoreTab extends StatelessWidget {
             subtitle: firebaseAuthConnected
                 ? 'La sincronización automática todavía no está activa.'
                 : 'Inicia sesión para usar la nube.',
-            onTap: firebaseAuthConnected && !isCloudUploading
+            onTap:
+                firebaseAuthConnected &&
+                    !isCloudUploading &&
+                    !isCloudProfilePreparing
                 ? onUploadFinancialStateToFirebase
                 : null,
           ),
@@ -9462,12 +10464,18 @@ class MoreTab extends StatelessWidget {
                 : null,
           ),
           _SheetAction(
-            icon: Icons.cloud_done_outlined,
+            icon: isCloudProfilePreparing
+                ? Icons.hourglass_top_outlined
+                : Icons.cloud_done_outlined,
             title: 'Perfil cloud: $cloudProfileStatus',
             subtitle: firebaseAuthConnected
-                ? 'Estructura preparada en users/{uid}; sync no activo todavía.'
+                ? isCloudProfilePreparing
+                      ? 'Preparando users/{uid} y el registro del dispositivo.'
+                      : 'Toca para preparar o reintentar el perfil cloud.'
                 : 'Inicia sesión para preparar el perfil.',
-            onTap: null,
+            onTap: firebaseAuthConnected && !isCloudProfilePreparing
+                ? onPrepareCloudProfile
+                : null,
           ),
           _SheetAction(
             icon: Icons.phone_android_outlined,
@@ -9486,28 +10494,28 @@ class MoreTab extends StatelessWidget {
             _SheetAction(
               icon: Icons.developer_mode_outlined,
               title: 'UID diagnóstico',
-              subtitle: firebaseAuthUid!,
+              subtitle: _maskedIdentifier(firebaseAuthUid!),
               onTap: null,
             ),
           _SheetAction(
             icon: isFirebaseAuthBusy
                 ? Icons.hourglass_top_outlined
                 : firebaseAuthConnected
-                    ? Icons.logout_outlined
-                    : Icons.login_outlined,
+                ? Icons.logout_outlined
+                : Icons.login_outlined,
             title: isFirebaseAuthBusy
                 ? 'Procesando...'
                 : firebaseAuthConnected
-                    ? 'Cerrar sesión'
-                    : 'Iniciar sesión con Google',
+                ? 'Cerrar sesión'
+                : 'Iniciar sesión con Google',
             subtitle: firebaseAuthConnected
                 ? 'Cierra solo Firebase Auth; Google Drive conserva su conexión.'
                 : 'No sube ni descarga datos todavía.',
-            onTap: isFirebaseAuthBusy
+            onTap: isFirebaseAuthBusy || isCloudProfilePreparing
                 ? null
                 : firebaseAuthConnected
-                    ? onSignOutFirebase
-                    : onSignInFirebaseWithGoogle,
+                ? onSignOutFirebase
+                : onSignInFirebaseWithGoogle,
           ),
         ],
       ),
@@ -9536,8 +10544,8 @@ class MoreTab extends StatelessWidget {
             onTap: googleDriveBusy
                 ? null
                 : googleDriveConnected
-                    ? onDisconnectGoogleDrive
-                    : onConnectGoogleDrive,
+                ? onDisconnectGoogleDrive
+                : onConnectGoogleDrive,
           ),
           const _SheetAction(
             icon: Icons.privacy_tip_outlined,
@@ -9612,11 +10620,7 @@ class MoreTab extends StatelessWidget {
       useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => StatefulBuilder(
-        builder:
-            (
-              BuildContext context,
-              void Function(void Function()) setModalState,
-            ) {
+        builder: (BuildContext context, void Function(void Function()) setModalState) {
           void runAndClose(VoidCallback action) {
             Navigator.of(sheetContext).pop();
             action();
@@ -9638,16 +10642,16 @@ class MoreTab extends StatelessWidget {
                   Text(
                     'Instantáneas',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     snapshotCount == 1
                         ? '1 instantánea guardada. Con 2 o más se muestra '
-                            'la línea de evolución.'
+                              'la línea de evolución.'
                         : '$snapshotCount instantáneas guardadas. Con 2 o más '
-                            'se muestra la línea de evolución.',
+                              'se muestra la línea de evolución.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 14),
@@ -9686,29 +10690,29 @@ class MoreTab extends StatelessWidget {
                   Text(
                     'Automatización de instantáneas',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   ...SnapshotAutomationMode.values.map(
                     (SnapshotAutomationMode option) =>
                         RadioListTile<SnapshotAutomationMode>(
-                      contentPadding: EdgeInsets.zero,
-                      value: option,
-                      groupValue: selectedAutomation,
-                      title: Text(option.label),
-                      onChanged: (SnapshotAutomationMode? value) {
-                        if (value == null) return;
-                        setModalState(() => selectedAutomation = value);
-                        onSnapshotAutomationModeChanged(value);
-                      },
-                    ),
+                          contentPadding: EdgeInsets.zero,
+                          value: option,
+                          groupValue: selectedAutomation,
+                          title: Text(option.label),
+                          onChanged: (SnapshotAutomationMode? value) {
+                            if (value == null) return;
+                            setModalState(() => selectedAutomation = value);
+                            onSnapshotAutomationModeChanged(value);
+                          },
+                        ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Retención de instantáneas',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   const Text(
@@ -9718,18 +10722,18 @@ class MoreTab extends StatelessWidget {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: SnapshotRetention.values.map(
-                      (SnapshotRetention option) {
-                        return ChoiceChip(
-                          selected: selectedRetention == option,
-                          label: Text(option.label),
-                          onSelected: (_) {
-                            setModalState(() => selectedRetention = option);
-                            onSnapshotRetentionChanged(option);
-                          },
-                        );
-                      },
-                    ).toList(),
+                    children: SnapshotRetention.values.map((
+                      SnapshotRetention option,
+                    ) {
+                      return ChoiceChip(
+                        selected: selectedRetention == option,
+                        label: Text(option.label),
+                        onSelected: (_) {
+                          setModalState(() => selectedRetention = option);
+                          onSnapshotRetentionChanged(option);
+                        },
+                      );
+                    }).toList(),
                   ),
                 ],
               ),
@@ -9856,9 +10860,9 @@ class MoreTab extends StatelessWidget {
             children: <Widget>[
               Text(
                 'Estado del sistema',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Text(
@@ -9866,7 +10870,12 @@ class MoreTab extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 12),
-              Text('Actividad local', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'Actividad local',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 6),
               InfoLine('Movimientos totales', movementCount.toString()),
               InfoLine(
@@ -9876,13 +10885,26 @@ class MoreTab extends StatelessWidget {
               InfoLine('Instantáneas guardadas', snapshotCount.toString()),
               InfoLine(
                 'Última instantánea guardada',
-                latestSnapshot == null ? 'Sin instantáneas' : longDate(latestSnapshot!),
+                latestSnapshot == null
+                    ? 'Sin instantáneas'
+                    : longDate(latestSnapshot!),
               ),
               const Divider(height: 20),
-              Text('Precios', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'Precios',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 6),
-              InfoLine('Última actualización', priceUpdatedLabel(pricesUpdatedAt)),
-              InfoLine('Precios disponibles', '$pricesAvailableCount/$pricesTotalCount'),
+              InfoLine(
+                'Última actualización',
+                priceUpdatedLabel(pricesUpdatedAt),
+              ),
+              InfoLine(
+                'Precios disponibles',
+                '$pricesAvailableCount/$pricesTotalCount',
+              ),
               InfoLine('Precios manuales', manualPriceCoins.length.toString()),
               InfoLine(
                 'Precios automáticos',
@@ -9890,77 +10912,144 @@ class MoreTab extends StatelessWidget {
               ),
               InfoLine(
                 'Manual',
-                manualPriceCoins.isEmpty ? 'Ninguna' : manualPriceCoins.join(', '),
+                manualPriceCoins.isEmpty
+                    ? 'Ninguna'
+                    : manualPriceCoins.join(', '),
               ),
               InfoLine(
                 'Sin precio',
-                missingPriceCoins.isEmpty ? 'Ninguna' : missingPriceCoins.join(', '),
+                missingPriceCoins.isEmpty
+                    ? 'Ninguna'
+                    : missingPriceCoins.join(', '),
               ),
               InfoLine(
                 'Estado de precios',
                 pricesAvailableCount == 0
                     ? 'Sin precios'
                     : pricesAvailableCount == pricesTotalCount
-                        ? 'Completo'
-                        : 'Parcial',
+                    ? 'Completo'
+                    : 'Parcial',
               ),
               const InfoLine(
                 'Nota',
                 'Precio 0 puede indicar dato no disponible; no necesariamente valor real de mercado.',
               ),
-              InfoLine('Estado de actualización', isRefreshingPrices ? 'Actualizando' : 'En reposo'),
-              InfoLine('Al abrir app', refreshPricesOnOpen ? 'Activado' : 'Desactivado'),
-              InfoLine('Después de movimiento', refreshPricesAfterMovement ? 'Activado' : 'Desactivado'),
+              InfoLine(
+                'Estado de actualización',
+                isRefreshingPrices ? 'Actualizando' : 'En reposo',
+              ),
+              InfoLine(
+                'Al abrir app',
+                refreshPricesOnOpen ? 'Activado' : 'Desactivado',
+              ),
+              InfoLine(
+                'Después de movimiento',
+                refreshPricesAfterMovement ? 'Activado' : 'Desactivado',
+              ),
               InfoLine('En pantalla', priceRefreshForegroundMode.label),
               InfoLine('Monedas con posición', activeCoins.toString()),
               InfoLine('Monedas soportadas', pricesTotalCount.toString()),
               InfoLine('Fuente de precios', _priceSource),
               const Divider(height: 20),
-              Text('Salud', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'Salud',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 6),
               InfoLine('Errores detectados', financialErrors.length.toString()),
               InfoLine('Firebase', firebaseStatus),
               InfoLine('Crash reporting', crashlyticsStatus),
               InfoLine('Analytics', analyticsStatus),
-              InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
+              InfoLine(
+                'Firebase Auth',
+                firebaseAuthConnected ? 'Conectado' : 'No conectado',
+              ),
               if (firebaseAuthConnected)
-                InfoLine('Cuenta Firebase', firebaseAuthEmail ?? 'Sin email visible'),
+                InfoLine(
+                  'Cuenta Firebase',
+                  firebaseAuthEmail ?? 'Sin email visible',
+                ),
               InfoLine('Cloud profile', cloudProfileStatus),
               const InfoLine('Firebase sync', 'Manual'),
-              InfoLine('DeviceId local', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
+              InfoLine(
+                'DeviceId local',
+                hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente',
+              ),
               InfoLine('Cloud state subida', cloudStateUploadLabel),
               InfoLine('Cloud state descarga', cloudStateDownloadLabel),
-              InfoLine('DeviceId cloud', hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente'),
+              InfoLine(
+                'DeviceId cloud',
+                hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente',
+              ),
               const InfoLine('Sync automático Firebase', 'No'),
               InfoLine('Copia de seguridad local', 'Compatible'),
-              InfoLine('Google Drive', googleDriveConnected ? 'Conectado' : 'No conectado'),
+              InfoLine(
+                'Google Drive',
+                googleDriveConnected ? 'Conectado' : 'No conectado',
+              ),
               const InfoLine('Scope Drive', 'appDataFolder'),
               const InfoLine('Sync automático Drive', 'No'),
               InfoLine('Última copia Drive', googleDriveBackupLabel),
-              InfoLine('Alertas automáticas locales', automaticLocalAlertsEnabled ? 'Activadas' : 'Desactivadas'),
-              const InfoLine('Monitoreo de alertas', 'Configurable desde Alertas'),
-              InfoLine('Intervalo de alertas', intervalLabel(automaticLocalAlertsIntervalMinutes)),
-              InfoLine('Permisos', notificationsAllowed ? 'Notificaciones permitidas' : 'Notificaciones no permitidas'),
-              InfoLine('Instantáneas automáticas', snapshotAutomationMode.label),
               InfoLine(
-                'Retención de instantáneas',
-                snapshotRetention.label,
+                'Alertas automáticas locales',
+                automaticLocalAlertsEnabled ? 'Activadas' : 'Desactivadas',
               ),
+              const InfoLine(
+                'Monitoreo de alertas',
+                'Configurable desde Alertas',
+              ),
+              InfoLine(
+                'Intervalo de alertas',
+                intervalLabel(automaticLocalAlertsIntervalMinutes),
+              ),
+              InfoLine(
+                'Permisos',
+                notificationsAllowed
+                    ? 'Notificaciones permitidas'
+                    : 'Notificaciones no permitidas',
+              ),
+              InfoLine(
+                'Instantáneas automáticas',
+                snapshotAutomationMode.label,
+              ),
+              InfoLine('Retención de instantáneas', snapshotRetention.label),
               const Divider(height: 20),
-              Text('Checklist beta', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'Checklist beta',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 6),
               const InfoLine('Cuenta', 'Google/Firebase Auth opcional'),
-              const InfoLine('Datos financieros', 'Locales; Drive/Firebase solo por acción manual'),
-              InfoLine('App activity', analyticsEnabled ? 'Analytics autorizado' : 'No autorizado'),
-              InfoLine('Crash logs', crashlyticsEnabled ? 'Reportes autorizados' : 'No autorizados'),
-              const InfoLine('OCR', 'Procesado localmente; no enviado a monitoreo'),
+              const InfoLine(
+                'Datos financieros',
+                'Locales; Drive/Firebase solo por acción manual',
+              ),
+              InfoLine(
+                'App activity',
+                analyticsEnabled ? 'Analytics autorizado' : 'No autorizado',
+              ),
+              InfoLine(
+                'Crash logs',
+                crashlyticsEnabled ? 'Reportes autorizados' : 'No autorizados',
+              ),
+              const InfoLine(
+                'OCR',
+                'Procesado localmente; no enviado a monitoreo',
+              ),
               const InfoLine('Sync automático', 'No activo'),
-              const InfoLine('Beta readiness', 'Data Safety pendiente de confirmar en Play Console'),
+              const InfoLine(
+                'Beta readiness',
+                'Data Safety pendiente de confirmar en Play Console',
+              ),
               if (financialErrors.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
-                ...financialErrors.take(6).map(
-                  (String error) => InfoLine('Alerta', error),
-                ),
+                ...financialErrors
+                    .take(6)
+                    .map((String error) => InfoLine('Alerta', error)),
                 if (financialErrors.length > 6)
                   InfoLine('Más alertas', '+${financialErrors.length - 6}'),
               ],
@@ -10004,9 +11093,9 @@ class MoreTab extends StatelessWidget {
             children: <Widget>[
               Text(
                 'Acerca de CriptoControlMx',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
@@ -10020,21 +11109,44 @@ class MoreTab extends StatelessWidget {
               InfoLine('Firebase', firebaseStatus),
               InfoLine('Crash reporting', crashlyticsStatus),
               InfoLine('Analytics', analyticsStatus),
-              InfoLine('Firebase Auth', firebaseAuthConnected ? 'Conectado' : 'No conectado'),
+              InfoLine(
+                'Firebase Auth',
+                firebaseAuthConnected ? 'Conectado' : 'No conectado',
+              ),
               InfoLine('Cloud profile', cloudProfileStatus),
               const InfoLine('Firebase sync', 'Manual; sin automático'),
               InfoLine('Cloud state subida', cloudStateUploadLabel),
               InfoLine('Cloud state descarga', cloudStateDownloadLabel),
               InfoLine('Fuente de precios', 'CoinGecko'),
               InfoLine('Exportaciones', 'CSV, JSON, PDF y XLSX'),
-              const InfoLine('Google Drive', 'Opcional; solo por acción del usuario'),
-              const InfoLine('Datos en copia', 'Movimientos, precios, comisión, snapshots y configuración financiera'),
-              const InfoLine('Cuenta Google', 'Email visible para mostrar la cuenta conectada'),
-              const InfoLine('Privacidad', 'Monitoreo opcional; sin venta de datos ni sync automático'),
-              InfoLine('Copia de seguridad', 'Creación y restauración locales disponibles'),
+              const InfoLine(
+                'Google Drive',
+                'Opcional; solo por acción del usuario',
+              ),
+              const InfoLine(
+                'Datos en copia',
+                'Movimientos, precios, comisión, snapshots y configuración financiera',
+              ),
+              const InfoLine(
+                'Cuenta Google',
+                'Email visible para mostrar la cuenta conectada',
+              ),
+              const InfoLine(
+                'Privacidad',
+                'Monitoreo opcional; sin venta de datos ni sync automático',
+              ),
+              InfoLine(
+                'Copia de seguridad',
+                'Creación y restauración locales disponibles',
+              ),
               InfoLine('Aviso', 'No es asesoría financiera'),
               const Divider(height: 20),
-              Text('Privacidad y datos', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'Privacidad y datos',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 6),
               const Text(
                 'CriptoControlMx maneja datos financieros registrados por ti. Esos datos se quedan en tu dispositivo salvo cuando decides crear una copia en Google Drive o subir/restaurar estado desde Firebase.',
@@ -10093,9 +11205,9 @@ class MoreTab extends StatelessWidget {
             children: <Widget>[
               Text(
                 'Verificación motor financiero',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Text(
@@ -10134,7 +11246,11 @@ class MoreTab extends StatelessWidget {
       coin: price,
     };
 
-    CoinStats stat(List<Movement> movements, Map<String, double> currentPrices, String coin) {
+    CoinStats stat(
+      List<Movement> movements,
+      Map<String, double> currentPrices,
+      String coin,
+    ) {
       return FinancialEngine.computeStats(
         coins: coins,
         movements: movements,
@@ -10176,7 +11292,10 @@ class MoreTab extends StatelessWidget {
       required CoinStats expected,
     }) {
       final List<Movement> movements = rawMoves
-          .map((Map<String, Object?> raw) => Movement.fromJson(Map<String, dynamic>.from(raw)))
+          .map(
+            (Map<String, Object?> raw) =>
+                Movement.fromJson(Map<String, dynamic>.from(raw)),
+          )
           .toList();
       final CoinStats actual = stat(movements, currentPrices, coin);
       return _MotorVerificationItem(
@@ -10188,22 +11307,319 @@ class MoreTab extends StatelessWidget {
     }
 
     final List<_MotorVerificationItem> items = <_MotorVerificationItem>[
-      coinCase(name: 'Compra simple', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 10, 'note': 'compra simple'}], currentPrices: prices('BTC', 120), expected: CoinStats(coin: 'BTC', quantity: 1, costBase: 110, currentPrice: 120, realizedPL: 0, feesPaid: 10, totalInvested: 110)),
-      coinCase(name: 'Dos compras con promedio', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'primera'}, <String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 300, 'fee': 0, 'note': 'segunda'}], currentPrices: prices('BTC', 250), expected: CoinStats(coin: 'BTC', quantity: 2, costBase: 400, currentPrice: 250, realizedPL: 0, feesPaid: 0, totalInvested: 400)),
-      coinCase(name: 'Venta parcial', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 150, 'fee': 0, 'note': 'parcial'}], currentPrices: prices('BTC', 150), expected: CoinStats(coin: 'BTC', quantity: 1, costBase: 100, currentPrice: 150, realizedPL: 50, feesPaid: 0, totalInvested: 200)),
-      coinCase(name: 'Venta total', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 150, 'fee': 0, 'note': 'cierre'}], currentPrices: prices('BTC', 150), expected: CoinStats(coin: 'BTC', quantity: 0, costBase: 0, currentPrice: 150, realizedPL: 50, feesPaid: 0, totalInvested: 100)),
-      coinCase(name: 'Entrada sin realizedPL', coin: 'ETH', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'transferIn', 'coin': 'ETH', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'entrada'}], currentPrices: prices('ETH', 120), expected: CoinStats(coin: 'ETH', quantity: 2, costBase: 200, currentPrice: 120, realizedPL: 0, feesPaid: 0, totalInvested: 200)),
-      coinCase(name: 'Salida sin realizedPL', coin: 'LINK', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'LINK', 'date': stamp.toIso8601String(), 'quantity': 2, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'transferOut', 'coin': 'LINK', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 1, 'unitPrice': 120, 'fee': 0, 'note': 'salida'}], currentPrices: prices('LINK', 100), expected: CoinStats(coin: 'LINK', quantity: 1, costBase: 100, currentPrice: 100, realizedPL: 0, feesPaid: 0, totalInvested: 200)),
-      coinCase(name: 'Comisión cero', coin: 'LTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'LTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'sin comisión'}], currentPrices: prices('LTC', 110), expected: CoinStats(coin: 'LTC', quantity: 1, costBase: 100, currentPrice: 110, realizedPL: 0, feesPaid: 0, totalInvested: 100)),
-      coinCase(name: 'Precio faltante = 0', coin: 'UNI', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'UNI', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'sin precio'}], currentPrices: <String, double>{}, expected: CoinStats(coin: 'UNI', quantity: 1, costBase: 100, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 100)),
-      coinCase(name: 'Moneda activa con precio 0', coin: 'USDC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'USDC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 1, 'fee': 0, 'note': 'USDC sin precio'}], currentPrices: prices('USDC', 0), expected: CoinStats(coin: 'USDC', quantity: 1, costBase: 1, currentPrice: 0, realizedPL: 0, feesPaid: 0, totalInvested: 1)),
-      coinCase(name: 'Venta mayor al saldo', coin: 'BTC', rawMoves: <Map<String, Object?>>[<String, Object?>{'type': 'buy', 'coin': 'BTC', 'date': stamp.toIso8601String(), 'quantity': 1, 'unitPrice': 100, 'fee': 0, 'note': 'base'}, <String, Object?>{'type': 'sell', 'coin': 'BTC', 'date': stamp.add(const Duration(minutes: 1)).toIso8601String(), 'quantity': 2, 'unitPrice': 200, 'fee': 0, 'note': 'exceso'}], currentPrices: prices('BTC', 200), expected: CoinStats(coin: 'BTC', quantity: 0, costBase: 0, currentPrice: 200, realizedPL: 100, feesPaid: 0, totalInvested: 100)),
+      coinCase(
+        name: 'Compra simple',
+        coin: 'BTC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'BTC',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 100,
+            'fee': 10,
+            'note': 'compra simple',
+          },
+        ],
+        currentPrices: prices('BTC', 120),
+        expected: CoinStats(
+          coin: 'BTC',
+          quantity: 1,
+          costBase: 110,
+          currentPrice: 120,
+          realizedPL: 0,
+          feesPaid: 10,
+          totalInvested: 110,
+        ),
+      ),
+      coinCase(
+        name: 'Dos compras con promedio',
+        coin: 'BTC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'BTC',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'primera',
+          },
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'BTC',
+            'date': stamp.add(const Duration(minutes: 1)).toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 300,
+            'fee': 0,
+            'note': 'segunda',
+          },
+        ],
+        currentPrices: prices('BTC', 250),
+        expected: CoinStats(
+          coin: 'BTC',
+          quantity: 2,
+          costBase: 400,
+          currentPrice: 250,
+          realizedPL: 0,
+          feesPaid: 0,
+          totalInvested: 400,
+        ),
+      ),
+      coinCase(
+        name: 'Venta parcial',
+        coin: 'BTC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'BTC',
+            'date': stamp.toIso8601String(),
+            'quantity': 2,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'base',
+          },
+          <String, Object?>{
+            'type': 'sell',
+            'coin': 'BTC',
+            'date': stamp.add(const Duration(minutes: 1)).toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 150,
+            'fee': 0,
+            'note': 'parcial',
+          },
+        ],
+        currentPrices: prices('BTC', 150),
+        expected: CoinStats(
+          coin: 'BTC',
+          quantity: 1,
+          costBase: 100,
+          currentPrice: 150,
+          realizedPL: 50,
+          feesPaid: 0,
+          totalInvested: 200,
+        ),
+      ),
+      coinCase(
+        name: 'Venta total',
+        coin: 'BTC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'BTC',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'base',
+          },
+          <String, Object?>{
+            'type': 'sell',
+            'coin': 'BTC',
+            'date': stamp.add(const Duration(minutes: 1)).toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 150,
+            'fee': 0,
+            'note': 'cierre',
+          },
+        ],
+        currentPrices: prices('BTC', 150),
+        expected: CoinStats(
+          coin: 'BTC',
+          quantity: 0,
+          costBase: 0,
+          currentPrice: 150,
+          realizedPL: 50,
+          feesPaid: 0,
+          totalInvested: 100,
+        ),
+      ),
+      coinCase(
+        name: 'Entrada sin realizedPL',
+        coin: 'ETH',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'transferIn',
+            'coin': 'ETH',
+            'date': stamp.toIso8601String(),
+            'quantity': 2,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'entrada',
+          },
+        ],
+        currentPrices: prices('ETH', 120),
+        expected: CoinStats(
+          coin: 'ETH',
+          quantity: 2,
+          costBase: 200,
+          currentPrice: 120,
+          realizedPL: 0,
+          feesPaid: 0,
+          totalInvested: 200,
+        ),
+      ),
+      coinCase(
+        name: 'Salida sin realizedPL',
+        coin: 'LINK',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'LINK',
+            'date': stamp.toIso8601String(),
+            'quantity': 2,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'base',
+          },
+          <String, Object?>{
+            'type': 'transferOut',
+            'coin': 'LINK',
+            'date': stamp.add(const Duration(minutes: 1)).toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 120,
+            'fee': 0,
+            'note': 'salida',
+          },
+        ],
+        currentPrices: prices('LINK', 100),
+        expected: CoinStats(
+          coin: 'LINK',
+          quantity: 1,
+          costBase: 100,
+          currentPrice: 100,
+          realizedPL: 0,
+          feesPaid: 0,
+          totalInvested: 200,
+        ),
+      ),
+      coinCase(
+        name: 'Comisión cero',
+        coin: 'LTC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'LTC',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'sin comisión',
+          },
+        ],
+        currentPrices: prices('LTC', 110),
+        expected: CoinStats(
+          coin: 'LTC',
+          quantity: 1,
+          costBase: 100,
+          currentPrice: 110,
+          realizedPL: 0,
+          feesPaid: 0,
+          totalInvested: 100,
+        ),
+      ),
+      coinCase(
+        name: 'Precio faltante = 0',
+        coin: 'UNI',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'UNI',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'sin precio',
+          },
+        ],
+        currentPrices: <String, double>{},
+        expected: CoinStats(
+          coin: 'UNI',
+          quantity: 1,
+          costBase: 100,
+          currentPrice: 0,
+          realizedPL: 0,
+          feesPaid: 0,
+          totalInvested: 100,
+        ),
+      ),
+      coinCase(
+        name: 'Moneda activa con precio 0',
+        coin: 'USDC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'USDC',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 1,
+            'fee': 0,
+            'note': 'USDC sin precio',
+          },
+        ],
+        currentPrices: prices('USDC', 0),
+        expected: CoinStats(
+          coin: 'USDC',
+          quantity: 1,
+          costBase: 1,
+          currentPrice: 0,
+          realizedPL: 0,
+          feesPaid: 0,
+          totalInvested: 1,
+        ),
+      ),
+      coinCase(
+        name: 'Venta mayor al saldo',
+        coin: 'BTC',
+        rawMoves: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'buy',
+            'coin': 'BTC',
+            'date': stamp.toIso8601String(),
+            'quantity': 1,
+            'unitPrice': 100,
+            'fee': 0,
+            'note': 'base',
+          },
+          <String, Object?>{
+            'type': 'sell',
+            'coin': 'BTC',
+            'date': stamp.add(const Duration(minutes: 1)).toIso8601String(),
+            'quantity': 2,
+            'unitPrice': 200,
+            'fee': 0,
+            'note': 'exceso',
+          },
+        ],
+        currentPrices: prices('BTC', 200),
+        expected: CoinStats(
+          coin: 'BTC',
+          quantity: 0,
+          costBase: 0,
+          currentPrice: 200,
+          realizedPL: 100,
+          feesPaid: 0,
+          totalInvested: 100,
+        ),
+      ),
     ];
 
     final List<Movement> snapshotMovements = <Movement>[
-      Movement(type: MovementType.buy, coin: 'BTC', date: stamp, quantity: 1, unitPrice: 100, fee: 10, note: 'snapshot'),
+      Movement(
+        type: MovementType.buy,
+        coin: 'BTC',
+        date: stamp,
+        quantity: 1,
+        unitPrice: 100,
+        fee: 10,
+        note: 'snapshot',
+      ),
     ];
-    final CoinStats snapshotStats = stat(snapshotMovements, prices('BTC', 120), 'BTC');
+    final CoinStats snapshotStats = stat(
+      snapshotMovements,
+      prices('BTC', 120),
+      'BTC',
+    );
     final PortfolioSnapshot snapshot = PortfolioSnapshot(
       id: 'snapshot-verification',
       createdAt: stamp,
@@ -10214,14 +11630,26 @@ class MoreTab extends StatelessWidget {
       movementCount: snapshotMovements.length,
       coins: <CoinSnapshot>[CoinSnapshot.fromStats(snapshotStats)],
     );
-    final PortfolioSnapshot snapshotRoundTrip = PortfolioSnapshot.fromJson(snapshot.toJson());
+    final PortfolioSnapshot snapshotRoundTrip = PortfolioSnapshot.fromJson(
+      snapshot.toJson(),
+    );
     items.add(
       _MotorVerificationItem(
         name: 'Snapshot compatible básico',
-        passed: close(snapshotRoundTrip.totalCostBase, snapshot.totalCostBase) &&
-            close(snapshotRoundTrip.totalCurrentValue, snapshot.totalCurrentValue) &&
-            close(snapshotRoundTrip.totalUnrealizedPL, snapshot.totalUnrealizedPL) &&
-            close(snapshotRoundTrip.totalRealizedPL, snapshot.totalRealizedPL) &&
+        passed:
+            close(snapshotRoundTrip.totalCostBase, snapshot.totalCostBase) &&
+            close(
+              snapshotRoundTrip.totalCurrentValue,
+              snapshot.totalCurrentValue,
+            ) &&
+            close(
+              snapshotRoundTrip.totalUnrealizedPL,
+              snapshot.totalUnrealizedPL,
+            ) &&
+            close(
+              snapshotRoundTrip.totalRealizedPL,
+              snapshot.totalRealizedPL,
+            ) &&
             snapshotRoundTrip.coins.length == 1 &&
             snapshotRoundTrip.coins.first.coin == 'BTC',
         expected:
@@ -10257,12 +11685,14 @@ class MoreTab extends StatelessWidget {
     items.add(
       _MotorVerificationItem(
         name: 'Backup financiero compatible',
-        passed: backupRoundTrip.isFinanciallyIdenticalTo(backupMovement) &&
+        passed:
+            backupRoundTrip.isFinanciallyIdenticalTo(backupMovement) &&
             decodedBackup['movements'] is List &&
             decodedBackup['currentPrices'] is Map &&
             decodedBackup['settings'] is Map &&
             decodedBackup['snapshots'] is List,
-        expected: 'movimientos=1, precios=${coins.length}, settings=1, snapshots=1',
+        expected:
+            'movimientos=1, precios=${coins.length}, settings=1, snapshots=1',
         actual:
             'movimientos=${(decodedBackup['movements'] as List).length}, precios=${(decodedBackup['currentPrices'] as Map).length}, settings=${(decodedBackup['settings'] as Map).length}, snapshots=${(decodedBackup['snapshots'] as List).length}',
       ),
@@ -10464,8 +11894,8 @@ class _PrivacyMonitoringCard extends StatelessWidget {
                   child: Text(
                     'Privacidad y monitoreo',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
@@ -10524,9 +11954,9 @@ class _CommandSection extends StatelessWidget {
             padding: const EdgeInsets.only(left: 2, bottom: 8),
             child: Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
           ),
           LayoutBuilder(
@@ -10542,10 +11972,8 @@ class _CommandSection extends StatelessWidget {
                 runSpacing: 12,
                 children: children
                     .map(
-                      (Widget child) => SizedBox(
-                        width: itemWidth,
-                        child: child,
-                      ),
+                      (Widget child) =>
+                          SizedBox(width: itemWidth, child: child),
                     )
                     .toList(),
               );
@@ -10664,7 +12092,9 @@ class _CommandCard extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
-                    color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.55,
+                    ),
                   ),
                   child: Row(
                     children: <Widget>[
@@ -10755,9 +12185,7 @@ class _CommandActionSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final double bottomPadding = MediaQuery.viewPaddingOf(context).bottom + 20;
     final List<_SheetAction> visibleActions = actions
-        .where(
-          (_SheetAction action) => !action.title.startsWith('Sin sincron'),
-        )
+        .where((_SheetAction action) => !action.title.startsWith('Sin sincron'))
         .where(
           (_SheetAction action) =>
               action.title != 'Crear copia en Google Drive' ||
@@ -10779,9 +12207,9 @@ class _CommandActionSheet extends StatelessWidget {
           children: <Widget>[
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 10),
             ConstrainedBox(
@@ -10805,7 +12233,13 @@ class _CommandActionSheet extends StatelessWidget {
                       onTap: action.onTap == null
                           ? null
                           : () {
-                              Navigator.of(context).pop();
+                              final NavigatorState? navigator =
+                                  Navigator.maybeOf(context);
+                              if (context.mounted &&
+                                  navigator != null &&
+                                  navigator.canPop()) {
+                                navigator.pop();
+                              }
                               action.onTap!();
                             },
                     ),
@@ -10846,7 +12280,8 @@ class SettingsTab extends StatelessWidget {
   final ValueChanged<SnapshotRetention> onSnapshotRetentionChanged;
   final ValueChanged<bool> onRefreshPricesOnOpenChanged;
   final ValueChanged<bool> onRefreshPricesAfterMovementChanged;
-  final ValueChanged<PriceRefreshForegroundMode> onPriceRefreshForegroundModeChanged;
+  final ValueChanged<PriceRefreshForegroundMode>
+  onPriceRefreshForegroundModeChanged;
   final VoidCallback onEditSellFee;
   final VoidCallback onOpenAlerts;
   final ValueChanged<bool> onAutomaticLocalAlertsChanged;
@@ -10912,256 +12347,272 @@ class SettingsTab extends StatelessWidget {
         if (showTheme)
           CardPanel(
             title: 'Tema',
-          subtitle: 'Paletas premium completas, sin alterar colores '
-              'semánticos financieros.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Modo visual',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              SegmentedButton<AppVisualMode>(
-                segments: AppVisualMode.values
-                    .map(
-                      (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
-                        value: mode,
-                        label: Text(mode.label),
-                      ),
-                    )
-                    .toList(),
-                selected: <AppVisualMode>{visualMode},
-                onSelectionChanged: (Set<AppVisualMode> value) {
-                  onVisualModeChanged(value.first);
-                },
-              ),
-              const SizedBox(height: 18),
-              Text(
-                'Estilo visual',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 10),
-              ...AppThemeStyle.values.map(
-                (AppThemeStyle option) => _ThemePaletteTile(
-                  option: option,
-                  selected: themeStyle == option,
-                  onTap: () => onThemeStyleChanged(option),
+            subtitle:
+                'Paletas premium completas, sin alterar colores '
+                'semánticos financieros.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Modo visual',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                SegmentedButton<AppVisualMode>(
+                  segments: AppVisualMode.values
+                      .map(
+                        (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
+                          value: mode,
+                          label: Text(mode.label),
+                        ),
+                      )
+                      .toList(),
+                  selected: <AppVisualMode>{visualMode},
+                  onSelectionChanged: (Set<AppVisualMode> value) {
+                    onVisualModeChanged(value.first);
+                  },
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Estilo visual',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                ...AppThemeStyle.values.map(
+                  (AppThemeStyle option) => _ThemePaletteTile(
+                    option: option,
+                    selected: themeStyle == option,
+                    onTap: () => onThemeStyleChanged(option),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         if (showPortfolio)
           CardPanel(
             title: 'Resumen de cartera',
-          subtitle: 'Configura cuántas posiciones aparecen en resumen y '
-              'cómo se ordenan.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Posiciones visibles',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: VisiblePositions.values.map(
-                  (VisiblePositions option) {
+            subtitle:
+                'Configura cuántas posiciones aparecen en resumen y '
+                'cómo se ordenan.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Posiciones visibles',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: VisiblePositions.values.map((
+                    VisiblePositions option,
+                  ) {
                     return ChoiceChip(
                       selected: visiblePositions == option,
                       label: Text(option.label),
                       onSelected: (_) => onVisiblePositionsChanged(option),
                     );
-                  },
-                ).toList(),
-              ),
-              const SizedBox(height: 16),
-              Text('Orden', style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(height: 8),
-              ...PositionSortMode.values.map(
-                (PositionSortMode option) => RadioListTile<PositionSortMode>(
-                  contentPadding: EdgeInsets.zero,
-                  value: option,
-                  groupValue: positionSortMode,
-                  title: Text(option.label),
-                  onChanged: (PositionSortMode? value) {
-                    if (value != null) onPositionSortModeChanged(value);
-                  },
+                  }).toList(),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Text('Orden', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                ...PositionSortMode.values.map(
+                  (PositionSortMode option) => RadioListTile<PositionSortMode>(
+                    contentPadding: EdgeInsets.zero,
+                    value: option,
+                    groupValue: positionSortMode,
+                    title: Text(option.label),
+                    onChanged: (PositionSortMode? value) {
+                      if (value != null) onPositionSortModeChanged(value);
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         if (showAdvanced)
           CardPanel(
             title: 'Cálculo',
-          subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonal(
-              onPressed: onEditSellFee,
-              child: const Text('Editar comisión'),
+            subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonal(
+                onPressed: onEditSellFee,
+                child: const Text('Editar comisión'),
+              ),
             ),
-          ),
           ),
         if (showPrices)
           CardPanel(
             title: 'Precios',
-          subtitle: 'Preferencias de actualización de precios.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              SwitchListTile(
-                dense: true,
-                value: refreshPricesOnOpen,
-                onChanged: onRefreshPricesOnOpenChanged,
-                title: const Text('Actualizar al abrir app'),
-                contentPadding: EdgeInsets.zero,
-              ),
-              SwitchListTile(
-                dense: true,
-                value: refreshPricesAfterMovement,
-                onChanged: onRefreshPricesAfterMovementChanged,
-                title: const Text('Actualizar después de registrar movimiento'),
-                contentPadding: EdgeInsets.zero,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Actualización mientras la app está abierta:',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: PriceRefreshForegroundMode.values.map(
-                  (PriceRefreshForegroundMode option) {
+            subtitle: 'Preferencias de actualización de precios.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SwitchListTile(
+                  dense: true,
+                  value: refreshPricesOnOpen,
+                  onChanged: onRefreshPricesOnOpenChanged,
+                  title: const Text('Actualizar al abrir app'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                SwitchListTile(
+                  dense: true,
+                  value: refreshPricesAfterMovement,
+                  onChanged: onRefreshPricesAfterMovementChanged,
+                  title: const Text(
+                    'Actualizar después de registrar movimiento',
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Actualización mientras la app está abierta:',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: PriceRefreshForegroundMode.values.map((
+                    PriceRefreshForegroundMode option,
+                  ) {
                     return ChoiceChip(
                       selected: priceRefreshForegroundMode == option,
                       label: Text(option.label),
                       onSelected: (_) =>
                           onPriceRefreshForegroundModeChanged(option),
                     );
-                  },
-                ).toList(),
-              ),
-            ],
+                  }).toList(),
+                ),
+              ],
+            ),
           ),
-        ),
         if (showAdvanced)
           CardPanel(
             title: 'Instantáneas',
-          subtitle: 'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Automatización',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              ...SnapshotAutomationMode.values.map(
-                (SnapshotAutomationMode option) =>
-                    RadioListTile<SnapshotAutomationMode>(
-                  contentPadding: EdgeInsets.zero,
-                  value: option,
-                  groupValue: snapshotAutomationMode,
-                  title: Text(option.label),
-                  onChanged: (SnapshotAutomationMode? value) {
-                    if (value != null) onSnapshotAutomationModeChanged(value);
-                  },
+            subtitle:
+                'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Automatización',
+                  style: Theme.of(context).textTheme.titleSmall,
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text('Retención', style: Theme.of(context).textTheme.titleSmall),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: SnapshotRetention.values.map(
-                  (SnapshotRetention option) {
+                ...SnapshotAutomationMode.values.map(
+                  (SnapshotAutomationMode option) =>
+                      RadioListTile<SnapshotAutomationMode>(
+                        contentPadding: EdgeInsets.zero,
+                        value: option,
+                        groupValue: snapshotAutomationMode,
+                        title: Text(option.label),
+                        onChanged: (SnapshotAutomationMode? value) {
+                          if (value != null)
+                            onSnapshotAutomationModeChanged(value);
+                        },
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Retención',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: SnapshotRetention.values.map((
+                    SnapshotRetention option,
+                  ) {
                     return ChoiceChip(
                       selected: snapshotRetention == option,
                       label: Text(option.label),
                       onSelected: (_) => onSnapshotRetentionChanged(option),
                     );
-                  },
-                ).toList(),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Las acciones principales de instantáneas viven en '
-                'Más → Instantáneas. '
-                'Aquí solo se configura automatización y retención.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
+                  }).toList(),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Las acciones principales de instantáneas viven en '
+                  'Más → Instantáneas. '
+                  'Aquí solo se configura automatización y retención.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
           ),
-        ),
         if (showAdvanced)
           CardPanel(
             title: 'Notificaciones',
-          subtitle: 'Configura comportamiento; la gestión completa vive en Alertas.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Text('Alertas internas: al abrir app / actualizar precios.'),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                dense: true,
-                value: automaticLocalAlertsEnabled,
-                onChanged: onAutomaticLocalAlertsChanged,
-                title: const Text('Alertas automáticas locales'),
-                subtitle: Text(
-                  notificationsAllowed
-                      ? 'Revisión en segundo plano de Android.'
-                      : 'Permiso pendiente o denegado en Android.',
+            subtitle:
+                'Configura comportamiento; la gestión completa vive en Alertas.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  'Alertas internas: al abrir app / actualizar precios.',
                 ),
-                contentPadding: EdgeInsets.zero,
-              ),
-              const Text(
-                'Android puede agrupar o retrasar revisiones para ahorrar batería. '
-                'No son notificaciones push en la nube.',
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: PriceAlertService.automaticIntervalOptions.map((int minutes) {
-                  return ChoiceChip(
-                    selected: automaticLocalAlertsIntervalMinutes == minutes,
-                    label: Text(intervalLabel(minutes)),
-                    onSelected: (_) => onAutomaticLocalAlertIntervalChanged(minutes),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.tonalIcon(
-                onPressed: onOpenAlerts,
-                icon: const Icon(Icons.notifications_active_outlined),
-                label: const Text('Ir a Alertas'),
-              ),
-            ],
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  dense: true,
+                  value: automaticLocalAlertsEnabled,
+                  onChanged: onAutomaticLocalAlertsChanged,
+                  title: const Text('Alertas automáticas locales'),
+                  subtitle: Text(
+                    notificationsAllowed
+                        ? 'Revisión en segundo plano de Android.'
+                        : 'Permiso pendiente o denegado en Android.',
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const Text(
+                  'Android puede agrupar o retrasar revisiones para ahorrar batería. '
+                  'No son notificaciones push en la nube.',
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: PriceAlertService.automaticIntervalOptions.map((
+                    int minutes,
+                  ) {
+                    return ChoiceChip(
+                      selected: automaticLocalAlertsIntervalMinutes == minutes,
+                      label: Text(intervalLabel(minutes)),
+                      onSelected: (_) =>
+                          onAutomaticLocalAlertIntervalChanged(minutes),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: onOpenAlerts,
+                  icon: const Icon(Icons.notifications_active_outlined),
+                  label: const Text('Ir a Alertas'),
+                ),
+              ],
+            ),
           ),
-        ),
         if (showAdvanced)
           CardPanel(
             title: 'Copia de seguridad',
-          subtitle: 'Cuenta local. Próximamente: sincronización y copia en la nube.',
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              onPressed: onExportBackup,
-              icon: const Icon(Icons.data_object_outlined),
-              label: const Text('Copiar contenido de copia'),
+            subtitle:
+                'Cuenta local. Próximamente: sincronización y copia en la nube.',
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: onExportBackup,
+                icon: const Icon(Icons.data_object_outlined),
+                label: const Text('Copiar contenido de copia'),
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -11194,7 +12645,9 @@ class _ThemePaletteTile extends StatelessWidget {
                 : Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: selected ? palette.primary : Theme.of(context).colorScheme.outlineVariant,
+              color: selected
+                  ? palette.primary
+                  : Theme.of(context).colorScheme.outlineVariant,
               width: selected ? 2 : 1,
             ),
           ),
@@ -11204,34 +12657,38 @@ class _ThemePaletteTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(option.label, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      option.label,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 3),
                     Text(option.description),
                   ],
                 ),
               ),
               Row(
-                children: <Color>[
-                  palette.background,
-                  palette.surfaceAlt,
-                  palette.primary,
-                  palette.positive,
-                  palette.negative,
-                  palette.warning,
-                ]
-                    .map(
-                      (Color color) => Container(
-                        width: 18,
-                        height: 18,
-                        margin: const EdgeInsets.only(left: 4),
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: palette.border),
-                        ),
-                      ),
-                    )
-                    .toList(),
+                children:
+                    <Color>[
+                          palette.background,
+                          palette.surfaceAlt,
+                          palette.primary,
+                          palette.positive,
+                          palette.negative,
+                          palette.warning,
+                        ]
+                        .map(
+                          (Color color) => Container(
+                            width: 18,
+                            height: 18,
+                            margin: const EdgeInsets.only(left: 4),
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: palette.border),
+                            ),
+                          ),
+                        )
+                        .toList(),
               ),
             ],
           ),
@@ -11265,7 +12722,7 @@ class SnapshotTrendPanel extends StatelessWidget {
       subtitle: ordered.length < 2
           ? 'Necesitas otra instantánea para comparar la evolución.'
           : '${ordered.length} instantáneas entre '
-              '${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
+                '${shortDate(first.createdAt)} y ${shortDate(latest.createdAt)}.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -11349,15 +12806,15 @@ class SnapshotTrendPanel extends StatelessWidget {
               runSpacing: 8,
               children: <Widget>[
                 ChartLegendDot(label: 'Valor actual', color: colors.primary),
-                ChartLegendDot(label: 'Capital invertido', color: colors.tertiary),
+                ChartLegendDot(
+                  label: 'Capital invertido',
+                  color: colors.tertiary,
+                ),
                 ChartLegendDot(
                   label: 'P&L flotante',
                   color: pnlColor(latest.totalUnrealizedPL),
                 ),
-                ChartLegendDot(
-                  label: 'P&L cerrado',
-                  color: colors.secondary,
-                ),
+                ChartLegendDot(label: 'P&L cerrado', color: colors.secondary),
                 const ChartLegendDot(
                   label: 'Dominancia BTC',
                   color: Color(0xFFF7931A),
@@ -11482,7 +12939,8 @@ class SnapshotLineChartPainter extends CustomPainter {
       canvas.drawLine(Offset(chart.left, y), Offset(chart.right, y), gridPaint);
 
       final double value = maxValue - ((maxValue - minValue) * i / 4);
-      final String label = series.length == 1 && series.first.valueFormatter != null
+      final String label =
+          series.length == 1 && series.first.valueFormatter != null
           ? series.first.valueFormatter!(value)
           : moneyShort(value);
       _drawLabel(canvas, label, Offset(0, y - 8), labelColor);
@@ -11534,7 +12992,10 @@ class SnapshotLineChartPainter extends CustomPainter {
         canvas.drawCircle(Offset(xFor(i), yFor(item.values[i])), 3.5, dotPaint);
       }
 
-      final Offset lastPoint = Offset(xFor(pointCount - 1), yFor(item.values.last));
+      final Offset lastPoint = Offset(
+        xFor(pointCount - 1),
+        yFor(item.values.last),
+      );
       canvas.drawCircle(
         lastPoint,
         7.0,
@@ -11543,7 +13004,8 @@ class SnapshotLineChartPainter extends CustomPainter {
       canvas.drawCircle(lastPoint, 4.8, dotPaint);
       _drawValueTag(
         canvas,
-        item.valueFormatter?.call(item.values.last) ?? moneyShort(item.values.last),
+        item.valueFormatter?.call(item.values.last) ??
+            moneyShort(item.values.last),
         lastPoint.translate(10, -12 - (seriesIndex * 16.0)),
         chart,
         item.color,
@@ -11660,10 +13122,10 @@ class ChartLegendDot extends StatelessWidget {
   }
 }
 
-
 String _positionStatusLabel(CoinStats stats, double sellFeePercent) {
   if (stats.quantity <= 0) return 'Sin posición';
-  if (stats.isAtOrAboveNetBreakEven(sellFeePercent)) return 'Arriba del equilibrio';
+  if (stats.isAtOrAboveNetBreakEven(sellFeePercent))
+    return 'Arriba del equilibrio';
   final double distance = stats.percentToNetBreakEven(sellFeePercent);
   if (stats.unrealizedPL < 0 && distance > 25) return 'Fuerte pérdida';
   if (distance > 10) return 'Debajo del equilibrio';
@@ -11732,7 +13194,10 @@ class PremiumDashboardHero extends StatelessWidget {
                           ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   ],
                 ),
               ),
@@ -11853,14 +13318,20 @@ class PremiumInfoPanel extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                   const SizedBox(height: 3),
                   Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
             if (badge != null)
-              StatusPill(label: badge!, positive: (badgeColor ?? Colors.green) == Colors.green),
+              StatusPill(
+                label: badge!,
+                positive: (badgeColor ?? Colors.green) == Colors.green,
+              ),
           ],
         ),
       ),
@@ -12143,7 +13614,6 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-
 List<CoinStats> sortedPositions(
   Iterable<CoinStats> positions,
   PositionSortMode mode,
@@ -12225,9 +13695,9 @@ ThemeData buildPremiumTheme(AppPalette palette, Brightness brightness) {
       ),
     ),
     textTheme: ThemeData(brightness: brightness).textTheme.apply(
-          bodyColor: palette.textMain,
-          displayColor: palette.textMain,
-        ),
+      bodyColor: palette.textMain,
+      displayColor: palette.textMain,
+    ),
   );
 }
 
@@ -12274,20 +13744,20 @@ enum PriceRefreshForegroundMode {
 
 extension PriceRefreshForegroundModeLabel on PriceRefreshForegroundMode {
   String get label => switch (this) {
-        PriceRefreshForegroundMode.manual => 'Manual',
-        PriceRefreshForegroundMode.every25Seconds => '25 s',
-        PriceRefreshForegroundMode.everyMinute => '1 min',
-        PriceRefreshForegroundMode.every15Minutes => '15 min',
-        PriceRefreshForegroundMode.daily => 'Diario',
-      };
+    PriceRefreshForegroundMode.manual => 'Manual',
+    PriceRefreshForegroundMode.every25Seconds => '25 s',
+    PriceRefreshForegroundMode.everyMinute => '1 min',
+    PriceRefreshForegroundMode.every15Minutes => '15 min',
+    PriceRefreshForegroundMode.daily => 'Diario',
+  };
 
   Duration? get interval => switch (this) {
-        PriceRefreshForegroundMode.manual => null,
-        PriceRefreshForegroundMode.every25Seconds => const Duration(seconds: 25),
-        PriceRefreshForegroundMode.everyMinute => const Duration(minutes: 1),
-        PriceRefreshForegroundMode.every15Minutes => const Duration(minutes: 15),
-        PriceRefreshForegroundMode.daily => const Duration(days: 1),
-      };
+    PriceRefreshForegroundMode.manual => null,
+    PriceRefreshForegroundMode.every25Seconds => const Duration(seconds: 25),
+    PriceRefreshForegroundMode.everyMinute => const Duration(minutes: 1),
+    PriceRefreshForegroundMode.every15Minutes => const Duration(minutes: 15),
+    PriceRefreshForegroundMode.daily => const Duration(days: 1),
+  };
 }
 
 PriceRefreshForegroundMode priceRefreshForegroundModeFromName(String? value) {
@@ -12355,7 +13825,6 @@ class AppPalette {
         onInverseSurface: surface,
         inversePrimary: primarySoft,
       );
-
 }
 
 Color _bestOnColor(Color color) {
@@ -12612,7 +14081,8 @@ extension SnapshotAutomationModeDetails on SnapshotAutomationMode {
     final DateTime? latest = snapshots.isEmpty
         ? null
         : snapshots.first.createdAt;
-    final bool olderThan24h = latest == null ||
+    final bool olderThan24h =
+        latest == null ||
         DateTime.now().difference(latest) >= const Duration(hours: 24);
     switch (this) {
       case SnapshotAutomationMode.manual:
@@ -12670,6 +14140,7 @@ SnapshotRetention snapshotRetentionFromName(String? value) {
   }
   return SnapshotRetention.last30;
 }
+
 enum MovementType { buy, sell, transferIn, transferOut }
 
 enum SimulationMode { operation, rotation }
@@ -12741,7 +14212,6 @@ MovementType movementTypeFromAny(dynamic value) {
 
   return MovementType.buy;
 }
-
 
 class FinancialEngine {
   static const double defaultExitFeePercent = 0.0;
@@ -12939,7 +14409,9 @@ class FinancialEngine {
       if (movement.fee < 0) {
         errors.add('Movimiento #$number tiene comisión negativa');
       }
-      if (movement.date.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
+      if (movement.date.isAfter(
+        DateTime.now().add(const Duration(minutes: 5)),
+      )) {
         errors.add('Movimiento #$number tiene fecha futura');
       }
       for (int j = i + 1; j < movements.length; j++) {
@@ -13003,7 +14475,9 @@ class FinancialEngine {
         hasSnapshotMovementMismatch = false,
         hasSnapshotTotalsMismatch = false;
     for (final PortfolioSnapshot snapshot in snapshots) {
-      if (snapshot.createdAt.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
+      if (snapshot.createdAt.isAfter(
+        DateTime.now().add(const Duration(minutes: 5)),
+      )) {
         hasFutureSnapshot = true;
       }
       if (snapshot.movementCount > movements.length) {
@@ -13033,9 +14507,12 @@ class FinancialEngine {
       }
     }
     if (hasFutureSnapshot) errors.add('Snapshot con fecha futura');
-    if (hasUnsupportedSnapshotCoin) errors.add('Snapshot desalineado: moneda no soportada');
-    if (hasSnapshotMovementMismatch) errors.add('Snapshot desalineado: movimientos mayores al ledger actual');
-    if (hasSnapshotTotalsMismatch) errors.add('Snapshot desalineado: totales no coinciden con monedas');
+    if (hasUnsupportedSnapshotCoin)
+      errors.add('Snapshot desalineado: moneda no soportada');
+    if (hasSnapshotMovementMismatch)
+      errors.add('Snapshot desalineado: movimientos mayores al ledger actual');
+    if (hasSnapshotTotalsMismatch)
+      errors.add('Snapshot desalineado: totales no coinciden con monedas');
 
     return errors;
   }
@@ -13094,9 +14571,9 @@ class Movement {
     this.deletedAt,
     this.deviceId,
     this.schemaVersion = 1,
-  })  : id = id == null || id.trim().isEmpty ? _generateMovementId() : id,
-        createdAt = createdAt ?? date,
-        updatedAt = updatedAt ?? createdAt ?? date;
+  }) : id = id == null || id.trim().isEmpty ? _generateMovementId() : id,
+       createdAt = createdAt ?? date,
+       updatedAt = updatedAt ?? createdAt ?? date;
 
   double get grossTotal => quantity * unitPrice;
 
@@ -13222,8 +14699,9 @@ class CoinStats {
   double get currentValue => quantity * currentPrice;
   double get unrealizedPL => currentValue - costBase;
   double get breakEvenReal => avgPrice;
-  double breakEvenWithExitFee([double sellFeePercent = FinancialEngine.defaultExitFeePercent]) =>
-      netBreakEvenPrice(sellFeePercent);
+  double breakEvenWithExitFee([
+    double sellFeePercent = FinancialEngine.defaultExitFeePercent,
+  ]) => netBreakEvenPrice(sellFeePercent);
 
   double netBreakEvenPrice(double sellFeePercent) {
     if (quantity <= 0) return 0.0;
@@ -13356,13 +14834,12 @@ class PortfolioSnapshot {
   });
 
   String get dominantCoinLabel {
-    final List<CoinSnapshot> active = coins
-        .where((CoinSnapshot coin) => coin.currentValue > 0)
-        .toList()
-      ..sort(
-        (CoinSnapshot a, CoinSnapshot b) =>
-            b.currentValue.compareTo(a.currentValue),
-      );
+    final List<CoinSnapshot> active =
+        coins.where((CoinSnapshot coin) => coin.currentValue > 0).toList()
+          ..sort(
+            (CoinSnapshot a, CoinSnapshot b) =>
+                b.currentValue.compareTo(a.currentValue),
+          );
     if (active.isEmpty) return 'Sin posición dominante';
     final CoinSnapshot leader = active.first;
     final double share = totalCurrentValue <= 0
@@ -13371,12 +14848,14 @@ class PortfolioSnapshot {
     return '${leader.coin} · ${pct(share)}';
   }
 
-
   double get btcDominancePercent {
     if (totalCurrentValue <= 0) return 0.0;
     final double btcValue = coins
         .where((CoinSnapshot coin) => coin.coin.toUpperCase() == 'BTC')
-        .fold<double>(0.0, (double total, CoinSnapshot coin) => total + coin.currentValue);
+        .fold<double>(
+          0.0,
+          (double total, CoinSnapshot coin) => total + coin.currentValue,
+        );
     return (btcValue / totalCurrentValue) * 100;
   }
 
@@ -13434,11 +14913,13 @@ String money(double value) => '\$${value.toStringAsFixed(2)} MXN';
 String priceDisplay(double value) =>
     value > 0 ? money(value) : 'Precio no disponible';
 
-String priceStatusCsv(double value) => value > 0 ? 'disponible' : 'no_disponible';
+String priceStatusCsv(double value) =>
+    value > 0 ? 'disponible' : 'no_disponible';
 
 String priceStatusJson(double value) => value > 0 ? 'available' : 'unavailable';
 
-String priceStatusLabel(double value) => value > 0 ? 'Disponible' : 'No disponible';
+String priceStatusLabel(double value) =>
+    value > 0 ? 'Disponible' : 'No disponible';
 
 String moneyShort(double value) => '\$${value.toStringAsFixed(0)}';
 
@@ -13523,6 +15004,3 @@ Color pnlColor(double value) {
   if (value < 0) return const Color(0xFFDC2626);
   return Colors.grey.shade700;
 }
-
-
-

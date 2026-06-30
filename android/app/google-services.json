@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "767407830346-fhs53hlvnonjb7befttucbq5shqs0a6v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "mx.criptocontrolmx.app",
+            "certificate_hash": "ea3fd77c9817b888a7f608e790b73c526c3a0870"
+          }
+        },
+        {
           "client_id": "767407830346-bf771ge1ba2roalchb21a4j3fl8v8258.apps.googleusercontent.com",
           "client_type": 3
         }
