@@ -5335,18 +5335,20 @@ class CleanCoinCard extends StatelessWidget {
                         hasPrice
                             ? '${crypto(stats.quantity)} · BE ${money(stats.netBreakEvenPrice(sellFeePercent))}'
                             : '${crypto(stats.quantity)} · Precio no disponible',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 7),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: StatusPill(
+                          label: isRecovered
+                              ? 'Arriba del equilibrio'
+                              : _positionStatusLabel(stats, sellFeePercent),
+                          positive: isRecovered,
+                        ),
                       ),
                     ],
                   ),
-                ),
-                StatusPill(
-                  label: isRecovered
-                      ? 'Arriba del equilibrio'
-                      : _positionStatusLabel(stats, sellFeePercent),
-                  positive: isRecovered,
                 ),
               ],
             ),
@@ -6714,56 +6716,74 @@ class _MovementsTabState extends State<MovementsTab> {
             title: 'Filtros y búsqueda',
             subtitle: 'Acota el historial sin modificar los movimientos.',
           ),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _coinFilter,
-                  decoration: const InputDecoration(
-                    labelText: 'Moneda',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: <DropdownMenuItem<String>>[
-                    const DropdownMenuItem<String>(
-                      value: 'TODAS',
-                      child: Text('Todas'),
-                    ),
-                    ...widget.coins.map(
-                      (String c) =>
-                          DropdownMenuItem<String>(value: c, child: Text(c)),
-                    ),
-                  ],
-                  onChanged: (String? value) {
-                    setState(() => _coinFilter = value ?? 'TODAS');
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _typeFilter,
-                  decoration: const InputDecoration(
-                    labelText: 'Tipo',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: <DropdownMenuItem<String>>[
-                    const DropdownMenuItem<String>(
-                      value: 'TODOS',
-                      child: Text('Todos'),
-                    ),
-                    ...MovementType.values.map(
-                      (MovementType t) => DropdownMenuItem<String>(
-                        value: t.name,
-                        child: Text(t.shortLabel),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final double textScale = MediaQuery.textScalerOf(
+                context,
+              ).scale(1);
+              final bool stacked =
+                  constraints.maxWidth < 520 || textScale >= 1.35;
+              final double fieldWidth = stacked
+                  ? constraints.maxWidth
+                  : (constraints.maxWidth - 10) / 2;
+
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: <Widget>[
+                  SizedBox(
+                    width: fieldWidth,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _coinFilter,
+                      decoration: const InputDecoration(
+                        labelText: 'Moneda',
+                        border: OutlineInputBorder(),
                       ),
+                      items: <DropdownMenuItem<String>>[
+                        const DropdownMenuItem<String>(
+                          value: 'TODAS',
+                          child: Text('Todas'),
+                        ),
+                        ...widget.coins.map(
+                          (String c) => DropdownMenuItem<String>(
+                            value: c,
+                            child: Text(c),
+                          ),
+                        ),
+                      ],
+                      onChanged: (String? value) {
+                        setState(() => _coinFilter = value ?? 'TODAS');
+                      },
                     ),
-                  ],
-                  onChanged: (String? value) {
-                    setState(() => _typeFilter = value ?? 'TODOS');
-                  },
-                ),
-              ),
-            ],
+                  ),
+                  SizedBox(
+                    width: fieldWidth,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _typeFilter,
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: <DropdownMenuItem<String>>[
+                        const DropdownMenuItem<String>(
+                          value: 'TODOS',
+                          child: Text('Todos'),
+                        ),
+                        ...MovementType.values.map(
+                          (MovementType t) => DropdownMenuItem<String>(
+                            value: t.name,
+                            child: Text(t.shortLabel),
+                          ),
+                        ),
+                      ],
+                      onChanged: (String? value) {
+                        setState(() => _typeFilter = value ?? 'TODOS');
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
           TextField(
@@ -9253,16 +9273,18 @@ class AlertCoinRow extends StatelessWidget {
                 ),
                 Text(
                   'Ref ${money(referencePrice)} · Δ $variationText',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: StatusPill(
+                    label: triggered ? 'Revisar' : 'Normal',
+                    positive: !triggered,
+                  ),
                 ),
               ],
             ),
-          ),
-          StatusPill(
-            label: triggered ? 'Revisar' : 'Normal',
-            positive: !triggered,
           ),
         ],
       ),
@@ -9324,11 +9346,15 @@ class RecoveryAlertCoinRow extends StatelessWidget {
                   ),
                 ),
               ),
-              StatusPill(
-                label: triggered ? 'Revisar' : 'Normal',
-                positive: !triggered,
-              ),
             ],
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: StatusPill(
+              label: triggered ? 'Revisar' : 'Normal',
+              positive: !triggered,
+            ),
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -11901,8 +11927,6 @@ class _HeaderMetric extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   value,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontWeight: FontWeight.w800, color: color),
                 ),
               ],
@@ -12090,34 +12114,26 @@ class PremiumActionTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (badge != null) ...<Widget>[
-                          const SizedBox(width: 6),
-                          PremiumStatusBadge(
-                            label: badge!,
-                            tone: _premiumBadgeTone(badge!),
-                          ),
-                        ],
-                      ],
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
+                    if (badge != null) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: PremiumStatusBadge(
+                          label: badge!,
+                          tone: _premiumBadgeTone(badge!),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -12141,31 +12157,45 @@ class PremiumActionTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
                 color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Icon(icon, size: 22, color: colors.onSurfaceVariant),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          emptyTitle!,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Icon(icon, size: 22, color: colors.onSurfaceVariant),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              emptyTitle!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              emptySubtitle!,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          emptySubtitle!,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  if (emptyActionLabel != null && onEmptyAction != null)
-                    TextButton(
-                      onPressed: onEmptyAction,
-                      child: Text(emptyActionLabel!),
+                  if (emptyActionLabel != null &&
+                      onEmptyAction != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: onEmptyAction,
+                        child: Text(emptyActionLabel!),
+                      ),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -12396,19 +12426,22 @@ class SettingsTab extends StatelessWidget {
                   ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                SegmentedButton<AppVisualMode>(
-                  segments: AppVisualMode.values
-                      .map(
-                        (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
-                          value: mode,
-                          label: Text(mode.label),
-                        ),
-                      )
-                      .toList(),
-                  selected: <AppVisualMode>{visualMode},
-                  onSelectionChanged: (Set<AppVisualMode> value) {
-                    onVisualModeChanged(value.first);
-                  },
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SegmentedButton<AppVisualMode>(
+                    segments: AppVisualMode.values
+                        .map(
+                          (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
+                            value: mode,
+                            label: Text(mode.label),
+                          ),
+                        )
+                        .toList(),
+                    selected: <AppVisualMode>{visualMode},
+                    onSelectionChanged: (Set<AppVisualMode> value) {
+                      onVisualModeChanged(value.first);
+                    },
+                  ),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -13561,11 +13594,19 @@ class PremiumMetricCard extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
                 ],
+                if (statusLabel != null) ...<Widget>[
+                  const SizedBox(height: 7),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: PremiumStatusBadge(
+                      label: statusLabel!,
+                      tone: statusTone,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
-          if (statusLabel != null)
-            PremiumStatusBadge(label: statusLabel!, tone: statusTone),
         ],
       ),
     );
@@ -13604,15 +13645,20 @@ class PremiumInfoPanel extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 3),
-                Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(subtitle),
+                if (badge != null) ...<Widget>[
+                  const SizedBox(height: 7),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: StatusPill(
+                      label: badge!,
+                      positive: (badgeColor ?? Colors.green) == Colors.green,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
-          if (badge != null)
-            StatusPill(
-              label: badge!,
-              positive: (badgeColor ?? Colors.green) == Colors.green,
-            ),
         ],
       ),
     );
@@ -13647,8 +13693,6 @@ class MiniMetric extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(fontWeight: FontWeight.w900, color: color),
           ),
         ],
@@ -13820,22 +13864,41 @@ class InfoLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(flex: 5, child: Text(label)),
-          Expanded(
-            flex: 6,
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontWeight: emphasized ? FontWeight.w700 : FontWeight.w400,
-                color: valueColor,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final double textScale = MediaQuery.textScalerOf(context).scale(1);
+          final bool stacked = constraints.maxWidth < 300 || textScale >= 1.4;
+          final TextStyle valueStyle = TextStyle(
+            fontWeight: emphasized ? FontWeight.w700 : FontWeight.w400,
+            color: valueColor,
+          );
+
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(label, style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 2),
+                Text(value, style: valueStyle),
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(flex: 5, child: Text(label)),
+              Expanded(
+                flex: 6,
+                child: Text(
+                  value,
+                  textAlign: TextAlign.right,
+                  style: valueStyle,
+                ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
