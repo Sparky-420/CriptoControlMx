@@ -75,6 +75,12 @@ void main() {
                     badge: 'No conectado',
                   ),
                   SizedBox(height: 12),
+                  PremiumQuickActions(
+                    expanded: true,
+                    onCapture: _noop,
+                    onAdd: _noop,
+                  ),
+                  SizedBox(height: 12),
                   PremiumMetricCard(
                     label: 'P&L no realizado',
                     value: r'$-123,456,789.99 MXN',
@@ -107,3 +113,5 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 }
+
+void _noop() {}

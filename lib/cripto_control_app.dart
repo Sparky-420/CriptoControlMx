@@ -4543,9 +4543,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             onViewSnapshots: () => _showSnapshots(pageContext),
           );
 
-          Widget buildMovementsTab() => MovementsTab(
+          Widget buildMovementsTab({bool startWithOcr = false}) => MovementsTab(
             movements: _movements,
             coins: _coins,
+            startWithOcr: startWithOcr,
             onAdd: () => _showAddMovementSheet(pageContext),
             onAddFromOcr: (_OcrMovementCandidate candidate) =>
                 _showAddMovementSheet(pageContext, ocrCandidate: candidate),
@@ -4559,6 +4560,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               _saveMovementAndMaybeSnapshot(SnapshotTrigger.movementChange);
             },
           );
+
+          void openMovementHistory({bool startWithOcr = false}) {
+            openMorePage(
+              'Historial de movimientos',
+              (_) => buildMovementsTab(startWithOcr: startWithOcr),
+            );
+          }
 
           Widget buildSettingsTab({
             VoidCallback? refresh,
@@ -4670,6 +4678,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               sellFeePercent: _sellFeePercent,
               priceModes: _priceModes,
               manualPriceUpdatedAtMs: _manualPriceUpdatedAtMs,
+              onRefreshPrices: () => _refreshPricesNow(pageContext),
               onEditPrice: (String coin) =>
                   _showEditPriceDialog(pageContext, coin),
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
@@ -4776,10 +4785,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 'Gráficas',
                 (VoidCallback refresh) => buildChartsTab(refresh: refresh),
               ),
-              onOpenMovements: () => openMorePage(
-                'Historial de movimientos',
-                (_) => buildMovementsTab(),
-              ),
+              onOpenMovements: openMovementHistory,
               onOpenPriceSettings: () => openMorePage(
                 'Actualización de precios',
                 (VoidCallback refresh) => buildSettingsTab(
@@ -4849,24 +4855,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             appBar: AppBar(
               title: const Text('CriptoControlMx'),
               actions: <Widget>[
-                IconButton(
-                  tooltip: 'Actualizar precios',
-                  onPressed: _isRefreshingPrices
-                      ? null
-                      : () => _refreshPricesNow(pageContext),
-                  icon: _isRefreshingPrices
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.sync),
-                ),
-                IconButton(
-                  tooltip: 'Nuevo movimiento',
-                  onPressed: () => _showAddMovementSheet(pageContext),
-                  icon: const Icon(Icons.add),
-                ),
+                if (_currentIndex != 0)
+                  PremiumQuickActions(
+                    onCapture: () => openMovementHistory(startWithOcr: true),
+                    onAdd: () => _showAddMovementSheet(pageContext),
+                  ),
+                if (_currentIndex != 0) const SizedBox(width: 8),
               ],
             ),
             body: IndexedStack(index: _currentIndex, children: pages),
@@ -4914,7 +4908,7 @@ class SummaryTab extends StatelessWidget {
   final void Function(CoinStats stats) onDetails;
   final VoidCallback onAddMovement;
   final VoidCallback onImportBackup;
-  final VoidCallback onRefreshPrices;
+  final Future<void> Function() onRefreshPrices;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
   final VoidCallback onViewSnapshotEvolution;
@@ -5006,150 +5000,149 @@ class SummaryTab extends StatelessWidget {
         .length;
 
     return PremiumScaffoldSurface(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-        children: <Widget>[
-          PremiumDashboardHero(
-            title: 'Resumen ejecutivo',
-            subtitle: leader == null
-                ? 'Panorama limpio para activar decisiones de cartera.'
-                : '${leader.coin} lidera la cartera por valor actual.',
-            icon: Icons.space_dashboard_outlined,
-            metrics: <PremiumMetricData>[
-              PremiumMetricData(
-                label: 'Valor de cartera',
-                value: moneyShort(totals.currentValue),
-                icon: Icons.account_balance_wallet_outlined,
-              ),
-              PremiumMetricData(
-                label: 'P&L no realizado',
-                value: moneyShort(totals.unrealizedPL),
-                color: pnlColor(totals.unrealizedPL),
-                icon: totals.unrealizedPL >= 0
-                    ? Icons.trending_up
-                    : Icons.trending_down,
-              ),
-              PremiumMetricData(
-                label: 'P&L realizado',
-                value: moneyShort(totals.realizedPL),
-                color: pnlColor(totals.realizedPL),
-                icon: Icons.payments_outlined,
-              ),
-              PremiumMetricData(
-                label: 'Mayor posición',
-                value: leader?.coin ?? '—',
-                icon: Icons.military_tech_outlined,
-              ),
-            ],
-          ),
-          if (!hasMovements)
-            CardPanel(
-              title: 'Bienvenido a CriptoControlMx',
-              subtitle:
-                  'Empieza con tu primer movimiento o restaura una copia de seguridad. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const Icon(Icons.tips_and_updates_outlined),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '1. Registra una compra, venta, entrada o salida.\n2. Actualiza precios para valorar tu cartera.\n3. Guarda instantáneas para construir historial y gráficas.',
-                          style: Theme.of(context).textTheme.bodyMedium,
+      child: RefreshIndicator(
+        onRefresh: onRefreshPrices,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          children: <Widget>[
+            PremiumDashboardHero(
+              title: 'Resumen ejecutivo',
+              subtitle: leader == null
+                  ? 'Panorama limpio para activar decisiones de cartera.'
+                  : '${leader.coin} lidera la cartera por valor actual.',
+              icon: Icons.space_dashboard_outlined,
+              metrics: <PremiumMetricData>[
+                PremiumMetricData(
+                  label: 'Valor de cartera',
+                  value: moneyShort(totals.currentValue),
+                  icon: Icons.account_balance_wallet_outlined,
+                ),
+                PremiumMetricData(
+                  label: 'P&L no realizado',
+                  value: moneyShort(totals.unrealizedPL),
+                  color: pnlColor(totals.unrealizedPL),
+                  icon: totals.unrealizedPL >= 0
+                      ? Icons.trending_up
+                      : Icons.trending_down,
+                ),
+                PremiumMetricData(
+                  label: 'P&L realizado',
+                  value: moneyShort(totals.realizedPL),
+                  color: pnlColor(totals.realizedPL),
+                  icon: Icons.payments_outlined,
+                ),
+                PremiumMetricData(
+                  label: 'Mayor posición',
+                  value: leader?.coin ?? '—',
+                  icon: Icons.military_tech_outlined,
+                ),
+              ],
+            ),
+            if (!hasMovements)
+              CardPanel(
+                title: 'Bienvenido a CriptoControlMx',
+                subtitle:
+                    'Empieza con tu primer movimiento o restaura una copia de seguridad. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Icon(Icons.tips_and_updates_outlined),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '1. Registra una compra, venta, entrada o salida.\n2. Actualiza precios para valorar tu cartera.\n3. Guarda instantáneas para construir historial y gráficas.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      FilledButton.icon(
-                        onPressed: onAddMovement,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Agregar movimiento'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: onImportBackup,
-                        icon: const Icon(Icons.upload_file_outlined),
-                        label: const Text('Restaurar copia'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: onRefreshPrices,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Actualizar precios'),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton.icon(
+                          onPressed: onAddMovement,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Agregar movimiento'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onImportBackup,
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: const Text('Restaurar copia'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 18),
+            LatestSnapshotCard(
+              snapshot: latestSnapshot,
+              onSaveSnapshot: onSaveSnapshot,
+              onViewSnapshots: onViewSnapshots,
+              onViewEvolution: onViewSnapshotEvolution,
+            ),
+            const SizedBox(height: 10),
+            _CommandSection(
+              title: 'Panorama',
+              children: <Widget>[
+                PremiumMetricCard(
+                  label: 'Invertido',
+                  value: money(totals.costBase),
+                  icon: Icons.savings_outlined,
+                ),
+                PremiumMetricCard(
+                  label: 'Posiciones arriba del equilibrio',
+                  value: '$recovered / ${active.length}',
+                  icon: Icons.verified_outlined,
+                  color: Colors.green,
+                ),
+              ],
+            ),
+            _CommandSection(
+              title: 'Foco inmediato',
+              children: <Widget>[
+                PremiumInfoPanel(
+                  icon: Icons.leaderboard_outlined,
+                  title: 'Mayor posición',
+                  subtitle: leader == null
+                      ? 'Sin posiciones abiertas'
+                      : '${leader.coin} · ${money(leader.currentValue)}',
+                  badge: leader == null ? 'Pendiente' : 'Dominante',
+                ),
+                PremiumInfoPanel(
+                  icon: Icons.warning_amber_rounded,
+                  title: 'Resultado a vigilar',
+                  subtitle: weakest == null
+                      ? 'Sin pérdidas abiertas'
+                      : '${weakest.coin} · ${money(weakest.unrealizedPL)}',
+                  badge: weakest == null
+                      ? 'Normal'
+                      : _positionStatusLabel(weakest, sellFeePercent),
+                  badgeColor: weakest == null
+                      ? Colors.green
+                      : pnlColor(weakest.unrealizedPL),
+                ),
+              ],
+            ),
+            _CommandSection(
+              title:
+                  'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
+              children: _buildVisiblePositionChildren(
+                active: active,
+                visibleActive: visibleActive,
+                sellFeePercent: sellFeePercent,
+                positionSortMode: positionSortMode,
+                onDetails: onDetails,
               ),
             ),
-          const SizedBox(height: 18),
-          LatestSnapshotCard(
-            snapshot: latestSnapshot,
-            onSaveSnapshot: onSaveSnapshot,
-            onViewSnapshots: onViewSnapshots,
-            onViewEvolution: onViewSnapshotEvolution,
-          ),
-          const SizedBox(height: 10),
-          _CommandSection(
-            title: 'Panorama',
-            children: <Widget>[
-              PremiumMetricCard(
-                label: 'Invertido',
-                value: money(totals.costBase),
-                icon: Icons.savings_outlined,
-              ),
-              PremiumMetricCard(
-                label: 'Posiciones arriba del equilibrio',
-                value: '$recovered / ${active.length}',
-                icon: Icons.verified_outlined,
-                color: Colors.green,
-              ),
-            ],
-          ),
-          _CommandSection(
-            title: 'Foco inmediato',
-            children: <Widget>[
-              PremiumInfoPanel(
-                icon: Icons.leaderboard_outlined,
-                title: 'Mayor posición',
-                subtitle: leader == null
-                    ? 'Sin posiciones abiertas'
-                    : '${leader.coin} · ${money(leader.currentValue)}',
-                badge: leader == null ? 'Pendiente' : 'Dominante',
-              ),
-              PremiumInfoPanel(
-                icon: Icons.warning_amber_rounded,
-                title: 'Resultado a vigilar',
-                subtitle: weakest == null
-                    ? 'Sin pérdidas abiertas'
-                    : '${weakest.coin} · ${money(weakest.unrealizedPL)}',
-                badge: weakest == null
-                    ? 'Normal'
-                    : _positionStatusLabel(weakest, sellFeePercent),
-                badgeColor: weakest == null
-                    ? Colors.green
-                    : pnlColor(weakest.unrealizedPL),
-              ),
-            ],
-          ),
-          _CommandSection(
-            title:
-                'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
-            children: _buildVisiblePositionChildren(
-              active: active,
-              visibleActive: visibleActive,
-              sellFeePercent: sellFeePercent,
-              positionSortMode: positionSortMode,
-              onDetails: onDetails,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -5385,6 +5378,7 @@ class CleanCoinCard extends StatelessWidget {
 class MovementsTab extends StatefulWidget {
   final List<Movement> movements;
   final List<String> coins;
+  final bool startWithOcr;
   final Future<void> Function() onAdd;
   final Future<void> Function(_OcrMovementCandidate candidate) onAddFromOcr;
   final Future<void> Function(Movement movement) onEdit;
@@ -5394,6 +5388,7 @@ class MovementsTab extends StatefulWidget {
     super.key,
     required this.movements,
     required this.coins,
+    this.startWithOcr = false,
     required this.onAdd,
     required this.onAddFromOcr,
     required this.onEdit,
@@ -5449,6 +5444,16 @@ class _MovementsTabState extends State<MovementsTab> {
   DateTime? _toDate;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.startWithOcr) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_runOcrFromCapture());
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
@@ -5489,58 +5494,6 @@ class _MovementsTabState extends State<MovementsTab> {
   Future<void> _addMovement() async {
     await widget.onAdd();
     if (mounted) setState(() {});
-  }
-
-  void _showAddMovementEntrySheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (BuildContext sheetContext) => SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Agregar movimiento',
-                style: Theme.of(sheetContext).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () async {
-                    Navigator.of(sheetContext).pop();
-                    await Future<void>.delayed(Duration.zero);
-                    if (!mounted) return;
-                    await _addMovement();
-                  },
-                  icon: const Icon(Icons.edit_note_outlined),
-                  label: const Text('Capturar manualmente'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    Navigator.of(sheetContext).pop();
-                    await Future<void>.delayed(Duration.zero);
-                    if (!mounted) return;
-                    await _runOcrFromCapture();
-                  },
-                  icon: const Icon(Icons.document_scanner_outlined),
-                  label: const Text('Importar desde captura'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> _runOcrFromCapture() async {
@@ -6851,22 +6804,10 @@ class _MovementsTabState extends State<MovementsTab> {
             ],
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _showAddMovementEntrySheet,
-              icon: const Icon(Icons.add),
-              label: const Text('Agregar movimiento'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _runOcrFromCapture,
-              icon: const Icon(Icons.document_scanner_outlined),
-              label: const Text('Importar desde captura'),
-            ),
+          PremiumQuickActions(
+            expanded: true,
+            onCapture: _runOcrFromCapture,
+            onAdd: _addMovement,
           ),
           const SizedBox(height: 16),
           PremiumSectionHeader(
@@ -8623,6 +8564,7 @@ class CoinsTab extends StatelessWidget {
   final double sellFeePercent;
   final Map<String, String> priceModes;
   final Map<String, int> manualPriceUpdatedAtMs;
+  final Future<void> Function() onRefreshPrices;
   final void Function(String coin) onEditPrice;
   final void Function(CoinStats stats) onDetails;
 
@@ -8633,6 +8575,7 @@ class CoinsTab extends StatelessWidget {
     required this.sellFeePercent,
     required this.priceModes,
     required this.manualPriceUpdatedAtMs,
+    required this.onRefreshPrices,
     required this.onEditPrice,
     required this.onDetails,
   });
@@ -8646,49 +8589,53 @@ class CoinsTab extends StatelessWidget {
         .where((String coin) => (stats[coin]?.currentPrice ?? 0) > 0)
         .length;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-      children: <Widget>[
-        PremiumDashboardHero(
-          title: 'Monedas',
-          subtitle: 'Precios y lectura general de tus posiciones',
-          icon: Icons.token_outlined,
-          metrics: <PremiumMetricData>[
-            PremiumMetricData(
-              label: 'Activas',
-              value: '$activeCount / ${coins.length}',
-              icon: Icons.account_balance_wallet_outlined,
-            ),
-            PremiumMetricData(
-              label: 'Actualizadas',
-              value: '$pricedCount precios',
-              icon: Icons.price_check_outlined,
-            ),
-            PremiumMetricData(
-              label: 'Fuente',
-              value: 'CoinGecko',
-              icon: Icons.cloud_outlined,
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        _CommandSection(
-          title: 'Paneles por moneda',
-          children: coins.map((String coin) {
-            final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
-            return PremiumCoinCard(
-              stat: stat,
-              sellFeePercent: sellFeePercent,
-              priceMode: priceModes[coin] == PriceService.manualMode
-                  ? PriceService.manualMode
-                  : PriceService.automaticMode,
-              manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
-              onEditPrice: () => onEditPrice(coin),
-              onDetails: () => onDetails(stat),
-            );
-          }).toList(),
-        ),
-      ],
+    return RefreshIndicator(
+      onRefresh: onRefreshPrices,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        children: <Widget>[
+          PremiumDashboardHero(
+            title: 'Monedas',
+            subtitle: 'Precios y lectura general de tus posiciones',
+            icon: Icons.token_outlined,
+            metrics: <PremiumMetricData>[
+              PremiumMetricData(
+                label: 'Activas',
+                value: '$activeCount / ${coins.length}',
+                icon: Icons.account_balance_wallet_outlined,
+              ),
+              PremiumMetricData(
+                label: 'Actualizadas',
+                value: '$pricedCount precios',
+                icon: Icons.price_check_outlined,
+              ),
+              PremiumMetricData(
+                label: 'Fuente',
+                value: 'CoinGecko',
+                icon: Icons.cloud_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _CommandSection(
+            title: 'Paneles por moneda',
+            children: coins.map((String coin) {
+              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+              return PremiumCoinCard(
+                stat: stat,
+                sellFeePercent: sellFeePercent,
+                priceMode: priceModes[coin] == PriceService.manualMode
+                    ? PriceService.manualMode
+                    : PriceService.automaticMode,
+                manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
+                onEditPrice: () => onEditPrice(coin),
+                onDetails: () => onDetails(stat),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -12048,6 +11995,99 @@ class _CommandSection extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class PremiumQuickActions extends StatelessWidget {
+  final VoidCallback onCapture;
+  final VoidCallback onAdd;
+  final bool expanded;
+
+  const PremiumQuickActions({
+    super.key,
+    required this.onCapture,
+    required this.onAdd,
+    this.expanded = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Widget compactActions = Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Semantics(
+            button: true,
+            label: 'Importar desde captura',
+            child: IconButton(
+              tooltip: 'Importar desde captura',
+              visualDensity: VisualDensity.compact,
+              onPressed: onCapture,
+              icon: const Icon(Icons.document_scanner_outlined),
+            ),
+          ),
+          const SizedBox(width: 2),
+          Semantics(
+            button: true,
+            label: 'Agregar movimiento',
+            child: IconButton.filled(
+              tooltip: 'Agregar movimiento',
+              visualDensity: VisualDensity.compact,
+              onPressed: onAdd,
+              icon: const Icon(Icons.add),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!expanded) return compactActions;
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double textScale = MediaQuery.textScalerOf(context).scale(1);
+        final bool iconOnly = constraints.maxWidth < 300 || textScale >= 1.35;
+
+        if (iconOnly) {
+          return Align(alignment: Alignment.centerRight, child: compactActions);
+        }
+
+        return Row(
+          children: <Widget>[
+            Expanded(
+              child: Tooltip(
+                message: 'Importar desde captura',
+                child: FilledButton.tonalIcon(
+                  onPressed: onCapture,
+                  icon: const Icon(Icons.document_scanner_outlined),
+                  label: const Text('Captura'),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Tooltip(
+                message: 'Agregar movimiento',
+                child: FilledButton.icon(
+                  onPressed: onAdd,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Agregar'),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
