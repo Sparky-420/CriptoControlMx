@@ -6636,6 +6636,12 @@ class _MovementsTabState extends State<MovementsTab> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: <Widget>[
+          PremiumQuickActions(
+            expanded: true,
+            onCapture: _runOcrFromCapture,
+            onAdd: _addMovement,
+          ),
+          const SizedBox(height: 16),
           PremiumDashboardHero(
             title: 'Historial de movimientos',
             subtitle:
@@ -6802,12 +6808,6 @@ class _MovementsTabState extends State<MovementsTab> {
                   label: const Text('Limpiar'),
                 ),
             ],
-          ),
-          const SizedBox(height: 12),
-          PremiumQuickActions(
-            expanded: true,
-            onCapture: _runOcrFromCapture,
-            onAdd: _addMovement,
           ),
           const SizedBox(height: 16),
           PremiumSectionHeader(
