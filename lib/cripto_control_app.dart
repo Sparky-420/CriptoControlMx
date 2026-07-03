@@ -473,7 +473,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   String? _firebaseDeviceId;
   DateTime? _cloudStateUploadedAt;
   DateTime? _cloudStateDownloadedAt;
-  bool _isGoogleConnecting = false;
+  bool _isGoogleConnecting = true;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
   String? _googleDriveBackupFileId;
@@ -499,7 +499,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (_firebaseUser != null) {
       unawaited(_ensureCloudProfile(showError: false));
     }
-    unawaited(_ensureGoogleSignInInitialized().catchError((_) {}));
+    unawaited(_rehydrateGoogleDrive());
     unawaited(
       _logSafeAnalyticsEvent(
         name: 'app_opened',
@@ -532,6 +532,28 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (_) {
       _googleSignInInitFuture = null;
       rethrow;
+    }
+  }
+
+  Future<void> _rehydrateGoogleDrive() async {
+    try {
+      await _ensureGoogleSignInInitialized();
+      final Future<GoogleSignInAccount?>? authenticationAttempt = GoogleSignIn
+          .instance
+          .attemptLightweightAuthentication();
+      final GoogleSignInAccount? account = authenticationAttempt == null
+          ? null
+          : await authenticationAttempt;
+      if (account == null) return;
+
+      final Map<String, String>? authHeaders = await account.authorizationClient
+          .authorizationHeaders(_googleDriveScopes);
+      if (!mounted || authHeaders == null) return;
+      setState(() => _googleAccount = account);
+    } catch (_) {
+      // Startup remains non-interactive: Drive can be reconnected manually.
+    } finally {
+      if (mounted) setState(() => _isGoogleConnecting = false);
     }
   }
 
@@ -1286,6 +1308,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           : Future<GoogleSignInClientAuthorization>.value(
               currentAuthorization,
             ));
+      final Map<String, String>? authHeaders = await account.authorizationClient
+          .authorizationHeaders(_googleDriveScopes);
+      if (authHeaders == null) {
+        throw StateError('Google Drive authorization headers unavailable');
+      }
 
       if (!mounted || !pageContext.mounted) return;
       setState(() => _googleAccount = account);
@@ -10255,10 +10282,10 @@ class MoreTab extends StatelessWidget {
       isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
   String get googleDriveBackupLabel => googleDriveBackupUpdatedAt == null
       ? 'Sin copia en Drive'
-      : longDate(googleDriveBackupUpdatedAt!);
+      : longDate(googleDriveBackupUpdatedAt!.toLocal());
   String get googleDriveBackupStatus => googleDriveBackupUpdatedAt == null
       ? 'Sin copia en Drive'
-      : 'Última copia en Drive: ${longDate(googleDriveBackupUpdatedAt!)}';
+      : 'Última copia en Drive: ${longDate(googleDriveBackupUpdatedAt!.toLocal())}';
 
   @override
   Widget build(BuildContext context) {
@@ -10295,10 +10322,16 @@ class MoreTab extends StatelessWidget {
               PremiumActionTile(
                 icon: Icons.cloud_done_outlined,
                 title: 'Google Drive',
-                subtitle: googleDriveConnected
+                subtitle: isGoogleConnecting
+                    ? 'Verificando autorización de Google Drive...'
+                    : googleDriveConnected
                     ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Última copia: $googleDriveBackupLabel'
-                    : 'No conectado · Conecta tu cuenta para crear y restaurar copias en la nube.',
-                badge: googleDriveConnected ? 'Conectado' : 'No conectado',
+                    : 'Conecta Google Drive para crear y restaurar copias.',
+                badge: isGoogleConnecting
+                    ? 'Verificando'
+                    : googleDriveConnected
+                    ? 'Conectado'
+                    : 'No conectado',
                 loading: googleDriveBusy,
                 onTap: () => _showGoogleDriveActions(context),
               ),
@@ -10559,12 +10592,16 @@ class MoreTab extends StatelessWidget {
             icon: googleDriveConnected
                 ? Icons.link_off_outlined
                 : Icons.cloud_sync_outlined,
-            title: googleDriveConnected
+            title: isGoogleConnecting
+                ? 'Verificando conexión'
+                : googleDriveConnected
                 ? 'Desconectar'
                 : 'Conectar Google Drive',
-            subtitle: googleDriveConnected
+            subtitle: isGoogleConnecting
+                ? 'Comprobando autorización de Google Drive sin abrir el inicio de sesión.'
+                : googleDriveConnected
                 ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Estado: conectado'
-                : 'Estado: no conectado · Conecta tu cuenta para crear y restaurar copias en la nube.',
+                : 'Conecta Google Drive para crear y restaurar copias.',
             onTap: googleDriveBusy
                 ? null
                 : googleDriveConnected
