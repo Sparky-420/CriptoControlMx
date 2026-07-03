@@ -49,6 +49,122 @@ void main() {
     expect(numberFromJson('bad'), 0);
   });
 
+  group('Mercado Pago OCR amount ranking', () {
+    test('separates total, commission, unit price and crypto quantity', () {
+      final Map<String, Object?> parsed = _parseOcrForTest('''
+Mercado Pago
+Compraste Bitcoin
+Total \$1,970
+Comisi\u00f3n \$30
+Precio de Bitcoin \$1,234,567.89
+Cantidad 0.0015 BTC
+Fecha 2 jul 2026
+''');
+
+      expect(parsed['platform'], 'Mercado Pago');
+      expect(parsed['coin'], 'BTC');
+      expect(parsed['amount'], 1970);
+      expect(parsed['commission'], 30);
+      expect(parsed['unitPrice'], 1234567.89);
+      expect(parsed['quantity'], 0.0015);
+      expect(
+        parsed['warnings'],
+        contains('Revisa el monto y la comisi\u00f3n detectados.'),
+      );
+    });
+
+    test('total pagado outranks an earlier commission', () {
+      final Map<String, Object?> parsed = _parseOcrForTest('''
+Mercado Pago
+Comisi\u00f3n \$30
+Total pagado \$1,970
+''');
+
+      expect(parsed['amount'], 1970);
+      expect(parsed['commission'], 30);
+    });
+
+    test('unit price never replaces total', () {
+      final Map<String, Object?> parsed = _parseOcrForTest('''
+Mercado Pago
+Precio de Bitcoin \$1,234,567.89
+Comisi\u00f3n \$30
+Total \$1,970
+''');
+
+      expect(parsed['amount'], 1970);
+      expect(parsed['commission'], 30);
+      expect(parsed['unitPrice'], 1234567.89);
+    });
+
+    test('associates values when ML Kit groups labels before amounts', () {
+      final Map<String, Object?> parsed = _parseOcrForTest('''
+LINK
+5.22005934
+Chainlink
+Compra
+Monto
+Comisi\u00f3n de compra (1.5%)
+Total
+Precio
+LINK 1 \$ 132.09
+Medio de pago
+N.\u00b0 de operaci\u00f3n
+162944530096
+\$ 689.50
+Saldo Disponible en Mercado Pago Wallet
+\$ 10.50
+\$ 700.00
+Creada el 6 de junio de 2026 - 23:10 hs
+''');
+
+      expect(parsed['platform'], 'Mercado Pago');
+      expect(parsed['coin'], 'LINK');
+      expect(parsed['amount'], 700);
+      expect(parsed['commission'], 10.50);
+      expect(parsed['unitPrice'], 132.09);
+      expect(parsed['quantity'], 5.22005934);
+    });
+
+    test('keeps zero commission for a Mercado Pago reception', () {
+      final Map<String, Object?> parsed = _parseOcrForTest('''
+LINK
+12.80184227
+Chainlink
+Recepci\u00f3n
+Equivalencia \$1,976.99
+Recepci\u00f3n desde
+Wallet externa
+Precio
+LINK 1 \u2248 \$154.43
+Creada el 4 de abril de 2026 - 08:21 hs
+''');
+
+      expect(parsed['platform'], 'Mercado Pago');
+      expect(parsed['coin'], 'LINK');
+      expect(parsed['amount'], 1976.99);
+      expect(parsed['commission'], 0);
+      expect(parsed['unitPrice'], 154.43);
+      expect(parsed['quantity'], 12.80184227);
+    });
+  });
+
+  test('Bitso OCR routing remains intact', () {
+    final Map<String, Object?> parsed = _parseOcrForTest('''
+Bitso
+Buy
+Monto gastado 1970 MXN
+Cantidad 0.0015 BTC
+1 BTC = 1313333.33 MXN
+Date 2 jul 2026 12:00
+''');
+
+    expect(parsed['platform'], 'Bitso');
+    expect(parsed['coin'], 'BTC');
+    expect(parsed['amount'], 1970);
+    expect(parsed['unitPrice'], 1313333.33);
+  });
+
   testWidgets('premium cards support compact width and large text', (
     WidgetTester tester,
   ) async {
@@ -112,6 +228,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+}
+
+Map<String, Object?> _parseOcrForTest(String text) {
+  final dynamic state = MovementsTab(
+    movements: <Movement>[],
+    coins: const <String>['BTC', 'ETH'],
+    onAdd: () async {},
+    onAddFromOcr: (_) async {},
+    onEdit: (_) async {},
+    onDelete: (_) {},
+  ).createState();
+  return state.parseOcrForTesting(text) as Map<String, Object?>;
 }
 
 void _noop() {}

@@ -5882,7 +5882,12 @@ class _MovementsTabState extends State<MovementsTab> {
             ? value.replaceAll('.', '').replaceAll(',', '.')
             : value.replaceAll(',', '');
       } else if (comma >= 0) {
-        value = value.replaceAll(',', '.');
+        final int decimalDigits = value.length - comma - 1;
+        final String integerPart = value.substring(0, comma);
+        value =
+            decimalDigits == 3 && integerPart.isNotEmpty && integerPart != '0'
+            ? value.replaceAll(',', '')
+            : value.replaceAll(',', '.');
       }
       return double.tryParse(value);
     }
@@ -6084,11 +6089,11 @@ class _MovementsTabState extends State<MovementsTab> {
     for (final RegExpMatch match in moneyWithSymbol.allMatches(lower)) {
       if (hasPercentContext(lower, match.start, match.end)) continue;
       final String before = lower.substring(
-        math.max(0, match.start - 32),
+        math.max(0, match.start - 48),
         match.start,
       );
       if (RegExp(
-        r'(comision|cargo|fee|costo de servicio|precio|cotizacion)',
+        r'(comision|cargo|fee|costo (?:por|de) operacion|costo de servicio|precio|cotizacion|tipo de cambio|valor de (?:1 )?(?:bitcoin|btc|ethereum|eth|chainlink|link|litecoin|ltc|uniswap|uni|tether|usdt|usd coin|usdc|ripple|xrp|solana|sol|cosmos|atom))',
       ).hasMatch(before)) {
         continue;
       }
@@ -6097,11 +6102,11 @@ class _MovementsTabState extends State<MovementsTab> {
     for (final RegExpMatch match in moneyWithCurrency.allMatches(lower)) {
       if (hasPercentContext(lower, match.start, match.end)) continue;
       final String before = lower.substring(
-        math.max(0, match.start - 32),
+        math.max(0, match.start - 48),
         match.start,
       );
       if (RegExp(
-        r'(comision|cargo|fee|costo de servicio|precio|cotizacion)',
+        r'(comision|cargo|fee|costo (?:por|de) operacion|costo de servicio|precio|cotizacion|tipo de cambio|valor de (?:1 )?(?:bitcoin|btc|ethereum|eth|chainlink|link|litecoin|ltc|uniswap|uni|tether|usdt|usd coin|usdc|ripple|xrp|solana|sol|cosmos|atom))',
       ).hasMatch(before)) {
         continue;
       }
@@ -6109,13 +6114,17 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     final RegExp amountLabel = RegExp(
-      r'\b(monto|pagaste|recibiste|equivalencia)\b',
+      r'\b(monto(?! total)|pagaste|recibiste|equivalencia|compraste|compra de|operacion|movimiento)\b',
     );
-    final RegExp totalLabel = RegExp(r'\btotal(?: pagado)?\b');
+    final RegExp totalLabel = RegExp(
+      r'\b(total(?: pagado| de la compra)?|importe total|monto total|compra total|se pago)\b',
+    );
     final RegExp feeLabel = RegExp(
-      r'\b(comision(?: de compra| mercado pago)?|cargo|fee|costo de servicio)\b',
+      r'\b(comision(?: de compra| mercado pago)?|cargo|fee|costo (?:por|de) operacion|costo de servicio)\b',
     );
-    final RegExp priceLabel = RegExp(r'\b(precio|cotizacion|valor de 1)\b');
+    final RegExp priceLabel = RegExp(
+      r'\b(precio(?: unitario| de (?:bitcoin|btc|ethereum|eth|chainlink|link|litecoin|ltc|uniswap|uni|tether|usdt|usd coin|usdc|ripple|xrp|solana|sol|cosmos|atom))?|cotizacion|tipo de cambio|valor de (?:1 )?(?:bitcoin|btc|ethereum|eth|chainlink|link|litecoin|ltc|uniswap|uni|tether|usdt|usd coin|usdc|ripple|xrp|solana|sol|cosmos|atom)|1 (?:bitcoin|btc|ethereum|eth|chainlink|link|litecoin|ltc|uniswap|uni|tether|usdt|usd coin|usdc|ripple|xrp|solana|sol|cosmos|atom))\b',
+    );
     final double? explicitAmount = firstMoneyAfterLabel(
       amountLabel,
       stopLabels: <RegExp>[feeLabel, totalLabel, priceLabel],
@@ -6128,19 +6137,49 @@ class _MovementsTabState extends State<MovementsTab> {
       feeLabel,
       stopLabels: <RegExp>[amountLabel, totalLabel, priceLabel],
     );
+    final double? explicitUnitPrice = firstMoneyAfterLabel(
+      priceLabel,
+      stopLabels: <RegExp>[amountLabel, totalLabel, feeLabel],
+    );
 
-    double fee = explicitFee ?? 0;
-    double? amountMxn = explicitAmount;
+    double? rankedTotal = explicitTotal;
+    if (rankedTotal == null &&
+        totalLabel.hasMatch(lower) &&
+        realMoneyAmounts.isNotEmpty) {
+      rankedTotal = realMoneyAmounts.reduce(math.max);
+    }
+    double? rankedFee = explicitFee;
+    if (rankedFee == null &&
+        feeLabel.hasMatch(lower) &&
+        realMoneyAmounts.length > 1) {
+      final List<double> feeCandidates = realMoneyAmounts
+          .where(
+            (double value) =>
+                rankedTotal == null || (value - rankedTotal).abs() >= 0.005,
+          )
+          .toList();
+      if (feeCandidates.isNotEmpty) {
+        rankedFee = feeCandidates.reduce(math.min);
+      }
+    }
+
+    double fee = rankedFee ?? 0;
+    double? amountMxn = rankedTotal ?? explicitAmount;
     if (fee == 0 && explicitAmount != null && explicitTotal != null) {
       final double inferredFee = explicitTotal - explicitAmount;
       if (inferredFee > 0.005) fee = inferredFee;
     }
-    if (amountMxn == null && explicitTotal != null) {
-      amountMxn = fee > 0 ? explicitTotal - fee : explicitTotal;
-    }
-    amountMxn ??= realMoneyAmounts.isEmpty ? null : realMoneyAmounts.first;
-    if (realMoneyAmounts.length > 1) {
-      addWarning('Se detectaron varios montos; revisa el total.');
+    amountMxn ??= realMoneyAmounts.isEmpty
+        ? null
+        : realMoneyAmounts.reduce(math.max);
+    final int classifiedMoneyCount = <double?>[
+      rankedTotal,
+      explicitAmount,
+      rankedFee,
+      explicitUnitPrice,
+    ].whereType<double>().length;
+    if (realMoneyAmounts.length > 1 || classifiedMoneyCount > 1) {
+      addWarning('Revisa el monto y la comisi\u00f3n detectados.');
     }
 
     final String coinTerms = coin == null
@@ -6149,9 +6188,9 @@ class _MovementsTabState extends State<MovementsTab> {
               .where((MapEntry<String, String> entry) => entry.value == coin)
               .map((MapEntry<String, String> entry) => RegExp.escape(entry.key))
               .join('|');
-    double? unitPrice;
+    double? unitPrice = explicitUnitPrice;
     if (coin != null) {
-      unitPrice =
+      unitPrice ??=
           firstGroup(
             RegExp(
               '(?:\\b$coin\\b|$coinTerms)\\s+1\\b[^\\d\$]{0,12}\\\$\\s*(${number.pattern})',
@@ -6203,7 +6242,7 @@ class _MovementsTabState extends State<MovementsTab> {
       addWarning('Precio unitario calculado desde monto y cantidad.');
     }
 
-    if (explicitFee == null && fee == 0) {
+    if (rankedFee == null && fee == 0) {
       addWarning('Comisión no detectada; se usó 0.00 MXN.');
     }
 
@@ -6296,6 +6335,20 @@ class _MovementsTabState extends State<MovementsTab> {
       warnings: warnings,
       rawText: rawText,
     );
+  }
+
+  @visibleForTesting
+  Map<String, Object?> parseOcrForTesting(String rawText) {
+    final _OcrMovementCandidate candidate = _parseOcrMovementText(rawText);
+    return <String, Object?>{
+      'platform': candidate.source,
+      'coin': candidate.coin,
+      'quantity': candidate.quantity,
+      'amount': candidate.amountMxn,
+      'unitPrice': candidate.unitPrice,
+      'commission': candidate.fee,
+      'warnings': candidate.warnings,
+    };
   }
 
   _OcrReadQuality _ocrReadQuality(_OcrMovementCandidate candidate) {
