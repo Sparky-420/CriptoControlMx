@@ -126,7 +126,7 @@ Creada el 6 de junio de 2026 - 23:10 hs
       expect(parsed['quantity'], 5.22005934);
     });
 
-    test('keeps zero commission for a Mercado Pago reception', () {
+    test('keeps receiving platform and requests an explicit origin', () {
       final Map<String, Object?> parsed = _parseOcrForTest('''
 LINK
 12.80184227
@@ -138,6 +138,7 @@ Wallet externa
 Precio
 LINK 1 \u2248 \$154.43
 Creada el 4 de abril de 2026 - 08:21 hs
+¿Necesitas ayuda?
 ''');
 
       expect(parsed['platform'], 'Mercado Pago');
@@ -146,6 +147,35 @@ Creada el 4 de abril de 2026 - 08:21 hs
       expect(parsed['commission'], 0);
       expect(parsed['unitPrice'], 154.43);
       expect(parsed['quantity'], 12.80184227);
+      expect(
+        parsed['warnings'],
+        contains(
+          'Recepción detectada: elige la procedencia (Bitso, MetaMask, Binance, Coinbase u otra) antes de guardar.',
+        ),
+      );
+    });
+
+    test('requests an explicit destination for an outgoing transfer', () {
+      final Map<String, Object?> parsed = _parseOcrForTest('''
+Mercado Pago
+Transferencia enviada
+Cantidad 0.5 ETH
+Equivalencia \$1,000
+Precio de ETH \$2,000
+Fecha 3 jul 2026
+''');
+
+      expect(parsed['platform'], 'Mercado Pago');
+      expect(parsed['coin'], 'ETH');
+      expect(parsed['amount'], 1000);
+      expect(parsed['quantity'], 0.5);
+      expect(parsed['unitPrice'], 2000);
+      expect(
+        parsed['warnings'],
+        contains(
+          'Transferencia de salida detectada: elige el destino (Bitso, MetaMask, Binance, Coinbase u otro) antes de guardar.',
+        ),
+      );
     });
   });
 

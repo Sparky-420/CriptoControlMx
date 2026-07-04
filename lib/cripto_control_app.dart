@@ -2702,9 +2702,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         (ocrCoin != null && _coins.contains(ocrCoin) ? ocrCoin : _coins.first);
     DateTime selectedDate =
         existing?.date ?? ocrCandidate?.date ?? DateTime.now();
-    final bool ocrWalletExternal =
-        useOcr && ocrCandidate.rawText.toLowerCase().contains('wallet externa');
-
     final TextEditingController qtyController = TextEditingController(
       text: existing != null
           ? compact(existing.quantity)
@@ -2728,7 +2725,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       text: existing?.source ?? ocrCandidate?.source ?? '',
     );
     final TextEditingController walletController = TextEditingController(
-      text: existing?.wallet ?? (ocrWalletExternal ? 'Wallet externa' : ''),
+      text: existing?.wallet ?? '',
     );
     final TextEditingController networkController = TextEditingController(
       text: existing?.network ?? '',
@@ -2743,369 +2740,363 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       useSafeArea: true,
       builder: (BuildContext sheetContext) {
         return StatefulBuilder(
-          builder:
-              (
-                BuildContext context,
-                void Function(void Function()) setModalState,
-              ) {
-                return Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    16,
-                    16,
-                    16,
-                    16 + MediaQuery.of(context).viewInsets.bottom,
-                  ),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+          builder: (BuildContext context, void Function(void Function()) setModalState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                16 + MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    SheetHeader(
+                      title: useOcr
+                          ? 'Revisar movimiento OCR'
+                          : existing == null
+                          ? 'Nuevo movimiento'
+                          : 'Editar movimiento',
+                      onClose: () => Navigator.of(sheetContext).pop(),
+                    ),
+                    const SizedBox(height: 12),
+                    if (ocrWarnings.isNotEmpty) ...<Widget>[
+                      Text(
+                        'Revisa antes de guardar',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      ...ocrWarnings.map(
+                        (String warning) => Text('• $warning'),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    DropdownButtonFormField<MovementType>(
+                      initialValue: selectedType,
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: MovementType.values
+                          .map(
+                            (MovementType type) =>
+                                DropdownMenuItem<MovementType>(
+                                  value: type,
+                                  child: Text(type.label),
+                                ),
+                          )
+                          .toList(),
+                      onChanged: (MovementType? value) {
+                        if (value != null) {
+                          setModalState(() => selectedType = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedCoin,
+                      decoration: const InputDecoration(
+                        labelText: 'Moneda',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _coins
+                          .map(
+                            (String coin) => DropdownMenuItem<String>(
+                              value: coin,
+                              child: Text(coin),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (String? value) {
+                        if (value != null) {
+                          setModalState(() => selectedCoin = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: <Widget>[
-                        SheetHeader(
-                          title: useOcr
-                              ? 'Revisar movimiento OCR'
-                              : existing == null
-                              ? 'Nuevo movimiento'
-                              : 'Editar movimiento',
-                          onClose: () => Navigator.of(sheetContext).pop(),
-                        ),
-                        const SizedBox(height: 12),
-                        if (ocrWarnings.isNotEmpty) ...<Widget>[
-                          Text(
-                            'Revisa antes de guardar',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 6),
-                          ...ocrWarnings.map(
-                            (String warning) => Text('• $warning'),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                        DropdownButtonFormField<MovementType>(
-                          initialValue: selectedType,
-                          decoration: const InputDecoration(
-                            labelText: 'Tipo',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: MovementType.values
-                              .map(
-                                (MovementType type) =>
-                                    DropdownMenuItem<MovementType>(
-                                      value: type,
-                                      child: Text(type.label),
-                                    ),
-                              )
-                              .toList(),
-                          onChanged: (MovementType? value) {
-                            if (value != null) {
-                              setModalState(() => selectedType = value);
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                          initialValue: selectedCoin,
-                          decoration: const InputDecoration(
-                            labelText: 'Moneda',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: _coins
-                              .map(
-                                (String coin) => DropdownMenuItem<String>(
-                                  value: coin,
-                                  child: Text(coin),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (String? value) {
-                            if (value != null) {
-                              setModalState(() => selectedCoin = value);
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            OutlinedButton.icon(
-                              onPressed: () async {
-                                final DateTime? picked = await showDatePicker(
-                                  context: context,
-                                  initialDate:
-                                      selectedDate.isAfter(DateTime.now())
-                                      ? DateTime.now()
-                                      : selectedDate,
-                                  firstDate: DateTime(2010),
-                                  lastDate: DateTime.now(),
-                                );
-                                if (picked != null) {
-                                  setModalState(
-                                    () => selectedDate = DateTime(
-                                      picked.year,
-                                      picked.month,
-                                      picked.day,
-                                      selectedDate.hour,
-                                      selectedDate.minute,
-                                    ),
-                                  );
-                                }
-                              },
-                              icon: const Icon(Icons.calendar_today_outlined),
-                              label: Text('Fecha: ${shortDate(selectedDate)}'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () async {
-                                final TimeOfDay? picked = await showTimePicker(
-                                  context: context,
-                                  initialTime: TimeOfDay.fromDateTime(
-                                    selectedDate,
-                                  ),
-                                );
-                                if (picked != null) {
-                                  setModalState(
-                                    () => selectedDate = DateTime(
-                                      selectedDate.year,
-                                      selectedDate.month,
-                                      selectedDate.day,
-                                      picked.hour,
-                                      picked.minute,
-                                    ),
-                                  );
-                                }
-                              },
-                              icon: const Icon(Icons.schedule_outlined),
-                              label: Text('Hora: ${timeLabel(selectedDate)}'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: qtyController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Cantidad cripto',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: priceController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Precio unitario MXN',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: feeController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Comisión MXN',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: sourceController,
-                          decoration: const InputDecoration(
-                            labelText: 'Plataforma',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: walletController,
-                          decoration: const InputDecoration(
-                            labelText: 'Cartera',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: networkController,
-                          decoration: const InputDecoration(
-                            labelText: 'Red',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: noteController,
-                          decoration: const InputDecoration(
-                            labelText: 'Nota',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: () async {
-                              final double? quantity = double.tryParse(
-                                qtyController.text.trim(),
-                              );
-                              final double? unitPrice = double.tryParse(
-                                priceController.text.trim(),
-                              );
-                              final double fee =
-                                  double.tryParse(feeController.text.trim()) ??
-                                  0.0;
-
-                              if (quantity == null || quantity <= 0) {
-                                _snack(pageContext, 'Pon una cantidad válida');
-                                return;
-                              }
-
-                              if (unitPrice == null || unitPrice <= 0) {
-                                _snack(
-                                  pageContext,
-                                  'Pon un precio mayor a cero',
-                                );
-                                return;
-                              }
-
-                              if (quantity * unitPrice <= 0) {
-                                _snack(
-                                  pageContext,
-                                  'El total MXN debe ser mayor a cero',
-                                );
-                                return;
-                              }
-
-                              if (selectedDate.isAfter(
-                                DateTime.now().add(const Duration(minutes: 1)),
-                              )) {
-                                _snack(
-                                  pageContext,
-                                  'La fecha no puede estar en el futuro',
-                                );
-                                return;
-                              }
-
-                              if (fee < 0) {
-                                _snack(
-                                  pageContext,
-                                  'La comisión no puede ser negativa',
-                                );
-                                return;
-                              }
-
-                              final Movement movement =
-                                  await _movementWithCurrentSyncMetadata(
-                                    Movement(
-                                      type: selectedType,
-                                      coin: selectedCoin,
-                                      date: selectedDate,
-                                      quantity: quantity,
-                                      unitPrice: unitPrice,
-                                      fee: fee,
-                                      source: sourceController.text.trim(),
-                                      wallet: walletController.text.trim(),
-                                      network: networkController.text.trim(),
-                                      note: noteController.text.trim(),
-                                    ),
-                                    existing: existing,
-                                  );
-
-                              if (_wouldCreateInvalidPosition(
-                                movement,
-                                replaceIndex: existing == null ? null : index,
-                              )) {
-                                _snack(
-                                  pageContext,
-                                  'Ese movimiento dejaría la posición en negativo',
-                                );
-                                return;
-                              }
-
-                              if (_wouldCreateDuplicateMovement(
-                                movement,
-                                replaceIndex: existing == null ? null : index,
-                              )) {
-                                final bool?
-                                continueAnyway = await showDialog<bool>(
-                                  context: sheetContext,
-                                  builder: (BuildContext dialogContext) =>
-                                      AlertDialog(
-                                        title: const Text('Posible duplicado'),
-                                        content: const Text(
-                                          'Ya existe un movimiento idéntico. ¿Quieres guardarlo de todos modos?',
-                                        ),
-                                        actions: <Widget>[
-                                          TextButton(
-                                            onPressed: () => Navigator.of(
-                                              dialogContext,
-                                            ).pop(false),
-                                            child: const Text('Revisar'),
-                                          ),
-                                          FilledButton(
-                                            onPressed: () => Navigator.of(
-                                              dialogContext,
-                                            ).pop(true),
-                                            child: const Text('Guardar'),
-                                          ),
-                                        ],
-                                      ),
-                                );
-                                if (continueAnyway != true) return;
-                              }
-
-                              setState(() {
-                                if (existing != null &&
-                                    index != null &&
-                                    index >= 0 &&
-                                    index < _movements.length) {
-                                  _movements[index] = movement;
-                                } else {
-                                  _movements.add(movement);
-                                }
-                              });
-
-                              final Future<void> saveFuture =
-                                  _saveMovementAndMaybeSnapshot(
-                                    SnapshotTrigger.movementChange,
-                                  );
-                              unawaited(
-                                _refreshPricesAfterMovement
-                                    ? saveFuture.then(
-                                        (_) => _refreshPricesSilently(),
-                                      )
-                                    : saveFuture,
-                              );
-                              unawaited(
-                                _logSafeAnalyticsEvent(
-                                  name: 'movement_saved',
-                                  parameters: <String, Object>{
-                                    'source': useOcr ? 'ocr' : 'manual',
-                                  },
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final DateTime? picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate.isAfter(DateTime.now())
+                                  ? DateTime.now()
+                                  : selectedDate,
+                              firstDate: DateTime(2010),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setModalState(
+                                () => selectedDate = DateTime(
+                                  picked.year,
+                                  picked.month,
+                                  picked.day,
+                                  selectedDate.hour,
+                                  selectedDate.minute,
                                 ),
                               );
-                              Navigator.of(sheetContext).pop();
-                            },
-                            icon: Icon(
-                              existing == null
-                                  ? Icons.add
-                                  : Icons.save_outlined,
-                            ),
-                            label: Text(
-                              existing == null
-                                  ? 'Guardar movimiento'
-                                  : 'Guardar cambios',
-                            ),
-                          ),
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today_outlined),
+                          label: Text('Fecha: ${shortDate(selectedDate)}'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final TimeOfDay? picked = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(selectedDate),
+                            );
+                            if (picked != null) {
+                              setModalState(
+                                () => selectedDate = DateTime(
+                                  selectedDate.year,
+                                  selectedDate.month,
+                                  selectedDate.day,
+                                  picked.hour,
+                                  picked.minute,
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.schedule_outlined),
+                          label: Text('Hora: ${timeLabel(selectedDate)}'),
                         ),
                       ],
                     ),
-                  ),
-                );
-              },
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: qtyController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Cantidad cripto',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: priceController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Precio unitario MXN',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: feeController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Comisión MXN',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: sourceController,
+                      decoration: const InputDecoration(
+                        labelText: 'Plataforma',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: walletController,
+                      decoration: InputDecoration(
+                        labelText:
+                            useOcr && selectedType == MovementType.transferIn
+                            ? 'Procedencia'
+                            : useOcr && selectedType == MovementType.transferOut
+                            ? 'Destino'
+                            : 'Cartera',
+                        helperText:
+                            useOcr &&
+                                (selectedType == MovementType.transferIn ||
+                                    selectedType == MovementType.transferOut)
+                            ? 'Ej.: Bitso, MetaMask, Binance, Coinbase u otra'
+                            : null,
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: networkController,
+                      decoration: const InputDecoration(
+                        labelText: 'Red',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nota',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () async {
+                          final double? quantity = double.tryParse(
+                            qtyController.text.trim(),
+                          );
+                          final double? unitPrice = double.tryParse(
+                            priceController.text.trim(),
+                          );
+                          final double fee =
+                              double.tryParse(feeController.text.trim()) ?? 0.0;
+
+                          if (quantity == null || quantity <= 0) {
+                            _snack(pageContext, 'Pon una cantidad válida');
+                            return;
+                          }
+
+                          if (unitPrice == null || unitPrice <= 0) {
+                            _snack(pageContext, 'Pon un precio mayor a cero');
+                            return;
+                          }
+
+                          if (quantity * unitPrice <= 0) {
+                            _snack(
+                              pageContext,
+                              'El total MXN debe ser mayor a cero',
+                            );
+                            return;
+                          }
+
+                          if (selectedDate.isAfter(
+                            DateTime.now().add(const Duration(minutes: 1)),
+                          )) {
+                            _snack(
+                              pageContext,
+                              'La fecha no puede estar en el futuro',
+                            );
+                            return;
+                          }
+
+                          if (fee < 0) {
+                            _snack(
+                              pageContext,
+                              'La comisión no puede ser negativa',
+                            );
+                            return;
+                          }
+
+                          final Movement movement =
+                              await _movementWithCurrentSyncMetadata(
+                                Movement(
+                                  type: selectedType,
+                                  coin: selectedCoin,
+                                  date: selectedDate,
+                                  quantity: quantity,
+                                  unitPrice: unitPrice,
+                                  fee: fee,
+                                  source: sourceController.text.trim(),
+                                  wallet: walletController.text.trim(),
+                                  network: networkController.text.trim(),
+                                  note: noteController.text.trim(),
+                                ),
+                                existing: existing,
+                              );
+
+                          if (_wouldCreateInvalidPosition(
+                            movement,
+                            replaceIndex: existing == null ? null : index,
+                          )) {
+                            _snack(
+                              pageContext,
+                              'Ese movimiento dejaría la posición en negativo',
+                            );
+                            return;
+                          }
+
+                          if (_wouldCreateDuplicateMovement(
+                            movement,
+                            replaceIndex: existing == null ? null : index,
+                          )) {
+                            final bool? continueAnyway = await showDialog<bool>(
+                              context: sheetContext,
+                              builder: (BuildContext dialogContext) => AlertDialog(
+                                title: const Text('Posible duplicado'),
+                                content: const Text(
+                                  'Ya existe un movimiento idéntico. ¿Quieres guardarlo de todos modos?',
+                                ),
+                                actions: <Widget>[
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(dialogContext).pop(false),
+                                    child: const Text('Revisar'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () =>
+                                        Navigator.of(dialogContext).pop(true),
+                                    child: const Text('Guardar'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (continueAnyway != true) return;
+                          }
+
+                          setState(() {
+                            if (existing != null &&
+                                index != null &&
+                                index >= 0 &&
+                                index < _movements.length) {
+                              _movements[index] = movement;
+                            } else {
+                              _movements.add(movement);
+                            }
+                          });
+
+                          final Future<void> saveFuture =
+                              _saveMovementAndMaybeSnapshot(
+                                SnapshotTrigger.movementChange,
+                              );
+                          unawaited(
+                            _refreshPricesAfterMovement
+                                ? saveFuture.then(
+                                    (_) => _refreshPricesSilently(),
+                                  )
+                                : saveFuture,
+                          );
+                          unawaited(
+                            _logSafeAnalyticsEvent(
+                              name: 'movement_saved',
+                              parameters: <String, Object>{
+                                'source': useOcr ? 'ocr' : 'manual',
+                              },
+                            ),
+                          );
+                          Navigator.of(sheetContext).pop();
+                        },
+                        icon: Icon(
+                          existing == null ? Icons.add : Icons.save_outlined,
+                        ),
+                        label: Text(
+                          existing == null
+                              ? 'Guardar movimiento'
+                              : 'Guardar cambios',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -5638,10 +5629,52 @@ class _MovementsTabState extends State<MovementsTab> {
   }
 
   _OcrMovementCandidate _parseOcrMovementText(String rawText) {
+    late final _OcrMovementCandidate parsed;
     if (_looksLikeBitsoCapture(rawText)) {
-      return _parseBitsoOcrText(rawText);
+      parsed = _parseBitsoOcrText(rawText);
+    } else {
+      parsed = _parseMercadoPagoOcrText(rawText);
     }
-    return _parseMercadoPagoOcrText(rawText);
+    return _withTransferCounterpartyWarning(parsed);
+  }
+
+  _OcrMovementCandidate _withTransferCounterpartyWarning(
+    _OcrMovementCandidate parsed,
+  ) {
+    final String value = _foldOcrText(
+      parsed.rawText,
+    ).replaceAll(RegExp(r'\s+'), ' ');
+    final bool hasReceptionText = RegExp(r'\brecepcion\b').hasMatch(value);
+    final bool hasTransferText = RegExp(
+      r'\b(transferencia|envio|enviaste)\b',
+    ).hasMatch(value);
+    String? warning;
+    if (hasReceptionText ||
+        (hasTransferText && parsed.type == MovementType.transferIn)) {
+      warning =
+          'Recepción detectada: elige la procedencia (Bitso, MetaMask, Binance, Coinbase u otra) antes de guardar.';
+    } else if (hasTransferText && parsed.type == MovementType.transferOut) {
+      warning =
+          'Transferencia de salida detectada: elige el destino (Bitso, MetaMask, Binance, Coinbase u otro) antes de guardar.';
+    } else if (hasTransferText) {
+      warning =
+          'Transferencia detectada: revisa el tipo y elige la procedencia o destino antes de guardar.';
+    }
+    if (warning == null || parsed.warnings.contains(warning)) return parsed;
+
+    return _OcrMovementCandidate(
+      type: parsed.type,
+      coin: parsed.coin,
+      quantity: parsed.quantity,
+      amountMxn: parsed.amountMxn,
+      unitPrice: parsed.unitPrice,
+      fee: parsed.fee,
+      date: parsed.date,
+      source: parsed.source,
+      note: parsed.note,
+      warnings: <String>[...parsed.warnings, warning],
+      rawText: parsed.rawText,
+    );
   }
 
   _OcrMovementCandidate _parseBitsoOcrText(String rawText) {
@@ -5898,9 +5931,7 @@ class _MovementsTabState extends State<MovementsTab> {
     }
 
     MovementType? type;
-    final bool hasReceive = RegExp(
-      r'\b(recepcion|recepcion desde|wallet externa|equivalencia)\b',
-    ).hasMatch(lower);
+    final bool hasReceive = RegExp(r'\brecepcion\b').hasMatch(lower);
     final bool hasTransferOut = RegExp(
       r'\b(envio|enviaste|retiro|retiraste|transferencia enviada)\b',
     ).hasMatch(lower);
@@ -5923,10 +5954,10 @@ class _MovementsTabState extends State<MovementsTab> {
       type = MovementType.buy;
     } else if (hasSell) {
       type = MovementType.sell;
-    } else if (hasReceive) {
-      type = MovementType.transferIn;
     } else if (hasTransferOut) {
       type = MovementType.transferOut;
+    } else if (hasReceive) {
+      type = MovementType.transferIn;
     }
     final bool looksLikeMercadoPago = _looksLikeMercadoPagoCapture(text);
     if (!looksLikeMercadoPago) {
@@ -6407,28 +6438,30 @@ class _MovementsTabState extends State<MovementsTab> {
   _OcrMovementCandidate _manualOcrCandidate(String rawText) {
     final bool looksLikeMercadoPago = _looksLikeMercadoPagoCapture(rawText);
     final bool looksLikeBitso = _looksLikeBitsoCapture(rawText);
-    return _OcrMovementCandidate(
-      type: null,
-      coin: null,
-      quantity: null,
-      amountMxn: null,
-      unitPrice: null,
-      fee: 0,
-      date: DateTime.now(),
-      source: looksLikeBitso
-          ? 'Bitso'
-          : looksLikeMercadoPago
-          ? 'Mercado Pago'
-          : '',
-      note: looksLikeBitso
-          ? 'OCR / captura Bitso'
-          : looksLikeMercadoPago
-          ? 'OCR / captura Mercado Pago'
-          : 'OCR / captura',
-      warnings: const <String>[
-        'Captura manual: completa los datos desde el texto OCR.',
-      ],
-      rawText: rawText,
+    return _withTransferCounterpartyWarning(
+      _OcrMovementCandidate(
+        type: null,
+        coin: null,
+        quantity: null,
+        amountMxn: null,
+        unitPrice: null,
+        fee: 0,
+        date: DateTime.now(),
+        source: looksLikeBitso
+            ? 'Bitso'
+            : looksLikeMercadoPago
+            ? 'Mercado Pago'
+            : '',
+        note: looksLikeBitso
+            ? 'OCR / captura Bitso'
+            : looksLikeMercadoPago
+            ? 'OCR / captura Mercado Pago'
+            : 'OCR / captura',
+        warnings: const <String>[
+          'Captura manual: completa los datos desde el texto OCR.',
+        ],
+        rawText: rawText,
+      ),
     );
   }
 
