@@ -469,7 +469,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   bool _isCloudProfilePreparing = false;
   bool _isCloudUploading = false;
   bool _isCloudDownloading = false;
-  String _cloudProfileStatus = 'Pendiente';
+  String _cloudProfileStatus = 'Sin configurar';
   String? _firebaseDeviceId;
   DateTime? _cloudStateUploadedAt;
   DateTime? _cloudStateDownloadedAt;
@@ -598,10 +598,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   void _loadFirebaseAuthUser() {
     try {
       _firebaseUser = FirebaseAuth.instance.currentUser;
-      _cloudProfileStatus = _firebaseUser == null ? 'Pendiente' : 'Pendiente';
+      _cloudProfileStatus = _firebaseUser == null
+          ? 'Sin cuenta'
+          : 'Sin configurar';
     } catch (_) {
       _firebaseUser = null;
-      _cloudProfileStatus = 'Error';
+      _cloudProfileStatus = 'Revisar conexión';
     }
   }
 
@@ -754,7 +756,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }) async {
     final User? user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      if (mounted) setState(() => _cloudProfileStatus = 'Pendiente');
+      if (mounted) setState(() => _cloudProfileStatus = 'Sin cuenta');
       return false;
     }
 
@@ -822,10 +824,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         recordSafeError(area: 'cloud', code: code, stackTrace: stackTrace),
       );
       if (!mounted) return false;
-      setState(() => _cloudProfileStatus = 'Error · $code');
+      setState(() => _cloudProfileStatus = 'Revisar conexión');
       if (showError && messenger != null && messenger.mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('No se pudo preparar perfil cloud: $code')),
+          const SnackBar(
+            content: Text(
+              'No se pudo preparar el perfil cloud. Tus datos locales no se modificaron.',
+            ),
+          ),
         );
       }
       return false;
@@ -980,7 +986,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
       if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('No se pudo subir a Firebase: $code')),
+        const SnackBar(
+          content: Text(
+            'No se pudo subir a Firebase. Tus datos locales no se modificaron.',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isCloudUploading = false);
@@ -1174,7 +1184,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
       if (!mounted || !pageContext.mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('No se pudo descargar de Firebase: $code')),
+        const SnackBar(
+          content: Text(
+            'No se pudo descargar de Firebase. Tus datos locales no se modificaron.',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isCloudDownloading = false);
@@ -1255,7 +1269,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (!mounted || !pageContext.mounted) return;
       setState(() {
         _firebaseUser = null;
-        _cloudProfileStatus = 'Pendiente';
+        _cloudProfileStatus = 'Sin configurar';
       });
       messenger.showSnackBar(const SnackBar(content: Text('Sesión cerrada.')));
     } catch (_) {
@@ -1500,7 +1514,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             content: Text(
               code == 'auth_required'
                   ? 'Reconecta Google Drive para crear copia.'
-                  : 'No se pudo crear copia Drive: $code',
+                  : 'No se pudo crear la copia en Google Drive. Tus datos locales no se modificaron.',
             ),
           ),
         );
@@ -1517,7 +1531,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           builder: (BuildContext dialogContext) => AlertDialog(
             title: const Text('Restaurar desde Google Drive'),
             content: const Text(
-              'Esto reemplazará tus datos financieros actuales con la copia guardada en Google Drive.',
+              'Esto reemplazará tus datos financieros actuales con la copia guardada en Google Drive. Antes de restaurar, crea una copia de seguridad local.',
             ),
             actions: <Widget>[
               TextButton(
@@ -1667,7 +1681,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             content: Text(
               code == 'auth_required'
                   ? 'Reconecta Google Drive para restaurar la copia.'
-                  : 'No se pudo restaurar copia Drive: $code',
+                  : 'No se pudo restaurar la copia de Google Drive. Tus datos locales no se modificaron.',
             ),
           ),
         );
@@ -5131,7 +5145,7 @@ class SummaryTab extends StatelessWidget {
                   subtitle: leader == null
                       ? 'Sin posiciones abiertas'
                       : '${leader.coin} · ${money(leader.currentValue)}',
-                  badge: leader == null ? 'Pendiente' : 'Dominante',
+                  badge: leader == null ? 'Sin posición' : 'Dominante',
                 ),
                 PremiumInfoPanel(
                   icon: Icons.warning_amber_rounded,
@@ -10115,7 +10129,7 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                   const SizedBox(height: 12),
                   InfoLine(
                     'Copia previa',
-                    _backupReady ? 'Listo para continuar' : 'Pendiente',
+                    _backupReady ? 'Listo para continuar' : 'Requerida',
                     emphasized: true,
                     valueColor: _backupReady ? colors.primary : colors.error,
                   ),
@@ -10389,15 +10403,15 @@ class MoreTab extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           _CommandSection(
-            title: 'Cuenta y copia de seguridad',
+            title: 'Cuenta / nube',
             children: <Widget>[
               PremiumActionTile(
                 icon: Icons.account_circle_outlined,
                 title: 'Cuenta en la nube',
                 subtitle: firebaseAuthConnected
                     ? 'Conectado: $firebaseAuthAccountLabel · Perfil cloud: $cloudProfileStatus'
-                    : 'No conectado · Inicia sesión con Google',
-                badge: firebaseAuthConnected ? 'Conectado' : 'No conectado',
+                    : 'Conecta Google para habilitar acciones manuales de nube.',
+                badge: firebaseAuthConnected ? 'Conectado' : 'Sin cuenta',
                 loading:
                     isFirebaseAuthBusy ||
                     isCloudProfilePreparing ||
@@ -10405,6 +10419,11 @@ class MoreTab extends StatelessWidget {
                     isCloudDownloading,
                 onTap: () => _showCloudAccountActions(context),
               ),
+            ],
+          ),
+          _CommandSection(
+            title: 'Google Drive backup',
+            children: <Widget>[
               PremiumActionTile(
                 icon: Icons.cloud_done_outlined,
                 title: 'Google Drive',
@@ -10412,22 +10431,47 @@ class MoreTab extends StatelessWidget {
                     ? 'Verificando autorización de Google Drive...'
                     : googleDriveConnected
                     ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Última copia: $googleDriveBackupLabel'
-                    : 'Conecta Google Drive para crear y restaurar copias.',
+                    : 'Conecta Drive para crear o restaurar una copia manual.',
                 badge: isGoogleConnecting
                     ? 'Verificando'
                     : googleDriveConnected
                     ? 'Conectado'
-                    : 'No conectado',
+                    : 'Sin conectar',
                 loading: googleDriveBusy,
                 onTap: () => _showGoogleDriveActions(context),
               ),
               PremiumActionTile(
                 icon: Icons.backup_outlined,
-                title: 'Copia de seguridad',
+                title: 'Copia local',
                 subtitle:
-                    'Crear una copia de tus movimientos, precios, comisión y snapshots.',
+                    'Exporta movimientos, precios, comisión y snapshots antes de restaurar o restablecer.',
                 onTap: onExportBackup,
               ),
+              PremiumActionTile(
+                icon: Icons.upload_file_outlined,
+                title: 'Restaurar copia',
+                subtitle:
+                    'Recupera datos desde una copia guardada. Requiere confirmación.',
+                onTap: () => _showImportActions(context),
+              ),
+            ],
+          ),
+          _CommandSection(
+            title: 'Snapshots',
+            children: <Widget>[
+              PremiumActionTile(
+                icon: Icons.photo_library_outlined,
+                title: 'Instantáneas',
+                subtitle: snapshotCount == 1
+                    ? '1 instantánea guardada · evolución y controles'
+                    : '$snapshotCount instantáneas guardadas · evolución y controles',
+                onTap: () => _showSnapshotActions(context),
+              ),
+            ],
+          ),
+          _CommandSection(
+            title: 'Exportaciones',
+            children: <Widget>[
               PremiumActionTile(
                 icon: Icons.receipt_long_outlined,
                 title: 'Historial de movimientos',
@@ -10440,29 +10484,59 @@ class MoreTab extends StatelessWidget {
               ),
               PremiumActionTile(
                 icon: Icons.table_chart_outlined,
-                title: 'Exportaciones',
-                subtitle: 'CSV, JSON, PDF y XLSX cuando están soportados',
-                badge: 'Reportes',
+                title: 'Reportes',
+                subtitle:
+                    'CSV para hojas de cálculo, JSON para respaldo, PDF/XLSX para reporte.',
+                badge: 'CSV/JSON',
                 onTap: () => _showDataActions(context),
-              ),
-              PremiumActionTile(
-                icon: Icons.upload_file_outlined,
-                title: 'Restaurar copia de seguridad',
-                subtitle: 'Recuperar datos desde una copia guardada.',
-                onTap: () => _showImportActions(context),
-              ),
-              PremiumActionTile(
-                icon: Icons.photo_library_outlined,
-                title: 'Instantáneas',
-                subtitle: snapshotCount == 1
-                    ? '1 instantánea guardada · evolución y controles'
-                    : '$snapshotCount instantáneas guardadas · evolución y controles',
-                onTap: () => _showSnapshotActions(context),
               ),
             ],
           ),
           _CommandSection(
-            title: 'Seguridad y datos',
+            title: 'Diagnóstico',
+            children: <Widget>[
+              PremiumActionTile(
+                icon: Icons.health_and_safety_outlined,
+                title: 'Estado del sistema',
+                subtitle:
+                    'Datos locales, Drive/Firebase manuales, alertas y fuente de precios.',
+                badge: pricesUpdatedAt == null ? 'Sin precios' : 'OK',
+                onTap: () => _showDiagnostics(context),
+              ),
+              PremiumActionTile(
+                icon: Icons.info_outline,
+                title: 'Acerca de CriptoControlMx',
+                subtitle: 'Información, privacidad local y aviso financiero.',
+                badge: 'Local',
+                onTap: () => _showAboutApp(context),
+              ),
+            ],
+          ),
+          _CommandSection(
+            title: 'Configuración visual',
+            children: <Widget>[
+              PremiumActionTile(
+                icon: Icons.palette_outlined,
+                title: 'Tema',
+                subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
+                onTap: onOpenThemeSettings,
+              ),
+              PremiumActionTile(
+                icon: Icons.sync_outlined,
+                title: 'Actualización de precios',
+                subtitle: 'Apertura, movimientos e intervalo en pantalla',
+                onTap: onOpenPriceSettings,
+              ),
+              PremiumActionTile(
+                icon: Icons.view_agenda_outlined,
+                title: 'Resumen de cartera',
+                subtitle: 'Posiciones visibles y orden del portafolio',
+                onTap: onOpenPortfolioSettings,
+              ),
+            ],
+          ),
+          _CommandSection(
+            title: 'Seguridad / reset',
             children: <Widget>[
               _PrivacyMonitoringCard(
                 analyticsEnabled: analyticsEnabled,
@@ -10474,61 +10548,9 @@ class MoreTab extends StatelessWidget {
                 icon: Icons.restart_alt_outlined,
                 title: 'Restablecer datos financieros',
                 subtitle:
-                    'Borra cartera, precios, instantáneas y alertas. Requiere copia previa.',
+                    'Borra cartera, precios, instantáneas y alertas. Requiere copia previa y confirmación.',
                 badge: 'Peligroso',
                 onTap: onOpenFinancialReset,
-              ),
-            ],
-          ),
-          _CommandSection(
-            title: 'Apariencia global',
-            children: <Widget>[
-              PremiumActionTile(
-                icon: Icons.palette_outlined,
-                title: 'Tema',
-                subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
-                onTap: onOpenThemeSettings,
-              ),
-            ],
-          ),
-          _CommandSection(
-            title: 'Precios',
-            children: <Widget>[
-              PremiumActionTile(
-                icon: Icons.sync_outlined,
-                title: 'Actualización de precios',
-                subtitle: 'Apertura, movimientos e intervalo en pantalla',
-                onTap: onOpenPriceSettings,
-              ),
-            ],
-          ),
-          _CommandSection(
-            title: 'Portafolio',
-            children: <Widget>[
-              PremiumActionTile(
-                icon: Icons.view_agenda_outlined,
-                title: 'Resumen de cartera',
-                subtitle: 'Posiciones visibles y orden del portafolio',
-                onTap: onOpenPortfolioSettings,
-              ),
-            ],
-          ),
-          _CommandSection(
-            title: 'Herramientas',
-            children: <Widget>[
-              PremiumActionTile(
-                icon: Icons.info_outline,
-                title: 'Acerca de CriptoControlMx',
-                subtitle: 'Información, privacidad local y aviso financiero.',
-                badge: 'Local',
-                onTap: () => _showAboutApp(context),
-              ),
-              PremiumActionTile(
-                icon: Icons.health_and_safety_outlined,
-                title: 'Diagnóstico',
-                subtitle: 'Datos locales, instantáneas y fuente de precios',
-                badge: pricesUpdatedAt == null ? 'Pendiente' : 'OK',
-                onTap: () => _showDiagnostics(context),
               ),
             ],
           ),
@@ -10552,7 +10574,7 @@ class MoreTab extends StatelessWidget {
                 : Icons.account_circle_outlined,
             title: firebaseAuthConnected
                 ? 'Estado: Conectado'
-                : 'Estado: No conectado',
+                : 'Estado: Sin cuenta conectada',
             subtitle: firebaseAuthConnected
                 ? 'Email: ${firebaseAuthEmail ?? 'sin email visible'}'
                 : 'Inicia sesión con Google para preparar el acceso en la nube.',
@@ -10560,9 +10582,9 @@ class MoreTab extends StatelessWidget {
           ),
           const _SheetAction(
             icon: Icons.cloud_off_outlined,
-            title: 'Sync automático: No activo',
+            title: 'Sincronización manual',
             subtitle:
-                'La sincronización automática todavía no está activa. Las acciones de nube son manuales.',
+                'Firebase no se sincroniza automáticamente. Tú decides cuándo subir o descargar estado.',
             onTap: null,
           ),
           _SheetAction(
@@ -10583,7 +10605,7 @@ class MoreTab extends StatelessWidget {
                 : Icons.cloud_upload_outlined,
             title: isCloudUploading ? 'Subiendo...' : 'Subir estado a la nube',
             subtitle: firebaseAuthConnected
-                ? 'La sincronización automática todavía no está activa.'
+                ? 'Subida manual; reemplaza la copia cloud anterior.'
                 : 'Inicia sesión para usar la nube.',
             onTap:
                 firebaseAuthConnected &&
@@ -10600,7 +10622,7 @@ class MoreTab extends StatelessWidget {
                 ? 'Descargando...'
                 : 'Descargar estado desde la nube',
             subtitle: firebaseAuthConnected
-                ? 'Reemplaza datos locales con confirmación previa.'
+                ? 'Reemplaza datos locales con confirmación previa. Crea una copia antes de continuar.'
                 : 'Inicia sesión para usar la nube.',
             onTap: firebaseAuthConnected && !isCloudDownloading
                 ? onDownloadFinancialStateFromFirebase
@@ -10623,7 +10645,7 @@ class MoreTab extends StatelessWidget {
           _SheetAction(
             icon: Icons.phone_android_outlined,
             title: 'DeviceId local',
-            subtitle: hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente',
+            subtitle: hasLocalFirebaseDeviceId ? 'Registrado' : 'No registrado',
             onTap: null,
           ),
           if (firebaseAuthConnected && firebaseAuthDisplayName != null)
@@ -10701,13 +10723,6 @@ class MoreTab extends StatelessWidget {
                 'Tu copia se guarda en el espacio privado de la app en Google Drive. CriptoControlMx no sincroniza automáticamente; solo crea o restaura una copia cuando tú lo solicitas. La copia puede incluir movimientos, precios, comisión, snapshots y configuración financiera. Puedes desconectar Google Drive cuando quieras.',
             onTap: null,
           ),
-          const _SheetAction(
-            icon: Icons.info_outline,
-            title: 'Sin sincronizaciÃ³n automÃ¡tica',
-            subtitle:
-                'No se sincroniza automÃ¡ticamente. Solo se subirÃ¡ o restaurarÃ¡ una copia cuando tÃº lo solicites.',
-            onTap: null,
-          ),
           _SheetAction(
             icon: Icons.history_outlined,
             title: googleDriveBackupStatus,
@@ -10737,20 +10752,6 @@ class MoreTab extends StatelessWidget {
                 ? 'Descarga la copia y pide confirmación antes de restaurar'
                 : 'Conecta Google Drive primero',
             onTap: googleDriveBusy ? null : onRestoreGoogleDriveBackup,
-          ),
-          _SheetAction(
-            icon: isGoogleConnecting
-                ? Icons.hourglass_top_outlined
-                : Icons.cloud_upload_outlined,
-            title: 'Crear copia en Google Drive',
-            subtitle: 'PrÃ³xima fase',
-            onTap: null,
-          ),
-          const _SheetAction(
-            icon: Icons.cloud_download_outlined,
-            title: 'Restaurar desde Google Drive',
-            subtitle: 'PrÃ³xima fase',
-            onTap: null,
           ),
         ],
       ),
@@ -11111,7 +11112,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Analytics', analyticsStatus),
               InfoLine(
                 'Firebase Auth',
-                firebaseAuthConnected ? 'Conectado' : 'No conectado',
+                firebaseAuthConnected ? 'Conectado' : 'Sin cuenta conectada',
               ),
               if (firebaseAuthConnected)
                 InfoLine(
@@ -11122,19 +11123,19 @@ class MoreTab extends StatelessWidget {
               const InfoLine('Firebase sync', 'Manual'),
               InfoLine(
                 'DeviceId local',
-                hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente',
+                hasLocalFirebaseDeviceId ? 'Registrado' : 'No registrado',
               ),
               InfoLine('Cloud state subida', cloudStateUploadLabel),
               InfoLine('Cloud state descarga', cloudStateDownloadLabel),
               InfoLine(
                 'DeviceId cloud',
-                hasLocalFirebaseDeviceId ? 'Registrado' : 'Pendiente',
+                hasLocalFirebaseDeviceId ? 'Registrado' : 'No registrado',
               ),
               const InfoLine('Sync automático Firebase', 'No'),
               InfoLine('Copia de seguridad local', 'Compatible'),
               InfoLine(
                 'Google Drive',
-                googleDriveConnected ? 'Conectado' : 'No conectado',
+                googleDriveConnected ? 'Conectado' : 'Sin cuenta conectada',
               ),
               const InfoLine('Scope Drive', 'appDataFolder'),
               const InfoLine('Sync automático Drive', 'No'),
@@ -11190,7 +11191,7 @@ class MoreTab extends StatelessWidget {
               const InfoLine('Sync automático', 'No activo'),
               const InfoLine(
                 'Beta readiness',
-                'Data Safety pendiente de confirmar en Play Console',
+                'Data Safety por confirmar en Play Console',
               ),
               if (financialErrors.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
@@ -11258,7 +11259,7 @@ class MoreTab extends StatelessWidget {
               InfoLine('Analytics', analyticsStatus),
               InfoLine(
                 'Firebase Auth',
-                firebaseAuthConnected ? 'Conectado' : 'No conectado',
+                firebaseAuthConnected ? 'Conectado' : 'Sin cuenta conectada',
               ),
               InfoLine('Cloud profile', cloudProfileStatus),
               const InfoLine('Firebase sync', 'Manual; sin automático'),
@@ -12799,7 +12800,7 @@ class SettingsTab extends StatelessWidget {
                   subtitle: Text(
                     notificationsAllowed
                         ? 'Revisión en segundo plano de Android.'
-                        : 'Permiso pendiente o denegado en Android.',
+                        : 'Permiso no autorizado en Android.',
                   ),
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -12835,13 +12836,13 @@ class SettingsTab extends StatelessWidget {
           CardPanel(
             title: 'Copia de seguridad',
             subtitle:
-                'Cuenta local. Próximamente: sincronización y copia en la nube.',
+                'Copia manual local para exportar o restaurar datos financieros.',
             child: Align(
               alignment: Alignment.centerLeft,
               child: FilledButton.tonalIcon(
                 onPressed: onExportBackup,
                 icon: const Icon(Icons.data_object_outlined),
-                label: const Text('Copiar contenido de copia'),
+                label: const Text('Crear copia manual'),
               ),
             ),
           ),
