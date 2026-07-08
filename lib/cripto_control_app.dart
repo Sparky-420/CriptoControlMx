@@ -473,7 +473,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   String? _firebaseDeviceId;
   DateTime? _cloudStateUploadedAt;
   DateTime? _cloudStateDownloadedAt;
-  bool _isGoogleConnecting = true;
+  bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
   String? _googleDriveBackupFileId;
@@ -499,7 +499,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (_firebaseUser != null) {
       unawaited(_ensureCloudProfile(showError: false));
     }
-    unawaited(_rehydrateGoogleDrive());
     unawaited(
       _logSafeAnalyticsEvent(
         name: 'app_opened',
@@ -532,28 +531,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } catch (_) {
       _googleSignInInitFuture = null;
       rethrow;
-    }
-  }
-
-  Future<void> _rehydrateGoogleDrive() async {
-    try {
-      await _ensureGoogleSignInInitialized();
-      final Future<GoogleSignInAccount?>? authenticationAttempt = GoogleSignIn
-          .instance
-          .attemptLightweightAuthentication();
-      final GoogleSignInAccount? account = authenticationAttempt == null
-          ? null
-          : await authenticationAttempt;
-      if (account == null) return;
-
-      final Map<String, String>? authHeaders = await account.authorizationClient
-          .authorizationHeaders(_googleDriveScopes);
-      if (!mounted || authHeaders == null) return;
-      setState(() => _googleAccount = account);
-    } catch (_) {
-      // Startup remains non-interactive: Drive can be reconnected manually.
-    } finally {
-      if (mounted) setState(() => _isGoogleConnecting = false);
     }
   }
 
@@ -10431,7 +10408,7 @@ class MoreTab extends StatelessWidget {
                     ? 'Verificando autorización de Google Drive...'
                     : googleDriveConnected
                     ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Última copia: $googleDriveBackupLabel'
-                    : 'Conecta Drive para crear o restaurar una copia manual.',
+                    : 'Conecta Google Drive para crear y restaurar copias.',
                 badge: isGoogleConnecting
                     ? 'Verificando'
                     : googleDriveConnected
