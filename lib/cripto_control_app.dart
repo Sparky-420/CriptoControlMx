@@ -9041,12 +9041,11 @@ class _AlertsTabState extends State<AlertsTab> {
 
     return PremiumScaffoldSurface(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: <Widget>[
           PremiumDashboardHero(
             title: 'Alertas',
-            subtitle:
-                'Internas al usar la app y automáticas locales en Android',
+            subtitle: 'Internas y automáticas locales en Android',
             icon: Icons.notifications_active_outlined,
             metrics: <PremiumMetricData>[
               PremiumMetricData(
@@ -9072,9 +9071,9 @@ class _AlertsTabState extends State<AlertsTab> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           _buildAutomaticNotificationsCard(context),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           PremiumSegmentShell(
             child: SegmentedButton<int>(
               segments: const <ButtonSegment<int>>[
@@ -9095,7 +9094,7 @@ class _AlertsTabState extends State<AlertsTab> {
               },
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           if (_segment == 0)
             _buildMarketSection(context)
           else
@@ -9110,12 +9109,13 @@ class _AlertsTabState extends State<AlertsTab> {
 
     return CardPanel(
       title: 'Alertas automáticas locales',
-      subtitle: 'Revisión en segundo plano con WorkManager de Android.',
+      subtitle: 'Revisión local en segundo plano.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           SwitchListTile(
             dense: true,
+            visualDensity: VisualDensity.compact,
             value: widget.automaticLocalAlertsEnabled,
             onChanged: widget.onAutomaticLocalAlertsChanged,
             title: const Text('Activar revisión automática local'),
@@ -9126,19 +9126,24 @@ class _AlertsTabState extends State<AlertsTab> {
             ),
             contentPadding: EdgeInsets.zero,
           ),
-          const Text(
+          Text(
             'Las alertas internas se revisan al abrir la app o actualizar precios. '
             'Las alertas automáticas locales dependen de Android, batería, '
             'permisos y conexión. Pueden no ser exactas al minuto.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             'Android puede agrupar o retrasar revisiones para ahorrar batería.',
-            style: TextStyle(color: colors.onSurfaceVariant),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Text('Intervalo', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -9174,6 +9179,7 @@ class _AlertsTabState extends State<AlertsTab> {
             children: <Widget>[
               SwitchListTile(
                 dense: true,
+                visualDensity: VisualDensity.compact,
                 value: widget.priceAlertsEnabled,
                 onChanged: widget.onPriceAlertsChanged,
                 title: const Text('Activar mercado'),
@@ -9194,7 +9200,7 @@ class _AlertsTabState extends State<AlertsTab> {
                 'Monitoreo',
                 '${watchedCoins.length} monedas monitoreadas',
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -9271,13 +9277,13 @@ class _AlertsTabState extends State<AlertsTab> {
       children: <Widget>[
         CardPanel(
           title: 'Alertas internas de recuperación',
-          subtitle:
-              'Compara el P&L actual contra una base guardada y estima cuánto falta para volver al equilibrio.',
+          subtitle: 'P&L contra base guardada y equilibrio estimado.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               SwitchListTile(
                 dense: true,
+                visualDensity: VisualDensity.compact,
                 value: widget.recoveryAlertsEnabled,
                 onChanged: widget.onRecoveryAlertsChanged,
                 title: const Text('Activar recuperación'),
@@ -9288,10 +9294,14 @@ class _AlertsTabState extends State<AlertsTab> {
                 'Umbral actual',
                 '${widget.recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
               ),
-              const Text(
-                'P&L base guardado para comparar la recuperación. Cambio vs base: diferencia entre el P&L actual y la base, en puntos porcentuales. Falta para equilibrio: monto estimado que falta para volver al punto de equilibrio.',
+              Text(
+                'Cambio vs base compara el P&L actual contra la base guardada. '
+                'Falta para equilibrio estima el monto hacia break-even.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -9316,6 +9326,7 @@ class _AlertsTabState extends State<AlertsTab> {
             children: <Widget>[
               SwitchListTile(
                 dense: true,
+                visualDensity: VisualDensity.compact,
                 value: _showCoinsWithoutPosition,
                 onChanged: (bool value) {
                   setState(() => _showCoinsWithoutPosition = value);
@@ -9387,29 +9398,33 @@ class AlertCoinRow extends StatelessWidget {
         : '${variationPercent >= 0 ? '+' : ''}${variationPercent.toStringAsFixed(2)}%';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
       ),
       child: Row(
         children: <Widget>[
-          CoinLogo(coin: coin, size: 40),
-          const SizedBox(width: 12),
+          CoinLogo(coin: coin, size: 36),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  money(currentPrice),
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  '$coin · ${money(currentPrice)}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 Text(
                   'Ref ${money(referencePrice)} · Δ $variationText',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: StatusPill(
@@ -9456,10 +9471,10 @@ class RecoveryAlertCoinRow extends StatelessWidget {
         : '${deltaPoints >= 0 ? '+' : ''}${deltaPoints.toStringAsFixed(2)} pts';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
       ),
       child: Column(
@@ -9467,22 +9482,22 @@ class RecoveryAlertCoinRow extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              CoinLogo(coin: coin, size: 40),
-              const SizedBox(width: 12),
+              CoinLogo(coin: coin, size: 36),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  pnlText,
+                  '$coin · $pnlText',
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     color: hasPosition
                         ? pnlColor(position.unrealizedPnl)
-                        : null,
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Align(
             alignment: Alignment.centerLeft,
             child: StatusPill(
@@ -9490,10 +9505,10 @@ class RecoveryAlertCoinRow extends StatelessWidget {
               positive: !triggered,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: <Widget>[
               MiniMetric(
                 label: 'P&L no realizado',
