@@ -5015,38 +5015,13 @@ class SummaryTab extends StatelessWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
           children: <Widget>[
-            PremiumDashboardHero(
+            SummaryHeroPanel(
               title: 'Resumen ejecutivo',
               subtitle: leader == null
-                  ? 'Panorama limpio para activar decisiones de cartera.'
-                  : '${leader.coin} lidera la cartera por valor actual.',
-              icon: Icons.space_dashboard_outlined,
-              metrics: <PremiumMetricData>[
-                PremiumMetricData(
-                  label: 'Valor de cartera',
-                  value: moneyShort(totals.currentValue),
-                  icon: Icons.account_balance_wallet_outlined,
-                ),
-                PremiumMetricData(
-                  label: 'P&L no realizado',
-                  value: moneyShort(totals.unrealizedPL),
-                  color: pnlColor(totals.unrealizedPL),
-                  icon: totals.unrealizedPL >= 0
-                      ? Icons.trending_up
-                      : Icons.trending_down,
-                ),
-                PremiumMetricData(
-                  label: 'P&L realizado',
-                  value: moneyShort(totals.realizedPL),
-                  color: pnlColor(totals.realizedPL),
-                  icon: Icons.payments_outlined,
-                ),
-                PremiumMetricData(
-                  label: 'Mayor posición',
-                  value: leader?.coin ?? '—',
-                  icon: Icons.military_tech_outlined,
-                ),
-              ],
+                  ? 'Panorama de cartera'
+                  : '${leader.coin} lidera por valor actual',
+              totals: totals,
+              leader: leader,
             ),
             if (!hasMovements)
               CardPanel(
@@ -5089,14 +5064,14 @@ class SummaryTab extends StatelessWidget {
                   ],
                 ),
               ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
             LatestSnapshotCard(
               snapshot: latestSnapshot,
               onSaveSnapshot: onSaveSnapshot,
               onViewSnapshots: onViewSnapshots,
               onViewEvolution: onViewSnapshotEvolution,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             _CommandSection(
               title: 'Panorama',
               children: <Widget>[
@@ -5157,6 +5132,106 @@ class SummaryTab extends StatelessWidget {
   }
 }
 
+class SummaryHeroPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final PortfolioTotals totals;
+  final CoinStats? leader;
+
+  const SummaryHeroPanel({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.totals,
+    required this.leader,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color unrealizedColor = pnlColor(totals.unrealizedPL);
+    final Color realizedColor = pnlColor(totals.realizedPL);
+
+    return PremiumCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.space_dashboard_outlined, color: colors.primary),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Valor de cartera',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            moneyShort(totals.currentValue),
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              _HeaderMetric(
+                label: 'P&L no realizado',
+                value: moneyShort(totals.unrealizedPL),
+                color: unrealizedColor,
+                icon: totals.unrealizedPL >= 0
+                    ? Icons.trending_up
+                    : Icons.trending_down,
+              ),
+              _HeaderMetric(
+                label: 'P&L realizado',
+                value: moneyShort(totals.realizedPL),
+                color: realizedColor,
+                icon: Icons.payments_outlined,
+              ),
+              _HeaderMetric(
+                label: 'Mayor posición',
+                value: leader?.coin ?? '—',
+                icon: Icons.military_tech_outlined,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class LatestSnapshotCard extends StatelessWidget {
   final PortfolioSnapshot? snapshot;
   final VoidCallback onSaveSnapshot;
@@ -5177,8 +5252,8 @@ class LatestSnapshotCard extends StatelessWidget {
     return CardPanel(
       title: 'Última instantánea',
       subtitle: current == null
-          ? 'Sin instantánea guardada todavía.'
-          : 'Guardado el ${longDate(current.createdAt)}.',
+          ? 'Sin instantánea guardada.'
+          : longDate(current.createdAt),
       child: current == null
           ? const Text(
               'Resumen muestra solo la última instantánea. Gestiona el histórico '
@@ -5202,7 +5277,7 @@ class LatestSnapshotCard extends StatelessWidget {
                 ),
                 InfoLine('Inversión total', money(current.totalCostBase)),
                 InfoLine('Moneda dominante', current.dominantCoinLabel),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -5315,13 +5390,13 @@ class CleanCoinCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
-                CoinLogo(coin: stats.coin, size: 46),
+                CoinLogo(coin: stats.coin, size: 42),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -5339,7 +5414,7 @@ class CleanCoinCard extends StatelessWidget {
                             : '${crypto(stats.quantity)} · Precio no disponible',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      const SizedBox(height: 7),
+                      const SizedBox(height: 6),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: StatusPill(
@@ -5354,10 +5429,10 @@ class CleanCoinCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 10,
-              runSpacing: 10,
+              runSpacing: 8,
               children: <Widget>[
                 MiniMetric(
                   label: 'Resultado',
@@ -5368,7 +5443,7 @@ class CleanCoinCard extends StatelessWidget {
                 MiniMetric(label: 'Promedio', value: money(stats.avgPrice)),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton.tonalIcon(
