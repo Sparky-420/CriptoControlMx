@@ -11859,18 +11859,18 @@ class _CommandCenterHeader extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            colors.primaryContainer.withValues(alpha: 0.92),
-            colors.surfaceContainerHighest.withValues(alpha: 0.88),
+            colors.primaryContainer.withValues(alpha: 0.72),
+            colors.surfaceContainerHighest.withValues(alpha: 0.82),
           ],
         ),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.13)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -11885,12 +11885,14 @@ class _CommandCenterHeader extends StatelessWidget {
                     Text(
                       'Centro de control',
                       style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                          ?.copyWith(fontWeight: FontWeight.w800, height: 1.05),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Herramientas, datos y configuración',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -11957,10 +11959,11 @@ class _HeaderMetric extends StatelessWidget {
 
     return Container(
       constraints: const BoxConstraints(minWidth: 142, maxWidth: 190),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: colors.surface.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(16),
+        color: colors.surface.withValues(alpha: 0.48),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -11971,7 +11974,12 @@ class _HeaderMetric extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(label, style: Theme.of(context).textTheme.labelSmall),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 3),
                 Text(
                   value,
@@ -13360,7 +13368,7 @@ class PremiumScaffoldSurface extends StatelessWidget {
           colors: <Color>[
             colors.surface,
             Color.alphaBlend(
-              colors.primary.withValues(alpha: 0.035),
+              colors.primary.withValues(alpha: 0.024),
               colors.surface,
             ),
             colors.surface,
@@ -13394,10 +13402,10 @@ class PremiumSectionHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: <Widget>[
           Container(
-            width: 4,
+            width: 3,
             height: subtitle == null ? 22 : 38,
             decoration: BoxDecoration(
-              color: colors.primary,
+              color: colors.primary.withValues(alpha: 0.82),
               borderRadius: BorderRadius.circular(99),
             ),
           ),
@@ -13409,8 +13417,8 @@ class PremiumSectionHeader extends StatelessWidget {
                 Text(
                   title,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.2,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
                   ),
                 ),
                 if (subtitle != null) ...<Widget>[
@@ -13447,7 +13455,7 @@ class PremiumCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final BorderRadius borderRadius = BorderRadius.circular(22);
+    final BorderRadius borderRadius = BorderRadius.circular(20);
     final Widget content = Padding(padding: padding, child: child);
 
     return Container(
@@ -13457,18 +13465,18 @@ class PremiumCard extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            colors.surfaceContainerHigh.withValues(alpha: 0.96),
-            colors.surfaceContainer.withValues(alpha: 0.92),
+            colors.surfaceContainerHigh.withValues(alpha: 0.9),
+            colors.surfaceContainer.withValues(alpha: 0.86),
           ],
         ),
         border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.55),
+          color: colors.outlineVariant.withValues(alpha: 0.38),
         ),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+            color: colors.shadow.withValues(alpha: 0.07),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -13615,18 +13623,18 @@ class PremiumDashboardHero extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            colors.primaryContainer.withValues(alpha: 0.92),
-            colors.surfaceContainerHighest.withValues(alpha: 0.88),
+            colors.primaryContainer.withValues(alpha: 0.72),
+            colors.surfaceContainerHighest.withValues(alpha: 0.82),
           ],
         ),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.13)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -13641,12 +13649,14 @@ class PremiumDashboardHero extends StatelessWidget {
                     Text(
                       title,
                       style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                          ?.copyWith(fontWeight: FontWeight.w800, height: 1.05),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),

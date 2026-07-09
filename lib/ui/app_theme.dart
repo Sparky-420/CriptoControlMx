@@ -139,12 +139,12 @@ class CcmxThemePalette {
   CcmxThemePalette withAccent(Color primary, Color primarySoft) => CcmxThemePalette(background: background, surface: surface, surfaceAlt: surfaceAlt, primary: primary, primarySoft: primarySoft, border: border, positive: positive, negative: negative, warning: warning, textMain: textMain, textMuted: textMuted);
 
   static const CcmxThemePalette proDark = CcmxThemePalette(
-    background: Color(0xFF090B12),
-    surface: Color(0xFF111520),
-    surfaceAlt: Color(0xFF1B2233),
-    primary: Color(0xFF9B8CFF),
-    primarySoft: Color(0xFF28234F),
-    border: Color(0xFF30384C),
+    background: Color(0xFF070910),
+    surface: Color(0xFF10131D),
+    surfaceAlt: Color(0xFF181D2A),
+    primary: Color(0xFF8F7BFF),
+    primarySoft: Color(0xFF211D40),
+    border: Color(0xFF2A3040),
     positive: Color(0xFF22C55E),
     negative: Color(0xFFEF4444),
     warning: Color(0xFFF59E0B),
@@ -271,10 +271,10 @@ class CcmxThemePalette {
 class CcmxThemeTokens {
   const CcmxThemeTokens._();
 
-  static const double cardRadius = 24;
-  static const double inputRadius = 16;
-  static const double cardBorderAlpha = 0.55;
-  static const FontWeight navigationLabelWeight = FontWeight.w700;
+  static const double cardRadius = 20;
+  static const double inputRadius = 14;
+  static const double cardBorderAlpha = 0.42;
+  static const FontWeight navigationLabelWeight = FontWeight.w600;
 }
 
 class CcmxAppTheme {
@@ -323,7 +323,7 @@ class CcmxAppTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: palette.surface,
-        indicatorColor: palette.primarySoft,
+        indicatorColor: palette.primarySoft.withValues(alpha: 0.82),
         labelTextStyle: WidgetStateProperty.all(
           TextStyle(
             color: palette.textMain,
@@ -332,10 +332,15 @@ class CcmxAppTheme {
         ),
       ),
       dividerColor: palette.border,
+      dividerTheme: DividerThemeData(
+        color: palette.border.withValues(alpha: 0.42),
+        thickness: 1,
+        space: 1,
+      ),
       chipTheme: ChipThemeData(
         backgroundColor: palette.surfaceAlt,
         selectedColor: palette.primarySoft,
-        side: BorderSide(color: palette.border),
+        side: BorderSide(color: palette.border.withValues(alpha: 0.55)),
         labelStyle: TextStyle(color: palette.textMain),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -347,7 +352,25 @@ class CcmxAppTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(CcmxThemeTokens.inputRadius),
-          borderSide: BorderSide(color: palette.border),
+          borderSide: BorderSide(
+            color: palette.border.withValues(alpha: 0.58),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(CcmxThemeTokens.inputRadius),
+          borderSide: BorderSide(color: palette.primary.withValues(alpha: 0.7)),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: palette.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: palette.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
       ),
       textTheme: ThemeData(brightness: brightness).textTheme.apply(
