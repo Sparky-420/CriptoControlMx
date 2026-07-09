@@ -8772,7 +8772,7 @@ class CoinsTab extends StatelessWidget {
       onRefresh: onRefreshPrices,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: <Widget>[
           PremiumDashboardHero(
             title: 'Monedas',
@@ -8796,7 +8796,7 @@ class CoinsTab extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           _CommandSection(
             title: 'Paneles por moneda',
             children: coins.map((String coin) {
@@ -8854,14 +8854,14 @@ class PremiumCoinCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
-                CoinLogo(coin: stat.coin, size: 52),
-                const SizedBox(width: 12),
+                CoinLogo(coin: stat.coin, size: 44),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -8874,22 +8874,26 @@ class PremiumCoinCard extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 2),
                       Text(
                         hasPosition
                             ? '${crypto(stat.quantity)} en cartera'
                             : 'Precio listo para seguimiento',
-                        style: Theme.of(context).textTheme.bodySmall,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
                       StatusPill(
                         label: isManual ? 'Manual' : 'Automático',
                         positive: !isManual,
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         priceModeLabel,
-                        style: Theme.of(context).textTheme.bodySmall,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -8901,18 +8905,20 @@ class PremiumCoinCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 10,
-              runSpacing: 10,
+              spacing: 8,
+              runSpacing: 8,
               children: <Widget>[
                 MiniMetric(
                   label: 'Precio',
                   value: priceDisplay(stat.currentPrice),
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
                 MiniMetric(
                   label: 'Valor actual',
                   value: money(stat.currentValue),
+                  color: Theme.of(context).colorScheme.primary,
                 ),
                 MiniMetric(
                   label: 'Resultado',
@@ -8926,13 +8932,15 @@ class PremiumCoinCard extends StatelessWidget {
               ],
             ),
             if (!hasPrice) ...<Widget>[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
