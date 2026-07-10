@@ -24,6 +24,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
+import 'ui/ccmx_components.dart' as ccmx_ui;
 
 const Set<String> _safeCrashAreas = <String>{
   'cloud',
@@ -10566,7 +10567,7 @@ class MoreTab extends StatelessWidget {
           _CommandSection(
             title: 'Diagnóstico',
             children: <Widget>[
-              PremiumActionTile(
+              ccmx_ui.CcmxActionTile(
                 icon: Icons.health_and_safety_outlined,
                 title: 'Estado del sistema',
                 subtitle: 'Datos locales, nube manual, alertas y precios.',
