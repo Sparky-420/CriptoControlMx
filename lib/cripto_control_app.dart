@@ -10574,7 +10574,7 @@ class MoreTab extends StatelessWidget {
                 badge: pricesUpdatedAt == null ? 'Sin precios' : 'OK',
                 onTap: () => _showDiagnostics(context),
               ),
-              PremiumActionTile(
+              ccmx_ui.CcmxActionTile(
                 icon: Icons.info_outline,
                 title: 'Acerca de CriptoControlMx',
                 subtitle: 'Información, privacidad local y aviso financiero.',
@@ -10586,7 +10586,7 @@ class MoreTab extends StatelessWidget {
           _CommandSection(
             title: 'Configuración visual',
             children: <Widget>[
-              PremiumActionTile(
+              ccmx_ui.CcmxActionTile(
                 icon: Icons.palette_outlined,
                 title: 'Tema',
                 subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
