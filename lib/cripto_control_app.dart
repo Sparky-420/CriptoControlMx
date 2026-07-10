@@ -10468,7 +10468,7 @@ class MoreTab extends StatelessWidget {
 
     return PremiumScaffoldSurface(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: <Widget>[
           _CommandCenterHeader(
             totals: totals,
@@ -10476,7 +10476,7 @@ class MoreTab extends StatelessWidget {
             pricesUpdatedAt: pricesUpdatedAt,
             priceSource: _priceSource,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           _CommandSection(
             title: 'Cuenta / nube',
             children: <Widget>[
@@ -10484,8 +10484,8 @@ class MoreTab extends StatelessWidget {
                 icon: Icons.account_circle_outlined,
                 title: 'Cuenta en la nube',
                 subtitle: firebaseAuthConnected
-                    ? 'Conectado: $firebaseAuthAccountLabel · Perfil cloud: $cloudProfileStatus'
-                    : 'Conecta Google para habilitar acciones manuales de nube.',
+                    ? '$firebaseAuthAccountLabel · Perfil $cloudProfileStatus'
+                    : 'Google opcional para nube manual.',
                 badge: firebaseAuthConnected ? 'Conectado' : 'Sin cuenta',
                 loading:
                     isFirebaseAuthBusy ||
@@ -10505,8 +10505,8 @@ class MoreTab extends StatelessWidget {
                 subtitle: isGoogleConnecting
                     ? 'Verificando autorización de Google Drive...'
                     : googleDriveConnected
-                    ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Última copia: $googleDriveBackupLabel'
-                    : 'Conecta Google Drive para crear y restaurar copias.',
+                    ? '${googleAccountEmail ?? 'cuenta Google'} · $googleDriveBackupLabel'
+                    : 'Crea y restaura copias manuales.',
                 badge: isGoogleConnecting
                     ? 'Verificando'
                     : googleDriveConnected
@@ -10518,15 +10518,13 @@ class MoreTab extends StatelessWidget {
               PremiumActionTile(
                 icon: Icons.backup_outlined,
                 title: 'Copia local',
-                subtitle:
-                    'Exporta movimientos, precios, comisión y snapshots antes de restaurar o restablecer.',
+                subtitle: 'Backup local de movimientos, precios y snapshots.',
                 onTap: onExportBackup,
               ),
               PremiumActionTile(
                 icon: Icons.upload_file_outlined,
                 title: 'Restaurar copia',
-                subtitle:
-                    'Recupera datos desde una copia guardada. Requiere confirmación.',
+                subtitle: 'Importar backup con confirmación previa.',
                 onTap: () => _showImportActions(context),
               ),
             ],
@@ -10551,17 +10549,15 @@ class MoreTab extends StatelessWidget {
                 icon: Icons.receipt_long_outlined,
                 title: 'Historial de movimientos',
                 subtitle: movementCount == 1
-                    ? '1 movimiento registrado para auditoría, edición y borrado'
-                    : '$movementCount movimientos registrados para auditoría, '
-                          'edición y borrado',
+                    ? '1 movimiento · OCR editable, auditoría y edición'
+                    : '$movementCount movimientos · OCR editable, auditoría y edición',
                 badge: 'Clave',
                 onTap: onOpenMovements,
               ),
               PremiumActionTile(
                 icon: Icons.table_chart_outlined,
                 title: 'Reportes',
-                subtitle:
-                    'CSV para hojas de cálculo, JSON para respaldo, PDF/XLSX para reporte.',
+                subtitle: 'CSV, JSON, PDF y XLSX para respaldo o reporte.',
                 badge: 'CSV/JSON',
                 onTap: () => _showDataActions(context),
               ),
@@ -10573,8 +10569,7 @@ class MoreTab extends StatelessWidget {
               PremiumActionTile(
                 icon: Icons.health_and_safety_outlined,
                 title: 'Estado del sistema',
-                subtitle:
-                    'Datos locales, Drive/Firebase manuales, alertas y fuente de precios.',
+                subtitle: 'Datos locales, nube manual, alertas y precios.',
                 badge: pricesUpdatedAt == null ? 'Sin precios' : 'OK',
                 onTap: () => _showDiagnostics(context),
               ),
@@ -10622,8 +10617,7 @@ class MoreTab extends StatelessWidget {
               PremiumActionTile(
                 icon: Icons.restart_alt_outlined,
                 title: 'Restablecer datos financieros',
-                subtitle:
-                    'Borra cartera, precios, instantáneas y alertas. Requiere copia previa y confirmación.',
+                subtitle: 'Borra datos financieros con copia previa y confirmación.',
                 badge: 'Peligroso',
                 onTap: onOpenFinancialReset,
               ),
@@ -11957,18 +11951,18 @@ class _CommandCenterHeader extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(17),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            colors.primaryContainer.withValues(alpha: 0.72),
-            colors.surfaceContainerHighest.withValues(alpha: 0.82),
+            colors.primaryContainer.withValues(alpha: 0.46),
+            colors.surfaceContainerHighest.withValues(alpha: 0.78),
           ],
         ),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.13)),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.11)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -11982,8 +11976,10 @@ class _CommandCenterHeader extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       'Centro de control',
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800, height: 1.05),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        height: 1.05,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -11998,14 +11994,14 @@ class _CommandCenterHeader extends StatelessWidget {
               Icon(
                 Icons.dashboard_customize_outlined,
                 color: colors.primary,
-                size: 30,
+                size: 28,
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           Wrap(
             spacing: 10,
-            runSpacing: 10,
+            runSpacing: 8,
             children: <Widget>[
               _HeaderMetric(
                 label: 'Cartera',
@@ -12335,7 +12331,7 @@ class PremiumActionTile extends StatelessWidget {
 
     return PremiumCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -12343,11 +12339,11 @@ class PremiumActionTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Container(
-                width: 42,
-                height: 42,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: colors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  color: colors.primary.withValues(alpha: 0.10),
                 ),
                 child: loading
                     ? const Padding(
@@ -12356,7 +12352,7 @@ class PremiumActionTile extends StatelessWidget {
                       )
                     : Icon(icon, color: colors.primary),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -12364,12 +12360,12 @@ class PremiumActionTile extends StatelessWidget {
                     Text(
                       title,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                     if (badge != null) ...<Widget>[
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: PremiumStatusBadge(
@@ -12378,30 +12374,33 @@ class PremiumActionTile extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
               if (showChevron) ...<Widget>[
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
                 Icon(
                   Icons.chevron_right,
                   color: colors.onSurfaceVariant.withValues(alpha: 0.72),
+                  size: 20,
                 ),
               ],
             ],
           ),
           if (_hasEmptyState) ...<Widget>[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
               ),
               child: Column(
