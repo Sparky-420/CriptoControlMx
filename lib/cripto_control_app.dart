@@ -10592,13 +10592,13 @@ class MoreTab extends StatelessWidget {
                 subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
                 onTap: onOpenThemeSettings,
               ),
-              PremiumActionTile(
+              ccmx_ui.CcmxActionTile(
                 icon: Icons.sync_outlined,
                 title: 'Actualización de precios',
                 subtitle: 'Apertura, movimientos e intervalo en pantalla',
                 onTap: onOpenPriceSettings,
               ),
-              PremiumActionTile(
+              ccmx_ui.CcmxActionTile(
                 icon: Icons.view_agenda_outlined,
                 title: 'Resumen de cartera',
                 subtitle: 'Posiciones visibles y orden del portafolio',
