@@ -4950,8 +4950,14 @@ class SummaryTab extends StatelessWidget {
   }) {
     if (active.isEmpty) {
       return <Widget>[
-        _SummaryEmptyPortfolio(
-          hasMovements: hasMovements,
+        EmptyState(
+          icon: Icons.account_balance_wallet_outlined,
+          title: hasMovements
+              ? 'No tienes posiciones abiertas'
+              : 'No hay cartera todavía',
+          subtitle: hasMovements
+              ? 'Tus movimientos existen, pero no hay saldos activos por mostrar.'
+              : 'Agrega tu primer movimiento para abrir el seguimiento.',
         ),
       ];
     }
@@ -5008,7 +5014,7 @@ class SummaryTab extends StatelessWidget {
         onRefresh: onRefreshPrices,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 30),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
           children: <Widget>[
             SummaryHeroPanel(
               title: 'Resumen ejecutivo',
@@ -5019,22 +5025,56 @@ class SummaryTab extends StatelessWidget {
               leader: leader,
             ),
             if (!hasMovements)
-              _SummaryWelcomePanel(
-                onAddMovement: onAddMovement,
-                onImportBackup: onImportBackup,
+              CardPanel(
+                title: 'Bienvenido a CriptoControlMx',
+                subtitle:
+                    'Empieza con tu primer movimiento o restaura una copia de seguridad. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Icon(Icons.tips_and_updates_outlined),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '1. Registra una compra, venta, entrada o salida.\n2. Actualiza precios para valorar tu cartera.\n3. Guarda instantáneas para construir historial y gráficas.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton.icon(
+                          onPressed: onAddMovement,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Agregar movimiento'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onImportBackup,
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: const Text('Restaurar copia'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             LatestSnapshotCard(
               snapshot: latestSnapshot,
               onSaveSnapshot: onSaveSnapshot,
               onViewSnapshots: onViewSnapshots,
               onViewEvolution: onViewSnapshotEvolution,
             ),
-            const SizedBox(height: 16),
-            _SummarySection(
+            const SizedBox(height: 6),
+            _CommandSection(
               title: 'Panorama',
-              subtitle: 'Lectura rápida de exposición y recuperación',
-              icon: Icons.analytics_outlined,
               children: <Widget>[
                 PremiumMetricCard(
                   label: 'Invertido',
@@ -5049,10 +5089,8 @@ class SummaryTab extends StatelessWidget {
                 ),
               ],
             ),
-            _SummarySection(
+            _CommandSection(
               title: 'Foco inmediato',
-              subtitle: 'Lo más relevante para revisar ahora',
-              icon: Icons.radar_outlined,
               children: <Widget>[
                 PremiumInfoPanel(
                   icon: Icons.leaderboard_outlined,
@@ -5077,12 +5115,9 @@ class SummaryTab extends StatelessWidget {
                 ),
               ],
             ),
-            _SummarySection(
+            _CommandSection(
               title:
-                  'Cartera',
-              subtitle:
-                  '${visiblePositions.label} · Orden: ${positionSortMode.label}',
-              icon: Icons.account_balance_wallet_outlined,
+                  'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
               children: _buildVisiblePositionChildren(
                 active: active,
                 visibleActive: visibleActive,
@@ -5117,60 +5152,15 @@ class SummaryHeroPanel extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final Color unrealizedColor = pnlColor(totals.unrealizedPL);
     final Color realizedColor = pnlColor(totals.realizedPL);
-    final bool positive = totals.unrealizedPL >= 0;
 
-    return Container(
+    return PremiumCard(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[
-            Color.alphaBlend(
-              colors.primary.withValues(alpha: 0.22),
-              colors.surfaceContainerHighest,
-            ),
-            colors.surfaceContainerHigh.withValues(alpha: 0.94),
-            colors.surface.withValues(alpha: 0.98),
-          ],
-        ),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.20)),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: colors.primary.withValues(alpha: 0.10),
-            blurRadius: 26,
-            offset: const Offset(0, 16),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 28,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: colors.primary.withValues(alpha: 0.14),
-                  border: Border.all(
-                    color: colors.primary.withValues(alpha: 0.20),
-                  ),
-                ),
-                child: Icon(
-                  Icons.account_balance_wallet_outlined,
-                  color: colors.primary,
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -5178,342 +5168,62 @@ class SummaryHeroPanel extends StatelessWidget {
                     Text(
                       title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: colors.onSurfaceVariant,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       subtitle,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
-              PremiumStatusBadge(
-                label: positive ? 'Ganancia abierta' : 'Pérdida abierta',
-                tone: positive
-                    ? PremiumStatusTone.positive
-                    : PremiumStatusTone.negative,
-              ),
+              Icon(Icons.space_dashboard_outlined, color: colors.primary),
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 18),
           Text(
-            'Valor actual de cartera',
+            'Valor de cartera',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: colors.onSurfaceVariant,
-                  fontWeight: FontWeight.w800,
-                ),
+              color: colors.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             moneyShort(totals.currentValue),
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  height: 0.98,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              Icon(
-                positive ? Icons.trending_up : Icons.trending_down,
-                color: unrealizedColor,
-                size: 18,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  'No realizado ${money(totals.unrealizedPL)}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: unrealizedColor,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final bool compactWidth = constraints.maxWidth < 380;
-              return Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: <Widget>[
-                  _SummaryHeroMetric(
-                    label: 'Invertido',
-                    value: moneyShort(totals.costBase),
-                    icon: Icons.savings_outlined,
-                    width: compactWidth ? constraints.maxWidth : 150,
-                  ),
-                  _SummaryHeroMetric(
-                    label: 'Valor actual',
-                    value: moneyShort(totals.currentValue),
-                    icon: Icons.account_balance_wallet_outlined,
-                    width: compactWidth ? constraints.maxWidth : 150,
-                  ),
-                  _SummaryHeroMetric(
-                    label: 'Resultado',
-                    value: moneyShort(totals.unrealizedPL),
-                    color: unrealizedColor,
-                    icon: positive ? Icons.north_east : Icons.south_east,
-                    width: compactWidth ? constraints.maxWidth : 150,
-                  ),
-                  _SummaryHeroMetric(
-                    label: 'Realizado',
-                    value: moneyShort(totals.realizedPL),
-                    color: realizedColor,
-                    icon: Icons.payments_outlined,
-                    width: compactWidth ? constraints.maxWidth : 150,
-                  ),
-                ],
-              );
-            },
-          ),
-          if (leader case final CoinStats leadingCoin) ...<Widget>[
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                color: colors.surface.withValues(alpha: 0.38),
-                border: Border.all(
-                  color: colors.outlineVariant.withValues(alpha: 0.28),
-                ),
-              ),
-              child: Row(
-                children: <Widget>[
-                  CoinLogo(coin: leadingCoin.coin, size: 34),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Mayor posición',
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${leadingCoin.coin} · ${money(leadingCoin.currentValue)}',
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(
-                    Icons.military_tech_outlined,
-                    color: colors.primary,
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryHeroMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color? color;
-  final double width;
-
-  const _SummaryHeroMetric({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.width,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: width,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: colors.surface.withValues(alpha: 0.42),
-          border: Border.all(
-            color: colors.outlineVariant.withValues(alpha: 0.30),
-          ),
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(icon, size: 18, color: color ?? colors.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: color,
-                          fontWeight: FontWeight.w900,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SummarySection extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final List<Widget> children;
-
-  const _SummarySection({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: colors.primary.withValues(alpha: 0.12),
-                ),
-                child: Icon(icon, color: colors.primary, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            height: 1.05,
-                          ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...children.map(
-            (Widget child) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: child,
+              fontWeight: FontWeight.w900,
+              height: 1,
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryWelcomePanel extends StatelessWidget {
-  final VoidCallback onAddMovement;
-  final VoidCallback onImportBackup;
-
-  const _SummaryWelcomePanel({
-    required this.onAddMovement,
-    required this.onImportBackup,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        color: colors.surfaceContainerHighest.withValues(alpha: 0.72),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(Icons.auto_awesome_outlined, color: colors.primary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Configura tu cartera',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Registra un movimiento o restaura una copia para activar el dashboard financiero.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 10,
+            runSpacing: 10,
             children: <Widget>[
-              FilledButton.icon(
-                onPressed: onAddMovement,
-                icon: const Icon(Icons.add),
-                label: const Text('Agregar movimiento'),
+              _HeaderMetric(
+                label: 'P&L no realizado',
+                value: moneyShort(totals.unrealizedPL),
+                color: unrealizedColor,
+                icon: totals.unrealizedPL >= 0
+                    ? Icons.trending_up
+                    : Icons.trending_down,
               ),
-              OutlinedButton.icon(
-                onPressed: onImportBackup,
-                icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Restaurar copia'),
+              _HeaderMetric(
+                label: 'P&L realizado',
+                value: moneyShort(totals.realizedPL),
+                color: realizedColor,
+                icon: Icons.payments_outlined,
+              ),
+              _HeaderMetric(
+                label: 'Mayor posición',
+                value: leader?.coin ?? '—',
+                icon: Icons.military_tech_outlined,
               ),
             ],
           ),
@@ -5523,52 +5233,6 @@ class _SummaryWelcomePanel extends StatelessWidget {
   }
 }
 
-class _SummaryEmptyPortfolio extends StatelessWidget {
-  final bool hasMovements;
-
-  const _SummaryEmptyPortfolio({required this.hasMovements});
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        color: colors.surfaceContainerHighest.withValues(alpha: 0.68),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        children: <Widget>[
-          Icon(
-            Icons.account_balance_wallet_outlined,
-            color: colors.primary,
-            size: 34,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            hasMovements ? 'No tienes posiciones abiertas' : 'No hay cartera todavía',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            hasMovements
-                ? 'Tus movimientos existen, pero no hay saldos activos por mostrar.'
-                : 'Agrega tu primer movimiento para abrir el seguimiento.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 class LatestSnapshotCard extends StatelessWidget {
   final PortfolioSnapshot? snapshot;
   final VoidCallback onSaveSnapshot;
@@ -5586,174 +5250,45 @@ class LatestSnapshotCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final PortfolioSnapshot? current = snapshot;
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        color: colors.surfaceContainerHigh.withValues(alpha: 0.86),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: colors.primary.withValues(alpha: 0.12),
-                ),
-                child: Icon(Icons.camera_alt_outlined, color: colors.primary),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      'Instantánea reciente',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      current == null
-                          ? 'Sin instantánea guardada'
-                          : longDate(current.createdAt),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                onPressed: onSaveSnapshot,
-                icon: const Icon(Icons.add_a_photo_outlined),
-                tooltip: 'Guardar instantánea',
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (current == null)
-            Text(
-              'Guarda una instantánea para comparar valor, inversión y resultados en el tiempo.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
+    return CardPanel(
+      title: 'Última instantánea',
+      subtitle: current == null
+          ? 'Sin instantánea guardada.'
+          : longDate(current.createdAt),
+      child: current == null
+          ? const Text(
+              'Resumen muestra solo la última instantánea. Gestiona el histórico '
+              'desde Más → Instantáneas.',
             )
-          else ...<Widget>[
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: <Widget>[
-                _SummarySnapshotMetric(
-                  label: 'Valor',
-                  value: moneyShort(current.totalCurrentValue),
-                  icon: Icons.account_balance_wallet_outlined,
-                ),
-                _SummarySnapshotMetric(
-                  label: 'No realizado',
-                  value: moneyShort(current.totalUnrealizedPL),
-                  icon: current.totalUnrealizedPL >= 0
-                      ? Icons.trending_up
-                      : Icons.trending_down,
-                  color: pnlColor(current.totalUnrealizedPL),
-                ),
-                _SummarySnapshotMetric(
-                  label: 'Realizado',
-                  value: moneyShort(current.totalRealizedPL),
-                  icon: Icons.payments_outlined,
-                  color: pnlColor(current.totalRealizedPL),
-                ),
-                _SummarySnapshotMetric(
-                  label: 'Dominante',
-                  value: current.dominantCoinLabel,
-                  icon: Icons.pie_chart_outline,
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              TextButton.icon(
-                onPressed: onViewEvolution,
-                icon: const Icon(Icons.show_chart),
-                label: const Text('Ver evolución'),
-              ),
-              TextButton.icon(
-                onPressed: onViewSnapshots,
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Administrar'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummarySnapshotMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color? color;
-
-  const _SummarySnapshotMetric({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      constraints: const BoxConstraints(minWidth: 132, maxWidth: 190),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: colors.surface.withValues(alpha: 0.45),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(icon, size: 18, color: color ?? colors.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
+          : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
+                InfoLine('Fecha', longDate(current.createdAt)),
+                InfoLine('Valor de cartera', money(current.totalCurrentValue)),
+                InfoLine(
+                  'P&L no realizado',
+                  money(current.totalUnrealizedPL),
+                  valueColor: pnlColor(current.totalUnrealizedPL),
+                  emphasized: true,
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
-                      ),
+                InfoLine(
+                  'P&L realizado',
+                  money(current.totalRealizedPL),
+                  valueColor: pnlColor(current.totalRealizedPL),
+                ),
+                InfoLine('Inversión total', money(current.totalCostBase)),
+                InfoLine('Moneda dominante', current.dominantCoinLabel),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: onViewEvolution,
+                    icon: const Icon(Icons.show_chart),
+                    label: const Text('Ver evolución en Gráficas'),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -5847,201 +5382,79 @@ class CleanCoinCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool isRecovered = stats.isAtOrAboveNetBreakEven(sellFeePercent);
     final bool hasPrice = stats.currentPrice > 0;
     final String distance = stats.quantity <= 0 || isRecovered
         ? '0.00%'
         : pct(stats.percentToNetBreakEven(sellFeePercent));
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: onDetails,
-        child: Container(
-          padding: const EdgeInsets.all(15),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            color: colors.surfaceContainerHigh.withValues(alpha: 0.82),
-            border: Border.all(
-              color: isRecovered
-                  ? const Color(0xFF22C55E).withValues(alpha: 0.20)
-                  : colors.outlineVariant.withValues(alpha: 0.34),
-            ),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.10),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  CoinLogo(coin: stats.coin, size: 46),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: Text(
-                                stats.coin,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w900),
-                              ),
-                            ),
-                            StatusPill(
-                              label: isRecovered ? 'Recuperada' : 'Vigilar',
-                              positive: isRecovered,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${crypto(stats.quantity)} ${stats.coin}',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Valor actual',
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          money(stats.currentValue),
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                height: 1.02,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    money(stats.unrealizedPL),
-                    textAlign: TextAlign.right,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: pnlColor(stats.unrealizedPL),
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                CoinLogo(coin: stats.coin, size: 42),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        money(stats.currentValue),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w900,
                         ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  _SummaryCoinMetric(
-                    label: 'Precio',
-                    value: hasPrice ? money(stats.currentPrice) : 'No disponible',
-                    icon: Icons.sell_outlined,
-                  ),
-                  _SummaryCoinMetric(
-                    label: 'Break-even',
-                    value: money(stats.netBreakEvenPrice(sellFeePercent)),
-                    icon: Icons.flag_outlined,
-                  ),
-                  _SummaryCoinMetric(
-                    label: isRecovered ? 'Margen' : 'Falta',
-                    value: distance,
-                    icon: isRecovered
-                        ? Icons.verified_outlined
-                        : Icons.trending_up_outlined,
-                    color: isRecovered ? const Color(0xFF22C55E) : null,
-                  ),
-                  _SummaryCoinMetric(
-                    label: 'Promedio',
-                    value: money(stats.avgPrice),
-                    icon: Icons.functions,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SummaryCoinMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color? color;
-
-  const _SummaryCoinMetric({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      constraints: const BoxConstraints(minWidth: 128, maxWidth: 190),
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: colors.surface.withValues(alpha: 0.42),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.24)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, color: color ?? colors.primary, size: 17),
-          const SizedBox(width: 7),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.onSurfaceVariant,
                       ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
+                      Text(
+                        hasPrice
+                            ? '${crypto(stats.quantity)} · BE ${money(stats.netBreakEvenPrice(sellFeePercent))}'
+                            : '${crypto(stats.quantity)} · Precio no disponible',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: StatusPill(
+                          label: isRecovered
+                              ? 'Arriba del equilibrio'
+                              : _positionStatusLabel(stats, sellFeePercent),
+                          positive: isRecovered,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: <Widget>[
+                MiniMetric(
+                  label: 'Resultado',
+                  value: money(stats.unrealizedPL),
+                  color: pnlColor(stats.unrealizedPL),
+                ),
+                MiniMetric(label: 'Falta', value: distance),
+                MiniMetric(label: 'Promedio', value: money(stats.avgPrice)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: onDetails,
+                icon: const Icon(Icons.info_outline),
+                label: const Text('Detalles'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
