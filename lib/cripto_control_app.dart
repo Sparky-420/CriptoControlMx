@@ -55,6 +55,8 @@ const Set<String> _safeCrashCodes = <String>{
 };
 const String _analyticsConsentKey = 'analytics_consent_v1';
 const String _crashlyticsConsentKey = 'crashlytics_consent_v1';
+const String _summaryViewModeKey = 'summary_view_mode';
+const String _summaryChartTypeKey = 'summary_chart_type';
 const Set<String> _safeAnalyticsEvents = <String>{
   'app_opened',
   'tab_view',
@@ -439,6 +441,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   AppThemeStyle _themeStyle = AppThemeStyle.proDark;
   VisiblePositions _visiblePositions = VisiblePositions.three;
   PositionSortMode _positionSortMode = PositionSortMode.largestValue;
+  SummaryViewMode _summaryViewMode = SummaryViewMode.executive;
+  SummaryChartType _summaryChartType = SummaryChartType.line;
   SnapshotAutomationMode _snapshotAutomationMode =
       SnapshotAutomationMode.manual;
   SnapshotRetention _snapshotRetention = SnapshotRetention.last30;
@@ -1781,6 +1785,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _positionSortMode = positionSortModeFromName(
         prefs.getString(_positionSortKey),
       );
+      _summaryViewMode = summaryViewModeFromName(
+        prefs.getString(_summaryViewModeKey),
+      );
+      final SummaryChartType loadedSummaryChartType = summaryChartTypeFromName(
+        prefs.getString(_summaryChartTypeKey),
+      );
+      _summaryChartType = loadedSummaryChartType == SummaryChartType.candles
+          ? SummaryChartType.line
+          : loadedSummaryChartType;
       _snapshotAutomationMode = snapshotAutomationModeFromName(
         prefs.getString(_snapshotModeKey),
       );
@@ -2473,6 +2486,23 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _saveData();
   }
 
+  void _changeSummaryViewMode(SummaryViewMode value) {
+    if (_summaryViewMode == value) return;
+    setState(() => _summaryViewMode = value);
+    unawaited(_saveSummaryVisualPreference(_summaryViewModeKey, value.name));
+  }
+
+  void _changeSummaryChartType(SummaryChartType value) {
+    if (_summaryChartType == value) return;
+    setState(() => _summaryChartType = value);
+    unawaited(_saveSummaryVisualPreference(_summaryChartTypeKey, value.name));
+  }
+
+  Future<void> _saveSummaryVisualPreference(String key, String value) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+  }
+
   void _changeSnapshotAutomationMode(SnapshotAutomationMode value) {
     setState(() => _snapshotAutomationMode = value);
     _saveData();
@@ -3103,12 +3133,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       useSafeArea: true,
       builder: (BuildContext sheetContext) => DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.84,
+        initialChildSize: 0.78,
         minChildSize: 0.45,
         maxChildSize: 0.96,
         builder: (BuildContext context, ScrollController controller) => ListView(
           controller: controller,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
           children: <Widget>[
             SheetHeader(
               title: 'Detalles de ${stats.coin}',
@@ -3116,25 +3146,25 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             ),
             const SizedBox(height: 12),
             CardPanel(
-              title: 'Lectura simple',
-              subtitle: 'Datos principales sin saturar la pantalla.',
+              title: 'Resumen',
+              subtitle: 'Lectura compacta de posición.',
               child: Column(
                 children: <Widget>[
-                  InfoLine('Cantidad', crypto(stats.quantity)),
-                  InfoLine('Invertido actual', money(stats.costBase)),
-                  InfoLine(
+                  _SummaryDetailLine('Cantidad', crypto(stats.quantity)),
+                  _SummaryDetailLine('Invertido', money(stats.costBase)),
+                  _SummaryDetailLine(
                     'Valor de cartera',
                     money(stats.currentValue),
                     emphasized: true,
                   ),
-                  InfoLine(
+                  _SummaryDetailLine(
                     'P&L no realizado',
                     money(stats.unrealizedPL),
                     valueColor: pnlColor(stats.unrealizedPL),
                     emphasized: true,
                   ),
-                  InfoLine(
-                    'Precio para recuperar',
+                  _SummaryDetailLine(
+                    'Precio recuperación',
                     money(stats.netBreakEvenPrice(_sellFeePercent)),
                   ),
                 ],
@@ -3142,16 +3172,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             ),
             CardPanel(
               title: 'Auditoría',
-              subtitle: 'Desglose para revisar de dónde salen los números.',
+              subtitle: 'Desglose de movimientos.',
               child: Column(
                 children: <Widget>[
-                  InfoLine('Compras acumuladas', money(audit.buys)),
-                  InfoLine('Ventas acumuladas', money(audit.sells)),
-                  InfoLine('Entradas acumuladas', money(audit.transferIns)),
-                  InfoLine('Salidas acumuladas', money(audit.transferOuts)),
-                  InfoLine('Comisiones acumuladas', money(audit.fees)),
-                  InfoLine('Promedio histórico actual', money(stats.avgPrice)),
-                  InfoLine(
+                  _SummaryDetailLine('Compras', money(audit.buys)),
+                  _SummaryDetailLine('Ventas', money(audit.sells)),
+                  _SummaryDetailLine('Entradas', money(audit.transferIns)),
+                  _SummaryDetailLine('Salidas', money(audit.transferOuts)),
+                  _SummaryDetailLine('Comisiones', money(audit.fees)),
+                  _SummaryDetailLine('Promedio', money(stats.avgPrice)),
+                  _SummaryDetailLine(
                     'P&L realizado',
                     money(stats.realizedPL),
                     valueColor: pnlColor(stats.realizedPL),
@@ -3171,7 +3201,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   ),
                   SizedBox(height: 6),
                   Text(
-                    'Precio para recuperar = promedio / (1 - comisión de salida)',
+                    'Precio recuperación = promedio / (1 - comisión de salida)',
                   ),
                 ],
               ),
@@ -4547,6 +4577,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             stats: stats,
             totals: totals,
             snapshots: _snapshots,
+            chartType: _summaryChartType,
+            onChartTypeChanged: (SummaryChartType value) {
+              _changeSummaryChartType(value);
+              refresh?.call();
+            },
             onSaveSnapshot: () {
               _saveSnapshot(pageContext).then((_) => refresh?.call());
             },
@@ -4671,6 +4706,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               visiblePositions: _visiblePositions,
               positionSortMode: _positionSortMode,
               latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first,
+              snapshots: _snapshots,
+              viewMode: _summaryViewMode,
+              chartType: _summaryChartType,
+              onViewModeChanged: _changeSummaryViewMode,
+              onChartTypeChanged: _changeSummaryChartType,
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
               onAddMovement: () => _showAddMovementSheet(pageContext),
               onImportBackup: () => _importBackup(pageContext),
@@ -4915,6 +4955,11 @@ class SummaryTab extends StatelessWidget {
   final VisiblePositions visiblePositions;
   final PositionSortMode positionSortMode;
   final PortfolioSnapshot? latestSnapshot;
+  final List<PortfolioSnapshot> snapshots;
+  final SummaryViewMode viewMode;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryViewMode> onViewModeChanged;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
   final void Function(CoinStats stats) onDetails;
   final VoidCallback onAddMovement;
   final VoidCallback onImportBackup;
@@ -4932,6 +4977,11 @@ class SummaryTab extends StatelessWidget {
     required this.visiblePositions,
     required this.positionSortMode,
     required this.latestSnapshot,
+    required this.snapshots,
+    required this.viewMode,
+    required this.chartType,
+    required this.onViewModeChanged,
+    required this.onChartTypeChanged,
     required this.onDetails,
     required this.onAddMovement,
     required this.onImportBackup,
@@ -4950,24 +5000,27 @@ class SummaryTab extends StatelessWidget {
   }) {
     if (active.isEmpty) {
       return <Widget>[
-        EmptyState(
+        _SummaryCompactNotice(
           icon: Icons.account_balance_wallet_outlined,
           title: hasMovements
               ? 'No tienes posiciones abiertas'
               : 'No hay cartera todavía',
           subtitle: hasMovements
-              ? 'Tus movimientos existen, pero no hay saldos activos por mostrar.'
-              : 'Agrega tu primer movimiento para abrir el seguimiento.',
+              ? 'Tus movimientos existen, pero no hay saldos activos.'
+              : 'Agrega tu primer movimiento para iniciar el seguimiento.',
         ),
       ];
     }
 
     final List<Widget> children = visibleActive
         .map<Widget>(
-          (CoinStats s) => CleanCoinCard(
-            stats: s,
-            sellFeePercent: sellFeePercent,
-            onDetails: () => onDetails(s),
+          (CoinStats s) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _SummaryCompactCoinTile(
+              stats: s,
+              sellFeePercent: sellFeePercent,
+              onDetails: () => onDetails(s),
+            ),
           ),
         )
         .toList();
@@ -4975,11 +5028,10 @@ class SummaryTab extends StatelessWidget {
     final int hiddenCount = active.length - visibleActive.length;
     if (hiddenCount > 0) {
       children.add(
-        PremiumInfoPanel(
+        _SummaryCompactNotice(
           icon: Icons.visibility_off_outlined,
           title: '$hiddenCount posiciones ocultas',
-          subtitle: 'Cambia el límite en Más > Portafolio.',
-          badge: positionSortMode.label,
+          subtitle: 'Límite actual · ${positionSortMode.label}',
         ),
       );
     }
@@ -5009,129 +5061,1320 @@ class SummaryTab extends StatelessWidget {
         .where((CoinStats s) => s.isAtOrAboveNetBreakEven(sellFeePercent))
         .length;
 
-    return PremiumScaffoldSurface(
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[Color(0xFF070B14), Color(0xFF090D18)],
+        ),
+      ),
       child: RefreshIndicator(
         onRefresh: onRefreshPrices,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 26),
           children: <Widget>[
-            SummaryHeroPanel(
-              title: 'Resumen ejecutivo',
-              subtitle: leader == null
-                  ? 'Panorama de cartera'
-                  : '${leader.coin} lidera por valor actual',
-              totals: totals,
-              leader: leader,
+            _SummaryViewModeSwitcher(
+              value: viewMode,
+              onChanged: onViewModeChanged,
             ),
-            if (!hasMovements)
-              CardPanel(
-                title: 'Bienvenido a CriptoControlMx',
-                subtitle:
-                    'Empieza con tu primer movimiento o restaura una copia de seguridad. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        const Icon(Icons.tips_and_updates_outlined),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            '1. Registra una compra, venta, entrada o salida.\n2. Actualiza precios para valorar tu cartera.\n3. Guarda instantáneas para construir historial y gráficas.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        FilledButton.icon(
-                          onPressed: onAddMovement,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Agregar movimiento'),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: onImportBackup,
-                          icon: const Icon(Icons.upload_file_outlined),
-                          label: const Text('Restaurar copia'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+            const SizedBox(height: 10),
+            if (viewMode == SummaryViewMode.executive) ...<Widget>[
+              _SummaryMockupHero(totals: totals),
+              const SizedBox(height: 10),
+              _SummaryMiniMetricGrid(totals: totals, leader: leader),
+              const SizedBox(height: 12),
+              _SummaryDistributionPanel(
+                positions: active,
+                totalValue: totals.currentValue,
               ),
-            const SizedBox(height: 14),
-            LatestSnapshotCard(
-              snapshot: latestSnapshot,
-              onSaveSnapshot: onSaveSnapshot,
-              onViewSnapshots: onViewSnapshots,
-              onViewEvolution: onViewSnapshotEvolution,
-            ),
-            const SizedBox(height: 6),
-            _CommandSection(
-              title: 'Panorama',
-              children: <Widget>[
-                PremiumMetricCard(
-                  label: 'Invertido',
-                  value: money(totals.costBase),
-                  icon: Icons.savings_outlined,
-                ),
-                PremiumMetricCard(
-                  label: 'Posiciones arriba del equilibrio',
-                  value: '$recovered / ${active.length}',
-                  icon: Icons.verified_outlined,
-                  color: Colors.green,
-                ),
-              ],
-            ),
-            _CommandSection(
-              title: 'Foco inmediato',
-              children: <Widget>[
-                PremiumInfoPanel(
-                  icon: Icons.leaderboard_outlined,
-                  title: 'Mayor posición',
-                  subtitle: leader == null
-                      ? 'Sin posiciones abiertas'
-                      : '${leader.coin} · ${money(leader.currentValue)}',
-                  badge: leader == null ? 'Sin posición' : 'Dominante',
-                ),
-                PremiumInfoPanel(
-                  icon: Icons.warning_amber_rounded,
-                  title: 'Resultado a vigilar',
-                  subtitle: weakest == null
-                      ? 'Sin pérdidas abiertas'
-                      : '${weakest.coin} · ${money(weakest.unrealizedPL)}',
-                  badge: weakest == null
-                      ? 'Normal'
-                      : _positionStatusLabel(weakest, sellFeePercent),
-                  badgeColor: weakest == null
-                      ? Colors.green
-                      : pnlColor(weakest.unrealizedPL),
-                ),
-              ],
-            ),
-            _CommandSection(
-              title:
-                  'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
-              children: _buildVisiblePositionChildren(
+              const SizedBox(height: 10),
+              _SummaryCompactFocusTile(
+                weakest: weakest,
+                recovered: recovered,
+                positionCount: active.length,
+                sellFeePercent: sellFeePercent,
+              ),
+              const SizedBox(height: 16),
+              _SummaryCompactSection(
+                title: 'Posiciones visibles',
+                subtitle:
+                    '${visibleActive.length} · ${visiblePositions.label} · ${positionSortMode.label}',
+              ),
+              const SizedBox(height: 8),
+              ..._buildVisiblePositionChildren(
                 active: active,
                 visibleActive: visibleActive,
                 sellFeePercent: sellFeePercent,
                 positionSortMode: positionSortMode,
                 onDetails: onDetails,
               ),
-            ),
+              const SizedBox(height: 10),
+              _SummarySnapshotPanel(
+                snapshot: latestSnapshot,
+                onViewEvolution: onViewSnapshotEvolution,
+              ),
+            ] else
+              _SummaryQuickView(
+                totals: totals,
+                positions: visibleActive,
+                latestSnapshot: latestSnapshot,
+                snapshots: snapshots,
+                chartType: chartType,
+                onChartTypeChanged: onChartTypeChanged,
+                onDetails: onDetails,
+                onViewEvolution: onViewSnapshotEvolution,
+              ),
+            if (!hasMovements) ...<Widget>[
+              const SizedBox(height: 10),
+              _SummaryWelcomePanel(
+                onAddMovement: onAddMovement,
+                onImportBackup: onImportBackup,
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 }
+
+const Color _summarySurface = Color(0xFF0F1726); const Color _summaryElevated = Color(0xFF162033);
+const Color _summaryPurple = Color(0xFF8B5CF6); const Color _summaryBorder = Color(0x24FFFFFF);
+const List<Color> _summaryDistributionColors = <Color>[
+  Color(0xFF8B5CF6), Color(0xFFF59E0B), Color(0xFF22C55E),
+  Color(0xFF38BDF8), Color(0xFFEC4899),
+];
+String _summaryMoney(double value, {int decimals = 0}) {
+  final List<String> parts = value.abs().toStringAsFixed(decimals).split('.'); final String digits = parts.first;
+  final StringBuffer grouped = StringBuffer();
+  for (int index = 0; index < digits.length; index++) {
+    if (index > 0 && (digits.length - index) % 3 == 0) grouped.write(',');
+    grouped.write(digits[index]);
+  }
+  final String fraction = decimals > 0 ? '.${parts.last}' : '';
+  return '${value < 0 ? '-' : ''}\$${grouped.toString()}$fraction MXN';
+}
+BoxDecoration _summaryBox({Color color = _summarySurface, double radius = 13}) =>
+    BoxDecoration(
+      color: color, borderRadius: BorderRadius.circular(radius), border: Border.all(color: _summaryBorder),
+    );
+
+class _SummaryViewModeSwitcher extends StatelessWidget {
+  final SummaryViewMode value;
+  final ValueChanged<SummaryViewMode> onChanged;
+
+  const _SummaryViewModeSwitcher({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.all(4),
+      decoration: _summaryBox(color: const Color(0xFF0B1220), radius: 13),
+      child: Row(
+        children: SummaryViewMode.values.map((SummaryViewMode mode) {
+          final bool selected = mode == value;
+          return Expanded(
+            child: InkWell(
+              onTap: () => onChanged(mode),
+              borderRadius: BorderRadius.circular(9),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected ? _summaryPurple : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: selected
+                      ? const <BoxShadow>[
+                          BoxShadow(color: Color(0x357C3AED), blurRadius: 12),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(
+                      mode.icon,
+                      size: 16,
+                      color: selected ? Colors.white : const Color(0xFF98A2B5),
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      mode.label,
+                      style: TextStyle(
+                        color: selected ? Colors.white : const Color(0xFF98A2B5),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _SummaryQuickView extends StatelessWidget {
+  final PortfolioTotals totals;
+  final List<CoinStats> positions;
+  final PortfolioSnapshot? latestSnapshot;
+  final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final void Function(CoinStats stats) onDetails;
+  final VoidCallback onViewEvolution;
+
+  const _SummaryQuickView({
+    required this.totals,
+    required this.positions,
+    required this.latestSnapshot,
+    required this.snapshots,
+    required this.chartType,
+    required this.onChartTypeChanged,
+    required this.onDetails,
+    required this.onViewEvolution,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _SummaryQuickMetricsGrid(totals: totals),
+        const SizedBox(height: 10),
+        _SummarySnapshotPanel(
+          snapshot: latestSnapshot,
+          onViewEvolution: onViewEvolution,
+        ),
+        const SizedBox(height: 10),
+        _SummaryQuickEvolutionPanel(
+          snapshots: snapshots,
+          chartType: chartType,
+          onChartTypeChanged: onChartTypeChanged,
+          onViewEvolution: onViewEvolution,
+        ),
+        const SizedBox(height: 16),
+        _SummaryCompactSection(
+          title: 'Monedas en foco',
+          subtitle: '${positions.length} posiciones visibles',
+        ),
+        const SizedBox(height: 8),
+        if (positions.isEmpty)
+          const _SummaryCompactNotice(
+            icon: Icons.account_balance_wallet_outlined,
+            title: 'Sin posiciones abiertas',
+            subtitle: 'Agrega movimientos para ver tu lectura rápida.',
+          )
+        else
+          ...positions.map(
+            (CoinStats stats) => Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: _SummaryQuickCoinRow(
+                stats: stats,
+                onDetails: () => onDetails(stats),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SummaryQuickMetricsGrid extends StatelessWidget {
+  final PortfolioTotals totals;
+
+  const _SummaryQuickMetricsGrid({required this.totals});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_SummaryQuickMetricData> metrics = <_SummaryQuickMetricData>[
+      _SummaryQuickMetricData(
+        'Valor actual',
+        _summaryMoney(totals.currentValue),
+        Icons.account_balance_wallet_outlined,
+        _summaryPurple,
+      ),
+      _SummaryQuickMetricData(
+        'Invertido',
+        _summaryMoney(totals.costBase),
+        Icons.savings_outlined,
+        const Color(0xFF38BDF8),
+      ),
+      _SummaryQuickMetricData(
+        'P&L no realizado',
+        _summaryMoney(totals.unrealizedPL),
+        Icons.trending_up,
+        pnlColor(totals.unrealizedPL),
+      ),
+      _SummaryQuickMetricData(
+        'P&L realizado',
+        _summaryMoney(totals.realizedPL),
+        Icons.payments_outlined,
+        pnlColor(totals.realizedPL),
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (_, BoxConstraints constraints) {
+        final double width = (constraints.maxWidth - 8) / 2;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: metrics
+              .map(
+                (_SummaryQuickMetricData metric) => SizedBox(
+                  width: width,
+                  child: _SummaryQuickMetricCard(metric: metric),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _SummaryQuickMetricData {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _SummaryQuickMetricData(this.label, this.value, this.icon, this.color);
+}
+
+class _SummaryQuickMetricCard extends StatelessWidget {
+  final _SummaryQuickMetricData metric;
+
+  const _SummaryQuickMetricCard({required this.metric});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 92,
+      padding: const EdgeInsets.all(11),
+      decoration: _summaryBox(color: const Color(0xFF111A2B), radius: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(metric.icon, size: 15, color: metric.color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  metric.label,
+                  maxLines: 2,
+                  style: const TextStyle(
+                    color: Color(0xFFB6BED0),
+                    fontSize: 13,
+                    height: 1.05,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              metric.value,
+              style: TextStyle(
+                color: metric.color,
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryQuickEvolutionPanel extends StatelessWidget {
+  final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final VoidCallback onViewEvolution;
+
+  const _SummaryQuickEvolutionPanel({
+    required this.snapshots,
+    required this.chartType,
+    required this.onChartTypeChanged,
+    required this.onViewEvolution,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<PortfolioSnapshot> ordered = snapshots.toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+    final Color primary = Theme.of(context).colorScheme.primary;
+
+    return _SummaryPanel(
+      icon: Icons.show_chart,
+      title: 'Evolución de cartera',
+      titleFontSize: 20,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _SummaryChartTypeButton(
+                  value: chartType,
+                  onChanged: onChartTypeChanged,
+                  compact: true,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: onViewEvolution,
+                tooltip: 'Abrir gráficas',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.open_in_new, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (ordered.length < 2)
+            const _SummaryCompactNotice(
+              icon: Icons.show_chart_outlined,
+              title: 'Histórico insuficiente',
+              subtitle: 'Guarda dos instantáneas para dibujar la evolución.',
+            )
+          else
+            SnapshotLineChart(
+              snapshots: ordered,
+              height: 160,
+              includeZero: true,
+              chartType: chartType,
+              series: <SnapshotChartSeries>[
+                SnapshotChartSeries(
+                  label: 'Valor actual',
+                  color: primary,
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.totalCurrentValue)
+                      .toList(),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryQuickCoinRow extends StatelessWidget {
+  final CoinStats stats;
+  final VoidCallback onDetails;
+
+  const _SummaryQuickCoinRow({required this.stats, required this.onDetails});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color resultColor = pnlColor(stats.unrealizedPL);
+    return Container(
+      height: 66,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: _summaryBox(radius: 11),
+      child: Row(
+        children: <Widget>[
+          CoinLogo(coin: stats.coin, size: 30),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  stats.coin,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  crypto(stats.quantity),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 118),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _summaryMoney(stats.currentValue),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _summaryMoney(stats.unrealizedPL),
+                    style: TextStyle(
+                      color: resultColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onDetails,
+            tooltip: 'Detalles',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.chevron_right, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryChartTypeButton extends StatelessWidget {
+  final SummaryChartType value;
+  final ValueChanged<SummaryChartType> onChanged;
+  final bool compact;
+
+  const _SummaryChartTypeButton({
+    required this.value,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: () => _showSummaryChartTypeSheet(
+        context,
+        value: value,
+        onChanged: onChanged,
+        hasOhlc: false,
+      ),
+      icon: Icon(value.icon, size: 17),
+      label: Text(
+        compact ? 'Tipo de gráfico' : 'Tipo de gráfico · ${value.label}',
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFC4B5FD),
+        minimumSize: Size(0, compact ? 40 : 44),
+        visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+        side: const BorderSide(color: Color(0x447C3AED)),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+Future<void> _showSummaryChartTypeSheet(
+  BuildContext context, {
+  required SummaryChartType value,
+  required ValueChanged<SummaryChartType> onChanged,
+  required bool hasOhlc,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (BuildContext sheetContext) => Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0B1220),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Tipo de gráfico',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 25,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Elige cómo representar la serie temporal actual.',
+              style: TextStyle(color: Color(0xFFB6BED0), fontSize: 16),
+            ),
+            const SizedBox(height: 14),
+            for (final SummaryChartType type in SummaryChartType.values)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _SummaryChartTypeOption(
+                  type: type,
+                  selected: value == type,
+                  enabled: type != SummaryChartType.candles || hasOhlc,
+                  onTap: () {
+                    onChanged(type);
+                    Navigator.of(sheetContext).pop();
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _SummaryChartTypeOption extends StatelessWidget {
+  final SummaryChartType type;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _SummaryChartTypeOption({
+    required this.type,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accent = enabled
+        ? const Color(0xFF8B5CF6)
+        : const Color(0xFF586174);
+    return Material(
+      color: selected
+          ? const Color(0xFF241A46)
+          : const Color(0xFF111A2B),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? const Color(0x887C3AED) : _summaryBorder,
+            ),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(type.icon, color: accent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      type.label,
+                      style: TextStyle(
+                        color: enabled ? Colors.white : const Color(0xFF7F899D),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (!enabled)
+                      const Text(
+                        'Requiere OHLC',
+                        style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+                      ),
+                  ],
+                ),
+              ),
+              if (selected)
+                const Icon(Icons.check_circle, color: _summaryPurple, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryMockupHero extends StatelessWidget {
+  final PortfolioTotals totals;
+  const _SummaryMockupHero({required this.totals});
+  @override
+  Widget build(BuildContext context) {
+    final Color resultColor = pnlColor(totals.unrealizedPL);
+    return Container(
+      height: 180, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight, colors: <Color>[Color(0xFF17213A), Color(0xFF211449)],
+        ),
+        borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0x427C3AED)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(color: Color(0x267C3AED), blurRadius: 22, offset: Offset(0, 10)),
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+        Row(children: <Widget>[
+          Container(
+            width: 24, height: 24,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(7),
+            ),
+            child: const Icon(
+              Icons.account_balance_wallet_outlined,
+              size: 14, color: Color(0xFFC4B5FD),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'Valor de cartera',
+            style: TextStyle(color: Color(0xFFD0D7E5), fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+        ]),
+        const SizedBox(height: 7),
+        FittedBox(
+          fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+          child: Text(
+            _summaryMoney(totals.currentValue),
+            maxLines: 1, style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w800),
+          ),
+        ),
+        const Spacer(),
+        Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+        const SizedBox(height: 8),
+        Row(children: <Widget>[
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+              const Text(
+                'P&L no realizado',
+                style: TextStyle(color: Color(0xFFB6BED0), fontSize: 16),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _summaryMoney(totals.unrealizedPL),
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: resultColor, fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: resultColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
+              Icon(
+                totals.unrealizedPL >= 0 ? Icons.trending_up : Icons.trending_down,
+                size: 14, color: resultColor,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                totals.unrealizedPL >= 0 ? 'Positivo' : 'Negativo',
+                style: TextStyle(color: resultColor, fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+            ]),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _SummaryMiniMetricGrid extends StatelessWidget {
+  final PortfolioTotals totals; final CoinStats? leader;
+  const _SummaryMiniMetricGrid({required this.totals, required this.leader});
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> items = <Widget>[
+      _SummaryMiniMetricCard(
+        icon: Icons.savings_outlined, label: 'Invertido', value: _summaryMoney(totals.costBase).replaceFirst(' MXN', ''),
+      ),
+      _SummaryMiniMetricCard(
+        icon: Icons.payments_outlined, label: 'P&L realizado', value: _summaryMoney(totals.realizedPL).replaceFirst(' MXN', ''), color: pnlColor(totals.realizedPL),
+      ),
+      _SummaryMiniMetricCard(
+        icon: Icons.workspace_premium_outlined, label: 'Mayor posición', value: leader?.coin ?? 'Sin posición', color: const Color(0xFFF59E0B),
+      ),
+    ];
+    return LayoutBuilder(builder: (_, BoxConstraints constraints) {
+      final double availableWidth = constraints.maxWidth;
+      final double cardWidth = (availableWidth - 16) / 3;
+      return Row(children: <Widget>[
+        SizedBox(width: cardWidth, child: items[0]),
+        const SizedBox(width: 8),
+        SizedBox(width: cardWidth, child: items[1]),
+        const SizedBox(width: 8),
+        SizedBox(width: cardWidth, child: items[2]),
+      ]);
+    });
+  }
+}
+
+class _SummaryMiniMetricCard extends StatelessWidget {
+  final IconData icon; final String label;
+  final String value; final Color color;
+  const _SummaryMiniMetricCard({
+    required this.icon, required this.label,
+    required this.value,
+    this.color = _summaryPurple,
+  });
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 90, padding: const EdgeInsets.all(10), decoration: _summaryBox(radius: 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 2, style: const TextStyle(color: Color(0xFFB6BED0), fontSize: 14, height: 1.05),
+          ),
+        ),
+      ]),
+      const Spacer(),
+      FittedBox(
+        fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+        child: Text(
+          value,
+          maxLines: 1,
+          style: TextStyle(
+            color: color == _summaryPurple ? Colors.white : color, fontSize: 19, fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    ]),
+  );
+}
+
+class _SummaryDistributionPanel extends StatelessWidget {
+  final List<CoinStats> positions; final double totalValue;
+  const _SummaryDistributionPanel({required this.positions, required this.totalValue});
+  @override
+  Widget build(BuildContext context) {
+    final List<CoinStats> valued = positions
+        .where((CoinStats item) => item.currentValue > 0)
+        .take(5)
+        .toList();
+    return _SummaryPanel(
+      icon: Icons.donut_small_outlined, title: 'Distribución por valor',
+      titleFontSize: 20,
+      child: valued.isEmpty
+          ? const Text(
+              'Sin posiciones valuadas para distribuir.',
+              style: TextStyle(color: Color(0xFFB6BED0), fontSize: 13),
+            )
+          : Column(children: <Widget>[
+              for (int i = 0; i < valued.length; i++)
+                Padding(
+                  padding: EdgeInsets.only(bottom: i == valued.length - 1 ? 0 : 7),
+                  child: _SummaryDistributionRow(
+                    stats: valued[i], share: totalValue > 0 ? valued[i].currentValue / totalValue : 0, color: _summaryDistributionColors[i % _summaryDistributionColors.length],
+                  ),
+                ),
+            ]),
+    );
+  }
+}
+
+class _SummaryDistributionRow extends StatelessWidget {
+  final CoinStats stats; final double share;
+  final Color color;
+  const _SummaryDistributionRow({
+    required this.stats, required this.share,
+    required this.color,
+  });
+  @override
+  Widget build(BuildContext context) => Row(children: <Widget>[
+    SizedBox(
+      width: 42,
+      child: Text(
+        stats.coin,
+        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+      ),
+    ),
+    Expanded(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          height: 7, color: Colors.white.withValues(alpha: 0.06), alignment: Alignment.centerLeft,
+          child: FractionallySizedBox(
+            widthFactor: share.clamp(0.0, 1.0).toDouble(), child: ColoredBox(color: color),
+          ),
+        ),
+      ),
+    ),
+    const SizedBox(width: 9),
+    SizedBox(
+      width: 62,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerRight,
+        child: Text(
+          pct(share * 100),
+          maxLines: 1,
+          softWrap: false,
+          textAlign: TextAlign.right,
+          style: const TextStyle(color: Color(0xFFD0D7E5), fontSize: 14),
+        ),
+      ),
+    ),
+  ]);
+}
+
+class _SummaryCompactFocusTile extends StatelessWidget {
+  final CoinStats? weakest; final int recovered;
+  final int positionCount; final double sellFeePercent;
+  const _SummaryCompactFocusTile({
+    required this.weakest, required this.recovered,
+    required this.positionCount, required this.sellFeePercent,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final CoinStats? focus = weakest;
+    final Color color = focus == null ? const Color(0xFF22C55E) : pnlColor(focus.unrealizedPL);
+    return _SummaryCompactNotice(
+      icon: Icons.notifications_active_outlined, title: focus == null ? 'Resultado a vigilar' : '${focus.coin} requiere atención',
+      subtitle: focus == null
+          ? 'Sin posiciones abiertas por revisar.'
+          : '${_summaryMoney(focus.unrealizedPL)} · $recovered/$positionCount en equilibrio',
+      badge: focus == null ? 'Normal' : _positionStatusLabel(focus, sellFeePercent), color: color,
+    );
+  }
+}
+
+class _SummarySnapshotPanel extends StatelessWidget {
+  final PortfolioSnapshot? snapshot; final VoidCallback onViewEvolution;
+  const _SummarySnapshotPanel({required this.snapshot, required this.onViewEvolution});
+  @override
+  Widget build(BuildContext context) {
+    final PortfolioSnapshot? current = snapshot;
+    return _SummaryPanel(
+      icon: Icons.camera_alt_outlined, title: 'Última instantánea',
+      titleFontSize: 18,
+      trailing: IconButton(
+        onPressed: onViewEvolution,
+        tooltip: 'Ver gráficas',
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+        padding: EdgeInsets.zero,
+        icon: const Icon(Icons.show_chart, size: 17, color: Color(0xFFC4B5FD)),
+      ),
+      child: current == null
+          ? const Text(
+              'Aún no hay instantáneas guardadas.',
+              style: TextStyle(color: Color(0xFFB6BED0), fontSize: 13),
+            )
+          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+              Text(
+                longDate(current.createdAt),
+                style: const TextStyle(color: Color(0xFFD0D7E5), fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Row(children: <Widget>[
+                Expanded(
+                  child: _SummaryTinyMetric(
+                    label: 'Valor', value: _summaryMoney(current.totalCurrentValue), valueFontSize: 16,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _SummaryTinyMetric(
+                    label: 'P&L pendiente', value: _summaryMoney(current.totalUnrealizedPL), color: pnlColor(current.totalUnrealizedPL), valueFontSize: 16,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _SummaryTinyMetric(
+                    label: 'P&L realizado', value: _summaryMoney(current.totalRealizedPL), color: pnlColor(current.totalRealizedPL), valueFontSize: 16,
+                  ),
+                ),
+              ]),
+            ]),
+    );
+  }
+}
+
+class _SummaryCompactSection extends StatelessWidget {
+  final String title; final String subtitle;
+  const _SummaryCompactSection({required this.title, required this.subtitle});
+  @override
+  Widget build(BuildContext context) => Row(children: <Widget>[
+    const Icon(Icons.account_balance_wallet_outlined, size: 17, color: _summaryPurple),
+    const SizedBox(width: 7),
+    Expanded(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+        Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        Text(
+          subtitle,
+          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+        ),
+      ]),
+    ),
+  ]);
+}
+
+class _SummaryCompactCoinTile extends StatelessWidget {
+  final CoinStats stats; final double sellFeePercent;
+  final VoidCallback onDetails;
+  const _SummaryCompactCoinTile({
+    required this.stats, required this.sellFeePercent,
+    required this.onDetails,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final bool recovered = stats.isAtOrAboveNetBreakEven(sellFeePercent);
+    final bool hasPrice = stats.currentPrice > 0;
+    final String distance = stats.quantity <= 0 || recovered
+        ? '0.00%'
+        : pct(stats.percentToNetBreakEven(sellFeePercent));
+    final Color resultColor = pnlColor(stats.unrealizedPL);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 8), decoration: _summaryBox(),
+      child: Column(children: <Widget>[
+        Row(children: <Widget>[
+          CoinLogo(coin: stats.coin, size: 34),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+              Text(
+                stats.coin,
+                style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800),
+              ),
+              Text(
+                crypto(stats.quantity),
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 128),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: <Widget>[
+              FittedBox(
+                fit: BoxFit.scaleDown, alignment: Alignment.centerRight,
+                child: Text(
+                  _summaryMoney(stats.currentValue),
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              FittedBox(
+                fit: BoxFit.scaleDown, alignment: Alignment.centerRight,
+                child: Text(
+                  _summaryMoney(stats.unrealizedPL),
+                  style: TextStyle(color: resultColor, fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 9),
+        Row(children: <Widget>[
+          Expanded(
+            child: _SummaryTinyMetric(
+              label: 'Break-even',
+              value: hasPrice
+                  ? _summaryMoney(stats.netBreakEvenPrice(sellFeePercent), decimals: 2)
+                  : 'Sin precio',
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(child: _SummaryTinyMetric(label: 'Falta', value: distance)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _SummaryTinyMetric(
+              label: 'Promedio', value: _summaryMoney(stats.avgPrice, decimals: 2),
+            ),
+          ),
+        ]),
+        Row(children: <Widget>[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: (recovered ? const Color(0xFF22C55E) : resultColor)
+                  .withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              recovered ? 'En equilibrio' : _positionStatusLabel(stats, sellFeePercent),
+              style: TextStyle(
+                color: recovered ? const Color(0xFF4ADE80) : resultColor, fontSize: 12, fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const Spacer(),
+          TextButton.icon(
+            onPressed: onDetails, icon: const Icon(Icons.arrow_forward, size: 15), label: const Text('Detalles'),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFC4B5FD), visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 7), textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _SummaryDetailLine extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool emphasized;
+  final Color? valueColor;
+
+  const _SummaryDetailLine(
+    this.label,
+    this.value, {
+    this.emphasized = false,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final TextStyle labelStyle = TextStyle(
+      color: colors.onSurfaceVariant,
+      fontSize: 14,
+      height: 1.2,
+    );
+    final TextStyle valueStyle = TextStyle(
+      color: valueColor ?? colors.onSurface,
+      fontSize: 16,
+      fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+      height: 1.2,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool stacked =
+              constraints.maxWidth < 280 ||
+              MediaQuery.textScalerOf(context).scale(1) >= 1.3;
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(label, style: labelStyle),
+                const SizedBox(height: 3),
+                Text(value, style: valueStyle),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                flex: 5,
+                child: Text(label, maxLines: 2, style: labelStyle),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 6,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: valueStyle,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SummaryTinyMetric extends StatelessWidget {
+  final String label; final String value;
+  final Color? color;
+  final double valueFontSize;
+  const _SummaryTinyMetric({required this.label, required this.value, this.color, this.valueFontSize = 14});
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 58),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+    decoration: _summaryBox(color: _summaryElevated.withValues(alpha: 0.72), radius: 8),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+      Text(
+        label,
+        maxLines: 2, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13, height: 1.05),
+      ),
+      const SizedBox(height: 2),
+      FittedBox(
+        fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+        child: Text(
+          value,
+          maxLines: 1,
+          style: TextStyle(
+            color: color ?? const Color(0xFFDCE3F0), fontSize: valueFontSize, fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    ]),
+  );
+}
+
+class _SummaryCompactNotice extends StatelessWidget {
+  final IconData icon; final String title;
+  final String subtitle; final String? badge;
+  final Color color;
+  const _SummaryCompactNotice({
+    required this.icon, required this.title,
+    required this.subtitle,
+    this.badge,
+    this.color = _summaryPurple,
+  });
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(11), decoration: _summaryBox(radius: 12),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: <Widget>[
+      Container(
+        width: 30, height: 30,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12), shape: BoxShape.circle,
+        ),
+        child: Icon(icon, size: 16, color: color),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          Text(
+            title,
+            maxLines: 2, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.1),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            maxLines: 2, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13, height: 1.1),
+          ),
+        ]),
+      ),
+      if (badge != null)
+        Container(
+          margin: const EdgeInsets.only(left: 8), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(7),
+          ),
+          constraints: const BoxConstraints(maxWidth: 104),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              badge!,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+    ]),
+  );
+}
+
+class _SummaryPanel extends StatelessWidget {
+  final IconData icon; final String title;
+  final Widget child; final Widget? trailing;
+  final double titleFontSize;
+  const _SummaryPanel({required this.icon, required this.title, required this.child, this.trailing, this.titleFontSize = 16});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12), decoration: _summaryBox(), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+      Row(children: <Widget>[
+        Icon(icon, size: 16, color: _summaryPurple),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: Colors.white, fontSize: titleFontSize, fontWeight: FontWeight.w800),
+          ),
+        ),
+        if (trailing != null) trailing!,
+      ]),
+      const SizedBox(height: 10),
+      child,
+    ]),
+  );
+}
+
+class _SummaryWelcomePanel extends StatelessWidget {
+  final VoidCallback onAddMovement; final VoidCallback onImportBackup;
+  const _SummaryWelcomePanel({
+    required this.onAddMovement, required this.onImportBackup,
+  });
+  @override
+  Widget build(BuildContext context) => _SummaryPanel(
+    icon: Icons.auto_awesome_outlined, title: 'Comienza tu cartera',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Text(
+          'Registra un movimiento o restaura una copia existente.',
+          style: TextStyle(color: Color(0xFFB6BED0), fontSize: 14),
+        ),
+        const SizedBox(height: 9),
+        Wrap(
+          spacing: 7,
+          children: <Widget>[
+            FilledButton.icon(
+              onPressed: onAddMovement, icon: const Icon(Icons.add, size: 16), label: const Text('Agregar'),
+            ),
+            OutlinedButton.icon(
+              onPressed: onImportBackup, icon: const Icon(Icons.upload_file_outlined, size: 16), label: const Text('Restaurar'),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
 
 class SummaryHeroPanel extends StatelessWidget {
   final String title;
@@ -9540,6 +10783,54 @@ String _btcDominance(Map<String, CoinStats> stats, PortfolioTotals totals) {
   return pct((btcValue / totals.currentValue) * 100);
 }
 
+enum SummaryViewMode { executive, quick }
+
+extension SummaryViewModeDetails on SummaryViewMode {
+  String get label => switch (this) {
+    SummaryViewMode.executive => 'Ejecutivo',
+    SummaryViewMode.quick => 'Rápido',
+  };
+
+  IconData get icon => switch (this) {
+    SummaryViewMode.executive => Icons.space_dashboard_outlined,
+    SummaryViewMode.quick => Icons.grid_view_rounded,
+  };
+}
+
+SummaryViewMode summaryViewModeFromName(String? value) {
+  return SummaryViewMode.values.firstWhere(
+    (SummaryViewMode mode) => mode.name == value,
+    orElse: () => SummaryViewMode.executive,
+  );
+}
+
+enum SummaryChartType { line, area, lineMarkers, columns, candles }
+
+extension SummaryChartTypeDetails on SummaryChartType {
+  String get label => switch (this) {
+    SummaryChartType.line => 'Línea',
+    SummaryChartType.area => 'Área',
+    SummaryChartType.lineMarkers => 'Línea con marcadores',
+    SummaryChartType.columns => 'Columnas',
+    SummaryChartType.candles => 'Velas',
+  };
+
+  IconData get icon => switch (this) {
+    SummaryChartType.line => Icons.show_chart,
+    SummaryChartType.area => Icons.area_chart_outlined,
+    SummaryChartType.lineMarkers => Icons.scatter_plot_outlined,
+    SummaryChartType.columns => Icons.bar_chart_rounded,
+    SummaryChartType.candles => Icons.candlestick_chart_outlined,
+  };
+}
+
+SummaryChartType summaryChartTypeFromName(String? value) {
+  return SummaryChartType.values.firstWhere(
+    (SummaryChartType type) => type.name == value,
+    orElse: () => SummaryChartType.line,
+  );
+}
+
 enum SnapshotMetric {
   portfolioValue,
   invested,
@@ -9628,8 +10919,13 @@ class SnapshotRangeOption {
 
 class AnalyticsControlPanel extends StatefulWidget {
   final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
 
-  const AnalyticsControlPanel({super.key, required this.snapshots});
+  const AnalyticsControlPanel({
+    super.key,
+    required this.snapshots,
+    required this.chartType,
+  });
 
   @override
   State<AnalyticsControlPanel> createState() => _AnalyticsControlPanelState();
@@ -9741,7 +11037,7 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
           ),
           const SizedBox(height: 4),
           Text(
-            'La línea aparece con 2 o más instantáneas.',
+            'La gráfica aparece con 2 o más instantáneas.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -9760,6 +11056,7 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
               snapshots: filtered,
               height: 240,
               includeZero: _metric != SnapshotMetric.btcDominance,
+              chartType: widget.chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: _metric.label,
@@ -9809,6 +11106,8 @@ class ChartsTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
   final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
 
@@ -9817,6 +11116,8 @@ class ChartsTab extends StatelessWidget {
     required this.stats,
     required this.totals,
     required this.snapshots,
+    required this.chartType,
+    required this.onChartTypeChanged,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
   });
@@ -9842,8 +11143,19 @@ class ChartsTab extends StatelessWidget {
         const Text(
           'Vista histórica sobre instantáneas guardadas. Ajusta rango y métrica para leer una serie a la vez.',
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: _SummaryChartTypeButton(
+            value: chartType,
+            onChanged: onChartTypeChanged,
+          ),
+        ),
         const SizedBox(height: 16),
-        AnalyticsControlPanel(snapshots: snapshots),
+        AnalyticsControlPanel(
+          snapshots: snapshots,
+          chartType: chartType,
+        ),
         const SizedBox(height: 12),
         _CommandSection(
           title: 'Indicadores',
@@ -9940,7 +11252,7 @@ class ChartsTab extends StatelessWidget {
             ),
           )
         else ...<Widget>[
-          SnapshotTrendPanel(snapshots: snapshots),
+          SnapshotTrendPanel(snapshots: snapshots, chartType: chartType),
           Align(
             alignment: Alignment.centerRight,
             child: FilledButton.tonal(
@@ -13016,8 +14328,13 @@ class _ThemePaletteTile extends StatelessWidget {
 
 class SnapshotTrendPanel extends StatelessWidget {
   final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
 
-  const SnapshotTrendPanel({super.key, required this.snapshots});
+  const SnapshotTrendPanel({
+    super.key,
+    required this.snapshots,
+    this.chartType = SummaryChartType.line,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -13057,6 +14374,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               snapshots: ordered,
               height: 220,
               includeZero: true,
+              chartType: chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'Valor actual',
@@ -13079,6 +14397,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               snapshots: ordered,
               height: 180,
               includeZero: true,
+              chartType: chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'P&L flotante',
@@ -13101,6 +14420,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               snapshots: ordered,
               height: 170,
               includeZero: false,
+              chartType: chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'Dominancia BTC',
@@ -13163,6 +14483,7 @@ class SnapshotLineChart extends StatelessWidget {
   final List<SnapshotChartSeries> series;
   final double height;
   final bool includeZero;
+  final SummaryChartType chartType;
 
   const SnapshotLineChart({
     super.key,
@@ -13170,10 +14491,22 @@ class SnapshotLineChart extends StatelessWidget {
     required this.series,
     required this.height,
     required this.includeZero,
+    this.chartType = SummaryChartType.line,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (chartType == SummaryChartType.candles) {
+      return SizedBox(
+        height: height,
+        child: const Center(
+          child: Text(
+            'Velas requiere una serie OHLC.',
+            style: TextStyle(color: Color(0xFF98A2B5)),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       height: height,
       width: double.infinity,
@@ -13182,6 +14515,7 @@ class SnapshotLineChart extends StatelessWidget {
           snapshots: snapshots,
           series: series,
           includeZero: includeZero,
+          chartType: chartType,
           axisColor: Theme.of(context).colorScheme.outlineVariant,
           labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
@@ -13208,6 +14542,7 @@ class SnapshotLineChartPainter extends CustomPainter {
   final List<PortfolioSnapshot> snapshots;
   final List<SnapshotChartSeries> series;
   final bool includeZero;
+  final SummaryChartType chartType;
   final Color axisColor;
   final Color labelColor;
 
@@ -13215,6 +14550,7 @@ class SnapshotLineChartPainter extends CustomPainter {
     required this.snapshots,
     required this.series,
     required this.includeZero,
+    required this.chartType,
     required this.axisColor,
     required this.labelColor,
   });
@@ -13226,7 +14562,7 @@ class SnapshotLineChartPainter extends CustomPainter {
     final Rect chart = Rect.fromLTWH(
       54,
       12,
-      math.max(1, size.width - 66),
+      math.max(1, size.width - 74),
       math.max(1, size.height - 42),
     );
 
@@ -13285,14 +14621,14 @@ class SnapshotLineChartPainter extends CustomPainter {
       final SnapshotChartSeries item = series[seriesIndex];
       if (item.values.length != pointCount) continue;
 
+      final List<Offset> points = List<Offset>.generate(
+        pointCount,
+        (int index) => Offset(xFor(index), yFor(item.values[index])),
+      );
       final Path path = Path();
-      for (int i = 0; i < pointCount; i++) {
-        final Offset point = Offset(xFor(i), yFor(item.values[i]));
-        if (i == 0) {
-          path.moveTo(point.dx, point.dy);
-        } else {
-          path.lineTo(point.dx, point.dy);
-        }
+      path.moveTo(points.first.dx, points.first.dy);
+      for (final Offset point in points.skip(1)) {
+        path.lineTo(point.dx, point.dy);
       }
 
       final Paint linePaint = Paint()
@@ -13301,23 +14637,62 @@ class SnapshotLineChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
-      canvas.drawPath(path, linePaint);
-
       final Paint dotPaint = Paint()..color = item.color;
-      for (int i = 0; i < pointCount; i++) {
-        canvas.drawCircle(Offset(xFor(i), yFor(item.values[i])), 3.5, dotPaint);
+
+      if (chartType == SummaryChartType.columns) {
+        final double slotWidth = chart.width / math.max(1, pointCount);
+        final double groupWidth = math.min(22.0, slotWidth * 0.66);
+        final double barWidth = math.max(2.0, groupWidth / series.length);
+        final double baseline = includeZero ? yFor(0) : chart.bottom;
+        for (int i = 0; i < pointCount; i++) {
+          final double top = math.min(points[i].dy, baseline);
+          final double barHeight = math.max(1.0, (points[i].dy - baseline).abs());
+          final double left =
+              points[i].dx - groupWidth / 2 + seriesIndex * barWidth;
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(left, top, math.max(1, barWidth - 1), barHeight),
+              const Radius.circular(2),
+            ),
+            Paint()..color = item.color.withValues(alpha: 0.82),
+          );
+        }
+      } else {
+        if (chartType == SummaryChartType.area) {
+          final Path areaPath = Path.from(path)
+            ..lineTo(points.last.dx, chart.bottom)
+            ..lineTo(points.first.dx, chart.bottom)
+            ..close();
+          canvas.drawPath(
+            areaPath,
+            Paint()
+              ..shader = LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  item.color.withValues(alpha: 0.34),
+                  item.color.withValues(alpha: 0.03),
+                ],
+              ).createShader(chart),
+          );
+        }
+        canvas.drawPath(path, linePaint);
+        if (chartType == SummaryChartType.lineMarkers) {
+          for (final Offset point in points) {
+            canvas.drawCircle(point, 3.5, dotPaint);
+          }
+        }
       }
 
-      final Offset lastPoint = Offset(
-        xFor(pointCount - 1),
-        yFor(item.values.last),
-      );
-      canvas.drawCircle(
-        lastPoint,
-        7.0,
-        Paint()..color = item.color.withValues(alpha: 0.16),
-      );
-      canvas.drawCircle(lastPoint, 4.8, dotPaint);
+      final Offset lastPoint = points.last;
+      if (chartType != SummaryChartType.columns) {
+        canvas.drawCircle(
+          lastPoint,
+          7.0,
+          Paint()..color = item.color.withValues(alpha: 0.16),
+        );
+        canvas.drawCircle(lastPoint, 4.8, dotPaint);
+      }
       _drawValueTag(
         canvas,
         item.valueFormatter?.call(item.values.last) ??
@@ -13346,7 +14721,7 @@ class SnapshotLineChartPainter extends CustomPainter {
     final TextPainter painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: 10),
+        style: TextStyle(color: color, fontSize: 13),
       ),
       textDirection: TextDirection.ltr,
       maxLines: 1,
@@ -13366,7 +14741,7 @@ class SnapshotLineChartPainter extends CustomPainter {
         text: text,
         style: TextStyle(
           color: labelColor,
-          fontSize: 10,
+          fontSize: 13,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -13411,6 +14786,7 @@ class SnapshotLineChartPainter extends CustomPainter {
         oldDelegate.series != series ||
         oldDelegate.axisColor != axisColor ||
         oldDelegate.labelColor != labelColor ||
+        oldDelegate.chartType != chartType ||
         oldDelegate.includeZero != includeZero;
   }
 }
@@ -13432,7 +14808,13 @@ class ChartLegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            fontSize: 14,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }
