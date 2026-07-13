@@ -3151,21 +3151,23 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               child: Column(
                 children: <Widget>[
                   _SummaryDetailLine('Cantidad', crypto(stats.quantity)),
-                  _SummaryDetailLine('Invertido', money(stats.costBase)),
+                  _SummaryDetailLine('Invertido', _coinsMoney(stats.costBase)),
                   _SummaryDetailLine(
                     'Valor de cartera',
-                    money(stats.currentValue),
+                    _coinsMoney(stats.currentValue),
                     emphasized: true,
                   ),
                   _SummaryDetailLine(
                     'P&L no realizado',
-                    money(stats.unrealizedPL),
+                    _coinsMoney(stats.unrealizedPL),
                     valueColor: pnlColor(stats.unrealizedPL),
                     emphasized: true,
                   ),
                   _SummaryDetailLine(
                     'Precio recuperación',
-                    money(stats.netBreakEvenPrice(_sellFeePercent)),
+                    _coinsMoney(
+                      stats.netBreakEvenPrice(_sellFeePercent),
+                    ),
                   ),
                 ],
               ),
@@ -3175,15 +3177,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               subtitle: 'Desglose de movimientos.',
               child: Column(
                 children: <Widget>[
-                  _SummaryDetailLine('Compras', money(audit.buys)),
-                  _SummaryDetailLine('Ventas', money(audit.sells)),
-                  _SummaryDetailLine('Entradas', money(audit.transferIns)),
-                  _SummaryDetailLine('Salidas', money(audit.transferOuts)),
-                  _SummaryDetailLine('Comisiones', money(audit.fees)),
-                  _SummaryDetailLine('Promedio', money(stats.avgPrice)),
+                  _SummaryDetailLine('Compras', _coinsMoney(audit.buys)),
+                  _SummaryDetailLine('Ventas', _coinsMoney(audit.sells)),
+                  _SummaryDetailLine(
+                    'Entradas',
+                    _coinsMoney(audit.transferIns),
+                  ),
+                  _SummaryDetailLine(
+                    'Salidas',
+                    _coinsMoney(audit.transferOuts),
+                  ),
+                  _SummaryDetailLine('Comisiones', _coinsMoney(audit.fees)),
+                  _SummaryDetailLine('Promedio', _coinsMoney(stats.avgPrice)),
                   _SummaryDetailLine(
                     'P&L realizado',
-                    money(stats.realizedPL),
+                    _coinsMoney(stats.realizedPL),
                     valueColor: pnlColor(stats.realizedPL),
                   ),
                 ],
@@ -4725,6 +4733,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             CoinsTab(
               coins: _coins,
               stats: stats,
+              snapshots: _snapshots,
               sellFeePercent: _sellFeePercent,
               priceModes: _priceModes,
               manualPriceUpdatedAtMs: _manualPriceUpdatedAtMs,
@@ -4732,6 +4741,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onEditPrice: (String coin) =>
                   _showEditPriceDialog(pageContext, coin),
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
+              onViewMovements: () => openMovementHistory(),
             ),
             AlertsTab(
               coins: _coins,
@@ -9981,27 +9991,58 @@ class RotationSimulationResult {
   );
 }
 
+String _coinsMoney(double value) => _summaryMoney(value, decimals: 2);
+
+String _coinsPrice(double value) =>
+    value > 0 ? _coinsMoney(value) : 'Precio no disponible';
+
 class CoinsTab extends StatelessWidget {
   final List<String> coins;
   final Map<String, CoinStats> stats;
+  final List<PortfolioSnapshot> snapshots;
   final double sellFeePercent;
   final Map<String, String> priceModes;
   final Map<String, int> manualPriceUpdatedAtMs;
   final Future<void> Function() onRefreshPrices;
   final void Function(String coin) onEditPrice;
   final void Function(CoinStats stats) onDetails;
+  final VoidCallback onViewMovements;
 
   const CoinsTab({
     super.key,
     required this.coins,
     required this.stats,
+    required this.snapshots,
     required this.sellFeePercent,
     required this.priceModes,
     required this.manualPriceUpdatedAtMs,
     required this.onRefreshPrices,
     required this.onEditPrice,
     required this.onDetails,
+    required this.onViewMovements,
   });
+
+  void _openCoinDetail(
+    BuildContext context,
+    CoinStats stat,
+    String priceMode,
+    int? manualPriceUpdatedAt,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext routeContext) => _CoinDetailPage(
+          stat: stat,
+          snapshots: snapshots,
+          sellFeePercent: sellFeePercent,
+          priceMode: priceMode,
+          manualPriceUpdatedAtMs: manualPriceUpdatedAt,
+          onEditPrice: () => onEditPrice(stat.coin),
+          onQuickDetails: () => onDetails(stat),
+          onViewMovements: onViewMovements,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -10011,51 +10052,509 @@ class CoinsTab extends StatelessWidget {
     final int pricedCount = coins
         .where((String coin) => (stats[coin]?.currentPrice ?? 0) > 0)
         .length;
+    final List<String> activeCoins = coins
+        .where((String coin) => (stats[coin]?.quantity ?? 0) > 0)
+        .toList();
+    final List<String> trackedCoins = coins
+        .where((String coin) => (stats[coin]?.quantity ?? 0) <= 0)
+        .toList();
 
-    return RefreshIndicator(
-      onRefresh: onRefreshPrices,
-      child: ListView(
+    return ColoredBox(
+      color: const Color(0xFF070B14),
+      child: RefreshIndicator(
+        onRefresh: onRefreshPrices,
+        child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
         children: <Widget>[
-          PremiumDashboardHero(
-            title: 'Monedas',
-            subtitle: 'Precios y lectura general de tus posiciones',
-            icon: Icons.token_outlined,
-            metrics: <PremiumMetricData>[
-              PremiumMetricData(
-                label: 'Activas',
-                value: '$activeCount / ${coins.length}',
+          _CoinsPremiumHeader(
+            activeCount: activeCount,
+            monitoredCount: coins.length,
+            pricedCount: pricedCount,
+          ),
+          const SizedBox(height: 16),
+          const _CoinsSectionHeader(),
+          const SizedBox(height: 10),
+          for (int index = 0; index < activeCoins.length; index++) ...<Widget>[
+            Builder(
+              builder: (BuildContext context) {
+                final String coin = activeCoins[index];
+                final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+                final String priceMode =
+                    priceModes[coin] == PriceService.manualMode
+                    ? PriceService.manualMode
+                    : PriceService.automaticMode;
+                return PremiumCoinCard(
+                  stat: stat,
+                  sellFeePercent: sellFeePercent,
+                  priceMode: priceMode,
+                  manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
+                  onEditPrice: () => onEditPrice(coin),
+                  onDetails: () => _openCoinDetail(
+                    context,
+                    stat,
+                    priceMode,
+                    manualPriceUpdatedAtMs[coin],
+                  ),
+                );
+              },
+            ),
+            if (index != activeCoins.length - 1) const SizedBox(height: 10),
+          ],
+          if (activeCoins.isEmpty)
+            const _CoinsEmptyActiveState(),
+          if (trackedCoins.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 18),
+            _CoinsTrackingHeader(count: trackedCoins.length),
+            const SizedBox(height: 9),
+            for (int index = 0; index < trackedCoins.length; index++) ...<Widget>[
+              Builder(
+                builder: (BuildContext context) {
+                  final String coin = trackedCoins[index];
+                  final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+                  final String priceMode =
+                      priceModes[coin] == PriceService.manualMode
+                      ? PriceService.manualMode
+                      : PriceService.automaticMode;
+                  return _TrackedCoinTile(
+                    stat: stat,
+                    priceMode: priceMode,
+                    onEditPrice: () => onEditPrice(coin),
+                    onDetails: () => _openCoinDetail(
+                      context,
+                      stat,
+                      priceMode,
+                      manualPriceUpdatedAtMs[coin],
+                    ),
+                  );
+                },
+              ),
+              if (index != trackedCoins.length - 1)
+                const SizedBox(height: 8),
+            ],
+          ],
+        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoinsPremiumHeader extends StatelessWidget {
+  final int activeCount;
+  final int monitoredCount;
+  final int pricedCount;
+
+  const _CoinsPremiumHeader({
+    required this.activeCount,
+    required this.monitoredCount,
+    required this.pricedCount,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: <Color>[Color(0xFF17152C), Color(0xFF101827)],
+      ),
+      border: Border.all(color: const Color(0x337C3AED)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Monedas',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Precios y lectura general de tus posiciones',
+                    maxLines: 2,
+                    style: TextStyle(
+                      color: Color(0xFFB6BED0),
+                      fontSize: 14,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0x227C3AED),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.currency_bitcoin,
+                size: 20,
+                color: Color(0xFFC4B5FD),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 13),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+            Expanded(
+              child: _CoinsHeaderMetric(
                 icon: Icons.account_balance_wallet_outlined,
+                label: 'Activas',
+                value: '$activeCount/$monitoredCount',
               ),
-              PremiumMetricData(
-                label: 'Actualizadas',
-                value: '$pricedCount precios',
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: _CoinsHeaderMetric(
                 icon: Icons.price_check_outlined,
+                label: 'Con precio',
+                value: '$pricedCount/$monitoredCount',
               ),
-              PremiumMetricData(
+            ),
+            const SizedBox(width: 7),
+            const Expanded(
+              child: _CoinsHeaderMetric(
+                icon: Icons.cloud_outlined,
                 label: 'Fuente',
                 value: 'CoinGecko',
-                icon: Icons.cloud_outlined,
+                valueFontSize: 16,
+              ),
+            ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinsHeaderMetric extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final double valueFontSize;
+
+  const _CoinsHeaderMetric({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueFontSize = 19,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 96),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+    decoration: BoxDecoration(
+      color: const Color(0x99101827),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0x14FFFFFF)),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(icon, size: 13, color: const Color(0xFFA78BFA)),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                softWrap: true,
+                style: const TextStyle(
+                  color: Color(0xFFAAB3C5),
+                  fontSize: 13,
+                  height: 1.05,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: valueFontSize,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinsSectionHeader extends StatelessWidget {
+  const _CoinsSectionHeader();
+
+  @override
+  Widget build(BuildContext context) => const Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text(
+        'Tus monedas',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      SizedBox(height: 2),
+      Text(
+        'Precios, posiciones y resultados',
+        style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+      ),
+    ],
+  );
+}
+
+class _CoinsTrackingHeader extends StatelessWidget {
+  final int count;
+
+  const _CoinsTrackingHeader({required this.count});
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      const Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'En seguimiento',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            SizedBox(height: 2),
+            Text(
+              'Precios disponibles sin posición abierta',
+              style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0x197C3AED),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          '$count',
+          style: const TextStyle(
+            color: Color(0xFFC4B5FD),
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+class _CoinsEmptyActiveState extends StatelessWidget {
+  const _CoinsEmptyActiveState();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFF0F1726),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0x14FFFFFF)),
+    ),
+    child: const Row(
+      children: <Widget>[
+        Icon(
+          Icons.account_balance_wallet_outlined,
+          color: Color(0xFFA78BFA),
+        ),
+        SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'No hay posiciones abiertas. Tus monedas monitoreadas aparecen abajo.',
+            style: TextStyle(
+              color: Color(0xFFB6BED0),
+              fontSize: 14,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _TrackedCoinTile extends StatelessWidget {
+  final CoinStats stat;
+  final String priceMode;
+  final VoidCallback onEditPrice;
+  final VoidCallback onDetails;
+
+  const _TrackedCoinTile({
+    required this.stat,
+    required this.priceMode,
+    required this.onEditPrice,
+    required this.onDetails,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isManual = priceMode == PriceService.manualMode;
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+    final String name = cryptoAssetMetadata[stat.coin]?.name ?? stat.coin;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(11, 10, 8, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1421),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x14FFFFFF)),
+      ),
+      child: Column(
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              CoinLogo(coin: stat.coin, size: 36),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      stat.coin,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      name,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        color: Color(0xFFB6BED0),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Editar precio',
+                onPressed: onEditPrice,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
+                ),
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  size: 17,
+                  color: Color(0xFFC4B5FD),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          _CommandSection(
-            title: 'Paneles por moneda',
-            children: coins.map((String coin) {
-              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
-              return PremiumCoinCard(
-                stat: stat,
-                sellFeePercent: sellFeePercent,
-                priceMode: priceModes[coin] == PriceService.manualMode
-                    ? PriceService.manualMode
-                    : PriceService.automaticMode,
-                manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
-                onEditPrice: () => onEditPrice(coin),
-                onDetails: () => onDetails(stat),
-              );
-            }).toList(),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  'Precio actual',
+                  style: TextStyle(
+                    color: Color(0xFFAAB3C5),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _coinsPrice(stat.currentPrice),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 5),
+          Row(
+            children: <Widget>[
+              _CoinModeChip(isManual: isManual, color: modeColor),
+              const SizedBox(width: 7),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0x1238BDF8),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: const Text(
+                  'Sin posición',
+                  style: TextStyle(
+                    color: Color(0xFF7DD3FC),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              const SizedBox(width: 4),
+              TextButton(
+                onPressed: onDetails,
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFC4B5FD),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: const Text('Detalles'),
+              ),
+            ],
           ),
         ],
       ),
@@ -10095,119 +10594,1281 @@ class PremiumCoinCard extends StatelessWidget {
               ? 'Precio manual'
               : 'Manual · ${longDate(manualUpdatedAt)}'
         : 'Precio automático';
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
+    final Color resultColor = pnlColor(stat.unrealizedPL);
+    final String assetName =
+        cryptoAssetMetadata[stat.coin]?.name ?? stat.coin;
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 9),
+      decoration: BoxDecoration(
+        color: hasPosition
+            ? const Color(0xFF0F1726)
+            : const Color(0xFF0D1421),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(
+          color: hasPosition
+              ? const Color(0x247C3AED)
+              : const Color(0x14FFFFFF),
+        ),
+      ),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                CoinLogo(coin: stat.coin, size: 44),
+                CoinLogo(coin: stat.coin, size: 42),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        hasPosition
-                            ? 'Posición abierta'
-                            : 'Sin posición activa',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+                        stat.coin,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        hasPosition
-                            ? '${crypto(stat.quantity)} en cartera'
-                            : 'Precio listo para seguimiento',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        assetName,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: const TextStyle(
+                          color: Color(0xFFB6BED0),
+                          fontSize: 15,
                         ),
                       ),
-                      const SizedBox(height: 5),
-                      StatusPill(
-                        label: isManual ? 'Manual' : 'Automático',
-                        positive: !isManual,
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        priceModeLabel,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '${crypto(stat.quantity)} en cartera',
+                          maxLines: 1,
+                          softWrap: false,
+                          style: const TextStyle(
+                            color: Color(0xFFB6BED0),
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                IconButton.filledTonal(
+                const SizedBox(width: 6),
+                _CoinModeChip(isManual: isManual, color: modeColor),
+                const SizedBox(width: 5),
+                IconButton(
                   tooltip: 'Editar precio',
                   onPressed: onEditPrice,
-                  icon: const Icon(Icons.edit_outlined),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 40,
+                    height: 40,
+                  ),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF182236),
+                    foregroundColor: const Color(0xFFC4B5FD),
+                  ),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            if (isManual || !hasPrice)
+              Padding(
+                padding: const EdgeInsets.only(left: 52, top: 3),
+                child: Text(
+                  hasPrice ? priceModeLabel : 'Sin precio disponible',
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: hasPrice
+                        ? const Color(0xFF8994AA)
+                        : const Color(0xFFF59E0B),
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 10),
+            Column(
               children: <Widget>[
-                MiniMetric(
-                  label: 'Precio',
-                  value: priceDisplay(stat.currentPrice),
-                  color: Theme.of(context).colorScheme.onSurface,
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _CoinFinancialMetric(
+                        label: 'Precio',
+                        value: _coinsPrice(stat.currentPrice),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: _CoinFinancialMetric(
+                        label: 'Valor actual',
+                        value: _coinsMoney(stat.currentValue),
+                        color: const Color(0xFFC4B5FD),
+                        valueFontSize: 20,
+                      ),
+                    ),
+                  ],
                 ),
-                MiniMetric(
-                  label: 'Valor actual',
-                  value: money(stat.currentValue),
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                MiniMetric(
-                  label: 'Resultado',
-                  value: money(stat.unrealizedPL),
-                  color: pnlColor(stat.unrealizedPL),
-                ),
-                MiniMetric(
-                  label: 'Break even',
-                  value: money(stat.netBreakEvenPrice(sellFeePercent)),
+                const SizedBox(height: 6),
+                _CoinResultMetric(
+                  value: _coinsMoney(stat.unrealizedPL),
+                  color: resultColor,
                 ),
               ],
             ),
             if (!hasPrice) ...<Widget>[
               const SizedBox(height: 6),
-              Text(
-                'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: Color(0xFFF59E0B),
+                  ),
+                  SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
+                      style: TextStyle(
+                        color: Color(0xFFAAB3C5),
+                        fontSize: 13,
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            const SizedBox(height: 8),
+            Row(
               children: <Widget>[
-                StatusPill(
+                const Text(
+                  'Break-even',
+                  style: TextStyle(
+                    color: Color(0xFFAAB3C5),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      _coinsMoney(
+                        stat.netBreakEvenPrice(sellFeePercent),
+                      ),
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Row(
+              children: <Widget>[
+                _CoinPositionChip(
                   label: hasPosition
                       ? (recovered ? 'Arriba del equilibrio' : 'Vigilar')
                       : 'Sin posición',
                   positive: !hasPosition || recovered,
                 ),
-                FilledButton.tonalIcon(
+                const Spacer(),
+                const SizedBox(width: 3),
+                TextButton.icon(
                   onPressed: onDetails,
-                  icon: const Icon(Icons.info_outline),
+                  icon: const Icon(Icons.arrow_forward, size: 15),
                   label: const Text('Detalles'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFC4B5FD),
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 7),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
+            ),
+          ],
+      ),
+    );
+  }
+}
+
+class _CoinModeChip extends StatelessWidget {
+  final bool isManual;
+  final Color color;
+
+  const _CoinModeChip({required this.isManual, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(isManual ? Icons.tune : Icons.sync, size: 12, color: color),
+        const SizedBox(width: 3),
+        Text(
+          isManual ? 'Manual' : 'Automático',
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinFinancialMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? color;
+  final double valueFontSize;
+
+  const _CoinFinancialMetric({
+    required this.label,
+    required this.value,
+    this.color,
+    this.valueFontSize = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 60),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+    decoration: BoxDecoration(
+      color: const Color(0xFF121C2D),
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: const Color(0x12FFFFFF)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 1,
+          style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+        ),
+        const SizedBox(height: 5),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              color: color ?? Colors.white,
+              fontSize: valueFontSize,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinResultMetric extends StatelessWidget {
+  final String value;
+  final Color color;
+
+  const _CoinResultMetric({required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 46),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.07),
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: color.withValues(alpha: 0.14)),
+    ),
+    child: Row(
+      children: <Widget>[
+        const Text(
+          'Resultado',
+          style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                color: color,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinPositionChip extends StatelessWidget {
+  final String label;
+  final bool positive;
+
+  const _CoinPositionChip({required this.label, required this.positive});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = positive
+        ? const Color(0xFF4ADE80)
+        : const Color(0xFFF59E0B);
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 112),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _CoinDetailView { summary, chart }
+
+enum _CoinChartRange { days7, days30, days90, all }
+
+extension on _CoinChartRange {
+  String get label => switch (this) {
+    _CoinChartRange.days7 => '7D',
+    _CoinChartRange.days30 => '30D',
+    _CoinChartRange.days90 => '90D',
+    _CoinChartRange.all => 'Todo',
+  };
+
+  int? get days => switch (this) {
+    _CoinChartRange.days7 => 7,
+    _CoinChartRange.days30 => 30,
+    _CoinChartRange.days90 => 90,
+    _CoinChartRange.all => null,
+  };
+}
+
+class _CoinDetailPage extends StatefulWidget {
+  final CoinStats stat;
+  final List<PortfolioSnapshot> snapshots;
+  final double sellFeePercent;
+  final String priceMode;
+  final int? manualPriceUpdatedAtMs;
+  final VoidCallback onEditPrice;
+  final VoidCallback onQuickDetails;
+  final VoidCallback onViewMovements;
+
+  const _CoinDetailPage({
+    required this.stat,
+    required this.snapshots,
+    required this.sellFeePercent,
+    required this.priceMode,
+    required this.manualPriceUpdatedAtMs,
+    required this.onEditPrice,
+    required this.onQuickDetails,
+    required this.onViewMovements,
+  });
+
+  @override
+  State<_CoinDetailPage> createState() => _CoinDetailPageState();
+}
+
+class _CoinDetailPageState extends State<_CoinDetailPage> {
+  _CoinDetailView _view = _CoinDetailView.summary;
+  _CoinChartRange _range = _CoinChartRange.days30;
+  SummaryChartType _chartType = SummaryChartType.line;
+
+  List<PortfolioSnapshot> get _coinSnapshots {
+    final List<PortfolioSnapshot> available = widget.snapshots
+        .where(
+          (PortfolioSnapshot snapshot) => snapshot.coins.any(
+            (CoinSnapshot coin) => coin.coin == widget.stat.coin,
+          ),
+        )
+        .toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+    final int? days = _range.days;
+    if (days == null || available.isEmpty) return available;
+    final DateTime cutoff = available.last.createdAt.subtract(
+      Duration(days: days),
+    );
+    return available
+        .where(
+          (PortfolioSnapshot snapshot) => !snapshot.createdAt.isBefore(cutoff),
+        )
+        .toList();
+  }
+
+  double _coinValue(PortfolioSnapshot snapshot) => snapshot.coins
+      .firstWhere((CoinSnapshot coin) => coin.coin == widget.stat.coin)
+      .currentValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final String name =
+        cryptoAssetMetadata[widget.stat.coin]?.name ?? widget.stat.coin;
+    final bool isManual = widget.priceMode == PriceService.manualMode;
+    return Scaffold(
+      backgroundColor: const Color(0xFF070B14),
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            _CoinDetailTopBar(
+              coin: widget.stat.coin,
+              name: name,
+              onBack: () => Navigator.of(context).pop(),
+              onQuickDetails: widget.onQuickDetails,
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+                children: <Widget>[
+                  _CoinDetailIdentity(
+                    stat: widget.stat,
+                    name: name,
+                    isManual: isManual,
+                    manualPriceUpdatedAtMs: widget.manualPriceUpdatedAtMs,
+                    onEditPrice: widget.onEditPrice,
+                  ),
+                  const SizedBox(height: 12),
+                  _CoinDetailViewSelector(
+                    value: _view,
+                    onChanged: (_CoinDetailView value) {
+                      setState(() => _view = value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  if (_view == _CoinDetailView.summary)
+                    _CoinDetailSummary(
+                      stat: widget.stat,
+                      isManual: isManual,
+                      sellFeePercent: widget.sellFeePercent,
+                      onEditPrice: widget.onEditPrice,
+                      onQuickDetails: widget.onQuickDetails,
+                      onViewMovements: widget.onViewMovements,
+                    )
+                  else
+                    _CoinDetailChart(
+                      coin: widget.stat.coin,
+                      snapshots: _coinSnapshots,
+                      values: _coinSnapshots.map(_coinValue).toList(),
+                      range: _range,
+                      chartType: _chartType,
+                      onRangeChanged: (_CoinChartRange value) {
+                        setState(() => _range = value);
+                      },
+                      onChartTypeChanged: (SummaryChartType value) {
+                        setState(() => _chartType = value);
+                      },
+                      onViewMovements: widget.onViewMovements,
+                    ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+class _CoinDetailTopBar extends StatelessWidget {
+  final String coin;
+  final String name;
+  final VoidCallback onBack;
+  final VoidCallback onQuickDetails;
+
+  const _CoinDetailTopBar({
+    required this.coin,
+    required this.name,
+    required this.onBack,
+    required this.onQuickDetails,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+    child: Row(
+      children: <Widget>[
+        IconButton(
+          onPressed: onBack,
+          tooltip: 'Volver',
+          icon: const Icon(Icons.arrow_back),
+        ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                name,
+                maxLines: 1,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                coin,
+                style: const TextStyle(
+                  color: Color(0xFFAAB3C5),
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          onPressed: onQuickDetails,
+          tooltip: 'Auditoría rápida',
+          icon: const Icon(Icons.fact_check_outlined, size: 20),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinDetailIdentity extends StatelessWidget {
+  final CoinStats stat;
+  final String name;
+  final bool isManual;
+  final int? manualPriceUpdatedAtMs;
+  final VoidCallback onEditPrice;
+
+  const _CoinDetailIdentity({
+    required this.stat,
+    required this.name,
+    required this.isManual,
+    required this.manualPriceUpdatedAtMs,
+    required this.onEditPrice,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+    final DateTime? updatedAt = manualPriceUpdatedAtMs == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(manualPriceUpdatedAtMs!);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[Color(0xFF17152C), Color(0xFF0F1726)],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x337C3AED)),
+      ),
+      child: Row(
+        children: <Widget>[
+          CoinLogo(coin: stat.coin, size: 52),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '${stat.coin} · $name',
+                  maxLines: 2,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  stat.quantity > 0
+                      ? '${crypto(stat.quantity)} en cartera'
+                      : 'Sin posición activa',
+                  maxLines: 2,
+                  style: const TextStyle(
+                    color: Color(0xFFB6BED0),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    _CoinModeChip(isManual: isManual, color: modeColor),
+                    if (isManual && updatedAt != null)
+                      Text(
+                        longDate(updatedAt),
+                        style: const TextStyle(
+                          color: Color(0xFF8994AA),
+                          fontSize: 13,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          IconButton(
+            onPressed: onEditPrice,
+            tooltip: 'Editar precio',
+            style: IconButton.styleFrom(
+              backgroundColor: const Color(0xFF1B2440),
+              foregroundColor: const Color(0xFFC4B5FD),
+            ),
+            icon: const Icon(Icons.edit_outlined, size: 19),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinDetailViewSelector extends StatelessWidget {
+  final _CoinDetailView value;
+  final ValueChanged<_CoinDetailView> onChanged;
+
+  const _CoinDetailViewSelector({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) => SegmentedButton<_CoinDetailView>(
+    segments: const <ButtonSegment<_CoinDetailView>>[
+      ButtonSegment<_CoinDetailView>(
+        value: _CoinDetailView.summary,
+        icon: Icon(Icons.dashboard_outlined, size: 17),
+        label: Text('Resumen'),
+      ),
+      ButtonSegment<_CoinDetailView>(
+        value: _CoinDetailView.chart,
+        icon: Icon(Icons.show_chart, size: 17),
+        label: Text('Gráfica'),
+      ),
+    ],
+    selected: <_CoinDetailView>{value},
+    onSelectionChanged: (Set<_CoinDetailView> selection) {
+      onChanged(selection.first);
+    },
+    showSelectedIcon: false,
+    style: ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+        (Set<WidgetState> states) => states.contains(WidgetState.selected)
+            ? const Color(0xFF6D28D9)
+            : const Color(0xFF111A2B),
+      ),
+      foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+        (Set<WidgetState> states) => states.contains(WidgetState.selected)
+            ? Colors.white
+            : const Color(0xFFB6BED0),
+      ),
+      side: WidgetStateProperty.all(
+        const BorderSide(color: Color(0x557C3AED)),
+      ),
+      textStyle: WidgetStateProperty.all(
+        const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+      ),
+    ),
+  );
+}
+
+class _CoinDetailSummary extends StatelessWidget {
+  final CoinStats stat;
+  final bool isManual;
+  final double sellFeePercent;
+  final VoidCallback onEditPrice;
+  final VoidCallback onQuickDetails;
+  final VoidCallback onViewMovements;
+
+  const _CoinDetailSummary({
+    required this.stat,
+    required this.isManual,
+    required this.sellFeePercent,
+    required this.onEditPrice,
+    required this.onQuickDetails,
+    required this.onViewMovements,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (stat.quantity <= 0) {
+      return _CoinNoPositionSummary(
+        stat: stat,
+        isManual: isManual,
+        onEditPrice: onEditPrice,
+        onViewMovements: onViewMovements,
+      );
+    }
+    final Color resultColor = pnlColor(stat.unrealizedPL);
+    return Column(
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F1726),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0x247C3AED)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                'Valor actual',
+                style: TextStyle(color: Color(0xFFB6BED0), fontSize: 15),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _coinsMoney(stat.currentValue),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _coinsMoney(stat.unrealizedPL),
+                style: TextStyle(
+                  color: resultColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Precio actual',
+                value: _coinsPrice(stat.currentPrice),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Invertido',
+                value: _coinsMoney(stat.costBase),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Break-even',
+                value: _coinsMoney(stat.netBreakEvenPrice(sellFeePercent)),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Promedio',
+                value: _coinsMoney(stat.avgPrice),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _CoinDetailPanel(
+          title: 'Lectura de posición',
+          child: Column(
+            children: <Widget>[
+              _CoinDetailRow('Cantidad', crypto(stat.quantity)),
+              _CoinDetailRow(
+                'P&L no realizado',
+                _coinsMoney(stat.unrealizedPL),
+                valueColor: resultColor,
+              ),
+              _CoinDetailRow(
+                'P&L realizado',
+                _coinsMoney(stat.realizedPL),
+                valueColor: pnlColor(stat.realizedPL),
+              ),
+              _CoinDetailRow('Comisiones', _coinsMoney(stat.feesPaid)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onEditPrice,
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                label: const Text('Editar precio'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: onViewMovements,
+                icon: const Icon(Icons.receipt_long_outlined, size: 17),
+                label: const Text('Movimientos'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF6D28D9),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton.icon(
+            onPressed: onQuickDetails,
+            icon: const Icon(Icons.fact_check_outlined, size: 17),
+            label: const Text('Abrir auditoría rápida'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CoinNoPositionSummary extends StatelessWidget {
+  final CoinStats stat;
+  final bool isManual;
+  final VoidCallback onEditPrice;
+  final VoidCallback onViewMovements;
+
+  const _CoinNoPositionSummary({
+    required this.stat,
+    required this.isManual,
+    required this.onEditPrice,
+    required this.onViewMovements,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+    return Column(
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F1726),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0x337C3AED)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                'Precio actual',
+                style: TextStyle(color: Color(0xFFB6BED0), fontSize: 15),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _coinsPrice(stat.currentPrice),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 38,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 7,
+                runSpacing: 6,
+                children: <Widget>[
+                  _CoinModeChip(isManual: isManual, color: modeColor),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0x1438BDF8),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: const Text(
+                      'Sin posición abierta',
+                      style: TextStyle(
+                        color: Color(0xFF7DD3FC),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _CoinDetailPanel(
+          title: 'Seguimiento disponible',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                'Esta moneda tiene precio disponible, pero no existe una posición abierta en la cartera.',
+                style: TextStyle(
+                  color: Color(0xFFB6BED0),
+                  fontSize: 14,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CoinDetailRow('Cantidad', crypto(stat.quantity)),
+              _CoinDetailRow(
+                'Valor de cartera',
+                _coinsMoney(stat.currentValue),
+              ),
+              _CoinDetailRow('Invertido', _coinsMoney(stat.costBase)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onEditPrice,
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                label: const Text('Editar precio'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: onViewMovements,
+                icon: const Icon(Icons.add_chart_outlined, size: 17),
+                label: const Text('Movimientos'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF6D28D9),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _CoinDetailMetric extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _CoinDetailMetric({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 68),
+    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+    decoration: BoxDecoration(
+      color: const Color(0xFF111A2B),
+      borderRadius: BorderRadius.circular(11),
+      border: Border.all(color: const Color(0x14FFFFFF)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 2,
+          style: const TextStyle(
+            color: Color(0xFFAAB3C5),
+            fontSize: 13,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 5),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinDetailPanel extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _CoinDetailPanel({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(13),
+    decoration: BoxDecoration(
+      color: const Color(0xFF0F1726),
+      borderRadius: BorderRadius.circular(13),
+      border: Border.all(color: const Color(0x18FFFFFF)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        child,
+      ],
+    ),
+  );
+}
+
+class _CoinDetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _CoinDetailRow(this.label, this.value, {this.valueColor});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 9),
+    child: Row(
+      children: <Widget>[
+        Expanded(
+          flex: 5,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFFAAB3C5),
+              fontSize: 14,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 6,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: valueColor ?? Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinDetailChart extends StatelessWidget {
+  final String coin;
+  final List<PortfolioSnapshot> snapshots;
+  final List<double> values;
+  final _CoinChartRange range;
+  final SummaryChartType chartType;
+  final ValueChanged<_CoinChartRange> onRangeChanged;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final VoidCallback onViewMovements;
+
+  const _CoinDetailChart({
+    required this.coin,
+    required this.snapshots,
+    required this.values,
+    required this.range,
+    required this.chartType,
+    required this.onRangeChanged,
+    required this.onChartTypeChanged,
+    required this.onViewMovements,
+  });
+
+  @override
+  Widget build(BuildContext context) => _CoinDetailPanel(
+    title: 'Evolución de $coin',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _CoinRangeSelector(value: range, onChanged: onRangeChanged),
+        const SizedBox(height: 9),
+        _SummaryChartTypeButton(
+          value: chartType,
+          onChanged: onChartTypeChanged,
+          compact: true,
+        ),
+        const SizedBox(height: 12),
+        if (snapshots.length < 2)
+          const _SummaryCompactNotice(
+            icon: Icons.show_chart_outlined,
+            title: 'Histórico insuficiente',
+            subtitle: 'Se necesitan dos instantáneas de esta moneda.',
+          )
+        else
+          SnapshotLineChart(
+            snapshots: snapshots,
+            height: 220,
+            includeZero: true,
+            chartType: chartType,
+            series: <SnapshotChartSeries>[
+              SnapshotChartSeries(
+                label: 'Valor actual',
+                color: const Color(0xFF8B5CF6),
+                values: values,
+              ),
+            ],
+          ),
+        if (snapshots.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          _CoinDetailRow('Último valor', _coinsMoney(values.last)),
+          _CoinDetailRow('Instantáneas', snapshots.length.toString()),
+        ],
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            onPressed: onViewMovements,
+            icon: const Icon(Icons.receipt_long_outlined, size: 17),
+            label: const Text('Ver movimientos'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF6D28D9),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinRangeSelector extends StatelessWidget {
+  final _CoinChartRange value;
+  final ValueChanged<_CoinChartRange> onChanged;
+
+  const _CoinRangeSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: _CoinChartRange.values
+        .map(
+          (_CoinChartRange range) => Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                right: range == _CoinChartRange.all ? 0 : 6,
+              ),
+              child: InkWell(
+                onTap: () => onChanged(range),
+                borderRadius: BorderRadius.circular(8),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: value == range
+                        ? const Color(0xFF6D28D9)
+                        : const Color(0xFF131D2F),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: value == range
+                          ? const Color(0xFF8B5CF6)
+                          : const Color(0x14FFFFFF),
+                    ),
+                  ),
+                  child: Text(
+                    range.label,
+                    style: TextStyle(
+                      color: value == range
+                          ? Colors.white
+                          : const Color(0xFFB6BED0),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        )
+        .toList(),
+  );
 }
 
 class AlertsTab extends StatefulWidget {
