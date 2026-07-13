@@ -3165,9 +3165,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   ),
                   _SummaryDetailLine(
                     'Precio recuperación',
-                    _coinsMoney(
-                      stats.netBreakEvenPrice(_sellFeePercent),
-                    ),
+                    _coinsMoney(stats.netBreakEvenPrice(_sellFeePercent)),
                   ),
                 ],
               ),
@@ -5150,14 +5148,20 @@ class SummaryTab extends StatelessWidget {
   }
 }
 
-const Color _summarySurface = Color(0xFF0F1726); const Color _summaryElevated = Color(0xFF162033);
-const Color _summaryPurple = Color(0xFF8B5CF6); const Color _summaryBorder = Color(0x24FFFFFF);
+const Color _summarySurface = Color(0xFF0F1726);
+const Color _summaryElevated = Color(0xFF162033);
+const Color _summaryPurple = Color(0xFF8B5CF6);
+const Color _summaryBorder = Color(0x24FFFFFF);
 const List<Color> _summaryDistributionColors = <Color>[
-  Color(0xFF8B5CF6), Color(0xFFF59E0B), Color(0xFF22C55E),
-  Color(0xFF38BDF8), Color(0xFFEC4899),
+  Color(0xFF8B5CF6),
+  Color(0xFFF59E0B),
+  Color(0xFF22C55E),
+  Color(0xFF38BDF8),
+  Color(0xFFEC4899),
 ];
 String _summaryMoney(double value, {int decimals = 0}) {
-  final List<String> parts = value.abs().toStringAsFixed(decimals).split('.'); final String digits = parts.first;
+  final List<String> parts = value.abs().toStringAsFixed(decimals).split('.');
+  final String digits = parts.first;
   final StringBuffer grouped = StringBuffer();
   for (int index = 0; index < digits.length; index++) {
     if (index > 0 && (digits.length - index) % 3 == 0) grouped.write(',');
@@ -5166,16 +5170,24 @@ String _summaryMoney(double value, {int decimals = 0}) {
   final String fraction = decimals > 0 ? '.${parts.last}' : '';
   return '${value < 0 ? '-' : ''}\$${grouped.toString()}$fraction MXN';
 }
-BoxDecoration _summaryBox({Color color = _summarySurface, double radius = 13}) =>
-    BoxDecoration(
-      color: color, borderRadius: BorderRadius.circular(radius), border: Border.all(color: _summaryBorder),
-    );
+
+BoxDecoration _summaryBox({
+  Color color = _summarySurface,
+  double radius = 13,
+}) => BoxDecoration(
+  color: color,
+  borderRadius: BorderRadius.circular(radius),
+  border: Border.all(color: _summaryBorder),
+);
 
 class _SummaryViewModeSwitcher extends StatelessWidget {
   final SummaryViewMode value;
   final ValueChanged<SummaryViewMode> onChanged;
 
-  const _SummaryViewModeSwitcher({required this.value, required this.onChanged});
+  const _SummaryViewModeSwitcher({
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -5214,7 +5226,9 @@ class _SummaryViewModeSwitcher extends StatelessWidget {
                     Text(
                       mode.label,
                       style: TextStyle(
-                        color: selected ? Colors.white : const Color(0xFF98A2B5),
+                        color: selected
+                            ? Colors.white
+                            : const Color(0xFF98A2B5),
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
                       ),
@@ -5452,7 +5466,10 @@ class _SummaryQuickEvolutionPanel extends StatelessWidget {
                 onPressed: onViewEvolution,
                 tooltip: 'Abrir gráficas',
                 visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
+                ),
                 padding: EdgeInsets.zero,
                 icon: const Icon(Icons.open_in_new, size: 18),
               ),
@@ -5521,7 +5538,10 @@ class _SummaryQuickCoinRow extends StatelessWidget {
                   crypto(stats.quantity),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+                  style: const TextStyle(
+                    color: Color(0xFFAAB3C5),
+                    fontSize: 14,
+                  ),
                 ),
               ],
             ),
@@ -5689,9 +5709,7 @@ class _SummaryChartTypeOption extends StatelessWidget {
         ? const Color(0xFF8B5CF6)
         : const Color(0xFF586174);
     return Material(
-      color: selected
-          ? const Color(0xFF241A46)
-          : const Color(0xFF111A2B),
+      color: selected ? const Color(0xFF241A46) : const Color(0xFF111A2B),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: enabled ? onTap : null,
@@ -5732,7 +5750,10 @@ class _SummaryChartTypeOption extends StatelessWidget {
                     if (!enabled)
                       const Text(
                         'Requiere OHLC',
-                        style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+                        style: TextStyle(
+                          color: Color(0xFFAAB3C5),
+                          fontSize: 14,
+                        ),
                       ),
                   ],
                 ),
@@ -5754,151 +5775,236 @@ class _SummaryMockupHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color resultColor = pnlColor(totals.unrealizedPL);
     return Container(
-      height: 180, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      height: 180,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight, colors: <Color>[Color(0xFF17213A), Color(0xFF211449)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[Color(0xFF17213A), Color(0xFF211449)],
         ),
-        borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0x427C3AED)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x427C3AED)),
         boxShadow: const <BoxShadow>[
-          BoxShadow(color: Color(0x267C3AED), blurRadius: 22, offset: Offset(0, 10)),
+          BoxShadow(
+            color: Color(0x267C3AED),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-        Row(children: <Widget>[
-          Container(
-            width: 24, height: 24,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(7),
-            ),
-            child: const Icon(
-              Icons.account_balance_wallet_outlined,
-              size: 14, color: Color(0xFFC4B5FD),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Text(
-            'Valor de cartera',
-            style: TextStyle(color: Color(0xFFD0D7E5), fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-        ]),
-        const SizedBox(height: 7),
-        FittedBox(
-          fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
-          child: Text(
-            _summaryMoney(totals.currentValue),
-            maxLines: 1, style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w800),
-          ),
-        ),
-        const Spacer(),
-        Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
-        const SizedBox(height: 8),
-        Row(children: <Widget>[
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 14,
+                  color: Color(0xFFC4B5FD),
+                ),
+              ),
+              const SizedBox(width: 8),
               const Text(
-                'P&L no realizado',
-                style: TextStyle(color: Color(0xFFB6BED0), fontSize: 16),
+                'Valor de cartera',
+                style: TextStyle(
+                  color: Color(0xFFD0D7E5),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                _summaryMoney(totals.unrealizedPL),
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: resultColor, fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-            ]),
+            ],
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-            decoration: BoxDecoration(
-              color: resultColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8),
+          const SizedBox(height: 7),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _summaryMoney(totals.currentValue),
+              maxLines: 1,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 30,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-              Icon(
-                totals.unrealizedPL >= 0 ? Icons.trending_up : Icons.trending_down,
-                size: 14, color: resultColor,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                totals.unrealizedPL >= 0 ? 'Positivo' : 'Negativo',
-                style: TextStyle(color: resultColor, fontSize: 14, fontWeight: FontWeight.w700),
-              ),
-            ]),
           ),
-        ]),
-      ]),
+          const Spacer(),
+          Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Text(
+                      'P&L no realizado',
+                      style: TextStyle(color: Color(0xFFB6BED0), fontSize: 16),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _summaryMoney(totals.unrealizedPL),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: resultColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: resultColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      totals.unrealizedPL >= 0
+                          ? Icons.trending_up
+                          : Icons.trending_down,
+                      size: 14,
+                      color: resultColor,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      totals.unrealizedPL >= 0 ? 'Positivo' : 'Negativo',
+                      style: TextStyle(
+                        color: resultColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _SummaryMiniMetricGrid extends StatelessWidget {
-  final PortfolioTotals totals; final CoinStats? leader;
+  final PortfolioTotals totals;
+  final CoinStats? leader;
   const _SummaryMiniMetricGrid({required this.totals, required this.leader});
   @override
   Widget build(BuildContext context) {
     final List<Widget> items = <Widget>[
       _SummaryMiniMetricCard(
-        icon: Icons.savings_outlined, label: 'Invertido', value: _summaryMoney(totals.costBase).replaceFirst(' MXN', ''),
+        icon: Icons.savings_outlined,
+        label: 'Invertido',
+        value: _summaryMoney(totals.costBase).replaceFirst(' MXN', ''),
       ),
       _SummaryMiniMetricCard(
-        icon: Icons.payments_outlined, label: 'P&L realizado', value: _summaryMoney(totals.realizedPL).replaceFirst(' MXN', ''), color: pnlColor(totals.realizedPL),
+        icon: Icons.payments_outlined,
+        label: 'P&L realizado',
+        value: _summaryMoney(totals.realizedPL).replaceFirst(' MXN', ''),
+        color: pnlColor(totals.realizedPL),
       ),
       _SummaryMiniMetricCard(
-        icon: Icons.workspace_premium_outlined, label: 'Mayor posición', value: leader?.coin ?? 'Sin posición', color: const Color(0xFFF59E0B),
+        icon: Icons.workspace_premium_outlined,
+        label: 'Mayor posición',
+        value: leader?.coin ?? 'Sin posición',
+        color: const Color(0xFFF59E0B),
       ),
     ];
-    return LayoutBuilder(builder: (_, BoxConstraints constraints) {
-      final double availableWidth = constraints.maxWidth;
-      final double cardWidth = (availableWidth - 16) / 3;
-      return Row(children: <Widget>[
-        SizedBox(width: cardWidth, child: items[0]),
-        const SizedBox(width: 8),
-        SizedBox(width: cardWidth, child: items[1]),
-        const SizedBox(width: 8),
-        SizedBox(width: cardWidth, child: items[2]),
-      ]);
-    });
+    return LayoutBuilder(
+      builder: (_, BoxConstraints constraints) {
+        final double availableWidth = constraints.maxWidth;
+        final double cardWidth = (availableWidth - 16) / 3;
+        return Row(
+          children: <Widget>[
+            SizedBox(width: cardWidth, child: items[0]),
+            const SizedBox(width: 8),
+            SizedBox(width: cardWidth, child: items[1]),
+            const SizedBox(width: 8),
+            SizedBox(width: cardWidth, child: items[2]),
+          ],
+        );
+      },
+    );
   }
 }
 
 class _SummaryMiniMetricCard extends StatelessWidget {
-  final IconData icon; final String label;
-  final String value; final Color color;
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
   const _SummaryMiniMetricCard({
-    required this.icon, required this.label,
+    required this.icon,
+    required this.label,
     required this.value,
     this.color = _summaryPurple,
   });
   @override
   Widget build(BuildContext context) => Container(
-    height: 90, padding: const EdgeInsets.all(10), decoration: _summaryBox(radius: 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-      Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-        Icon(icon, size: 14, color: color),
-        const SizedBox(width: 5),
-        Expanded(
+    height: 90,
+    padding: const EdgeInsets.all(10),
+    decoration: _summaryBox(radius: 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                style: const TextStyle(
+                  color: Color(0xFFB6BED0),
+                  fontSize: 14,
+                  height: 1.05,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const Spacer(),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
           child: Text(
-            label,
-            maxLines: 2, style: const TextStyle(color: Color(0xFFB6BED0), fontSize: 14, height: 1.05),
+            value,
+            maxLines: 1,
+            style: TextStyle(
+              color: color == _summaryPurple ? Colors.white : color,
+              fontSize: 19,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
-      ]),
-      const Spacer(),
-      FittedBox(
-        fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
-        child: Text(
-          value,
-          maxLines: 1,
-          style: TextStyle(
-            color: color == _summaryPurple ? Colors.white : color, fontSize: 19, fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
-    ]),
+      ],
+    ),
   );
 }
 
 class _SummaryDistributionPanel extends StatelessWidget {
-  final List<CoinStats> positions; final double totalValue;
-  const _SummaryDistributionPanel({required this.positions, required this.totalValue});
+  final List<CoinStats> positions;
+  final double totalValue;
+  const _SummaryDistributionPanel({
+    required this.positions,
+    required this.totalValue,
+  });
   @override
   Widget build(BuildContext context) {
     final List<CoinStats> valued = positions
@@ -5906,100 +6012,139 @@ class _SummaryDistributionPanel extends StatelessWidget {
         .take(5)
         .toList();
     return _SummaryPanel(
-      icon: Icons.donut_small_outlined, title: 'Distribución por valor',
+      icon: Icons.donut_small_outlined,
+      title: 'Distribución por valor',
       titleFontSize: 20,
       child: valued.isEmpty
           ? const Text(
               'Sin posiciones valuadas para distribuir.',
               style: TextStyle(color: Color(0xFFB6BED0), fontSize: 13),
             )
-          : Column(children: <Widget>[
-              for (int i = 0; i < valued.length; i++)
-                Padding(
-                  padding: EdgeInsets.only(bottom: i == valued.length - 1 ? 0 : 7),
-                  child: _SummaryDistributionRow(
-                    stats: valued[i], share: totalValue > 0 ? valued[i].currentValue / totalValue : 0, color: _summaryDistributionColors[i % _summaryDistributionColors.length],
+          : Column(
+              children: <Widget>[
+                for (int i = 0; i < valued.length; i++)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      bottom: i == valued.length - 1 ? 0 : 7,
+                    ),
+                    child: _SummaryDistributionRow(
+                      stats: valued[i],
+                      share: totalValue > 0
+                          ? valued[i].currentValue / totalValue
+                          : 0,
+                      color:
+                          _summaryDistributionColors[i %
+                              _summaryDistributionColors.length],
+                    ),
                   ),
-                ),
-            ]),
+              ],
+            ),
     );
   }
 }
 
 class _SummaryDistributionRow extends StatelessWidget {
-  final CoinStats stats; final double share;
+  final CoinStats stats;
+  final double share;
   final Color color;
   const _SummaryDistributionRow({
-    required this.stats, required this.share,
+    required this.stats,
+    required this.share,
     required this.color,
   });
   @override
-  Widget build(BuildContext context) => Row(children: <Widget>[
-    SizedBox(
-      width: 42,
-      child: Text(
-        stats.coin,
-        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
-      ),
-    ),
-    Expanded(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: Container(
-          height: 7, color: Colors.white.withValues(alpha: 0.06), alignment: Alignment.centerLeft,
-          child: FractionallySizedBox(
-            widthFactor: share.clamp(0.0, 1.0).toDouble(), child: ColoredBox(color: color),
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      SizedBox(
+        width: 42,
+        child: Text(
+          stats.coin,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
-    ),
-    const SizedBox(width: 9),
-    SizedBox(
-      width: 62,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerRight,
-        child: Text(
-          pct(share * 100),
-          maxLines: 1,
-          softWrap: false,
-          textAlign: TextAlign.right,
-          style: const TextStyle(color: Color(0xFFD0D7E5), fontSize: 14),
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            height: 7,
+            color: Colors.white.withValues(alpha: 0.06),
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: share.clamp(0.0, 1.0).toDouble(),
+              child: ColoredBox(color: color),
+            ),
+          ),
         ),
       ),
-    ),
-  ]);
+      const SizedBox(width: 9),
+      SizedBox(
+        width: 62,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(
+            pct(share * 100),
+            maxLines: 1,
+            softWrap: false,
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: Color(0xFFD0D7E5), fontSize: 14),
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 class _SummaryCompactFocusTile extends StatelessWidget {
-  final CoinStats? weakest; final int recovered;
-  final int positionCount; final double sellFeePercent;
+  final CoinStats? weakest;
+  final int recovered;
+  final int positionCount;
+  final double sellFeePercent;
   const _SummaryCompactFocusTile({
-    required this.weakest, required this.recovered,
-    required this.positionCount, required this.sellFeePercent,
+    required this.weakest,
+    required this.recovered,
+    required this.positionCount,
+    required this.sellFeePercent,
   });
   @override
   Widget build(BuildContext context) {
     final CoinStats? focus = weakest;
-    final Color color = focus == null ? const Color(0xFF22C55E) : pnlColor(focus.unrealizedPL);
+    final Color color = focus == null
+        ? const Color(0xFF22C55E)
+        : pnlColor(focus.unrealizedPL);
     return _SummaryCompactNotice(
-      icon: Icons.notifications_active_outlined, title: focus == null ? 'Resultado a vigilar' : '${focus.coin} requiere atención',
+      icon: Icons.notifications_active_outlined,
+      title: focus == null
+          ? 'Resultado a vigilar'
+          : '${focus.coin} requiere atención',
       subtitle: focus == null
           ? 'Sin posiciones abiertas por revisar.'
           : '${_summaryMoney(focus.unrealizedPL)} · $recovered/$positionCount en equilibrio',
-      badge: focus == null ? 'Normal' : _positionStatusLabel(focus, sellFeePercent), color: color,
+      badge: focus == null
+          ? 'Normal'
+          : _positionStatusLabel(focus, sellFeePercent),
+      color: color,
     );
   }
 }
 
 class _SummarySnapshotPanel extends StatelessWidget {
-  final PortfolioSnapshot? snapshot; final VoidCallback onViewEvolution;
-  const _SummarySnapshotPanel({required this.snapshot, required this.onViewEvolution});
+  final PortfolioSnapshot? snapshot;
+  final VoidCallback onViewEvolution;
+  const _SummarySnapshotPanel({
+    required this.snapshot,
+    required this.onViewEvolution,
+  });
   @override
   Widget build(BuildContext context) {
     final PortfolioSnapshot? current = snapshot;
     return _SummaryPanel(
-      icon: Icons.camera_alt_outlined, title: 'Última instantánea',
+      icon: Icons.camera_alt_outlined,
+      title: 'Última instantánea',
       titleFontSize: 18,
       trailing: IconButton(
         onPressed: onViewEvolution,
@@ -6014,63 +6159,97 @@ class _SummarySnapshotPanel extends StatelessWidget {
               'Aún no hay instantáneas guardadas.',
               style: TextStyle(color: Color(0xFFB6BED0), fontSize: 13),
             )
-          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-              Text(
-                longDate(current.createdAt),
-                style: const TextStyle(color: Color(0xFFD0D7E5), fontSize: 14),
-              ),
-              const SizedBox(height: 8),
-              Row(children: <Widget>[
-                Expanded(
-                  child: _SummaryTinyMetric(
-                    label: 'Valor', value: _summaryMoney(current.totalCurrentValue), valueFontSize: 16,
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  longDate(current.createdAt),
+                  style: const TextStyle(
+                    color: Color(0xFFD0D7E5),
+                    fontSize: 14,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _SummaryTinyMetric(
-                    label: 'P&L pendiente', value: _summaryMoney(current.totalUnrealizedPL), color: pnlColor(current.totalUnrealizedPL), valueFontSize: 16,
-                  ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _SummaryTinyMetric(
+                        label: 'Valor',
+                        value: _summaryMoney(current.totalCurrentValue),
+                        valueFontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _SummaryTinyMetric(
+                        label: 'P&L pendiente',
+                        value: _summaryMoney(current.totalUnrealizedPL),
+                        color: pnlColor(current.totalUnrealizedPL),
+                        valueFontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _SummaryTinyMetric(
+                        label: 'P&L realizado',
+                        value: _summaryMoney(current.totalRealizedPL),
+                        color: pnlColor(current.totalRealizedPL),
+                        valueFontSize: 16,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: _SummaryTinyMetric(
-                    label: 'P&L realizado', value: _summaryMoney(current.totalRealizedPL), color: pnlColor(current.totalRealizedPL), valueFontSize: 16,
-                  ),
-                ),
-              ]),
-            ]),
+              ],
+            ),
     );
   }
 }
 
 class _SummaryCompactSection extends StatelessWidget {
-  final String title; final String subtitle;
+  final String title;
+  final String subtitle;
   const _SummaryCompactSection({required this.title, required this.subtitle});
   @override
-  Widget build(BuildContext context) => Row(children: <Widget>[
-    const Icon(Icons.account_balance_wallet_outlined, size: 17, color: _summaryPurple),
-    const SizedBox(width: 7),
-    Expanded(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-        Text(
-          title,
-          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      const Icon(
+        Icons.account_balance_wallet_outlined,
+        size: 17,
+        color: _summaryPurple,
+      ),
+      const SizedBox(width: 7),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+            ),
+          ],
         ),
-        Text(
-          subtitle,
-          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
-        ),
-      ]),
-    ),
-  ]);
+      ),
+    ],
+  );
 }
 
 class _SummaryCompactCoinTile extends StatelessWidget {
-  final CoinStats stats; final double sellFeePercent;
+  final CoinStats stats;
+  final double sellFeePercent;
   final VoidCallback onDetails;
   const _SummaryCompactCoinTile({
-    required this.stats, required this.sellFeePercent,
+    required this.stats,
+    required this.sellFeePercent,
     required this.onDetails,
   });
   @override
@@ -6082,87 +6261,139 @@ class _SummaryCompactCoinTile extends StatelessWidget {
         : pct(stats.percentToNetBreakEven(sellFeePercent));
     final Color resultColor = pnlColor(stats.unrealizedPL);
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 8), decoration: _summaryBox(),
-      child: Column(children: <Widget>[
-        Row(children: <Widget>[
-          CoinLogo(coin: stats.coin, size: 34),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-              Text(
-                stats.coin,
-                style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800),
-              ),
-              Text(
-                crypto(stats.quantity),
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
-              ),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 128),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: <Widget>[
-              FittedBox(
-                fit: BoxFit.scaleDown, alignment: Alignment.centerRight,
-                child: Text(
-                  _summaryMoney(stats.currentValue),
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 8),
+      decoration: _summaryBox(),
+      child: Column(
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              CoinLogo(coin: stats.coin, size: 34),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      stats.coin,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      crypto(stats.quantity),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFAAB3C5),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              FittedBox(
-                fit: BoxFit.scaleDown, alignment: Alignment.centerRight,
-                child: Text(
-                  _summaryMoney(stats.unrealizedPL),
-                  style: TextStyle(color: resultColor, fontSize: 15, fontWeight: FontWeight.w700),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 128),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _summaryMoney(stats.currentValue),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _summaryMoney(stats.unrealizedPL),
+                        style: TextStyle(
+                          color: resultColor,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ]),
+            ],
           ),
-        ]),
-        const SizedBox(height: 9),
-        Row(children: <Widget>[
-          Expanded(
-            child: _SummaryTinyMetric(
-              label: 'Break-even',
-              value: hasPrice
-                  ? _summaryMoney(stats.netBreakEvenPrice(sellFeePercent), decimals: 2)
-                  : 'Sin precio',
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(child: _SummaryTinyMetric(label: 'Falta', value: distance)),
-          const SizedBox(width: 6),
-          Expanded(
-            child: _SummaryTinyMetric(
-              label: 'Promedio', value: _summaryMoney(stats.avgPrice, decimals: 2),
-            ),
-          ),
-        ]),
-        Row(children: <Widget>[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: (recovered ? const Color(0xFF22C55E) : resultColor)
-                  .withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              recovered ? 'En equilibrio' : _positionStatusLabel(stats, sellFeePercent),
-              style: TextStyle(
-                color: recovered ? const Color(0xFF4ADE80) : resultColor, fontSize: 12, fontWeight: FontWeight.w700,
+          const SizedBox(height: 9),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _SummaryTinyMetric(
+                  label: 'Break-even',
+                  value: hasPrice
+                      ? _summaryMoney(
+                          stats.netBreakEvenPrice(sellFeePercent),
+                          decimals: 2,
+                        )
+                      : 'Sin precio',
+                ),
               ),
-            ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _SummaryTinyMetric(label: 'Falta', value: distance),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _SummaryTinyMetric(
+                  label: 'Promedio',
+                  value: _summaryMoney(stats.avgPrice, decimals: 2),
+                ),
+              ),
+            ],
           ),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: onDetails, icon: const Icon(Icons.arrow_forward, size: 15), label: const Text('Detalles'),
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFC4B5FD), visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 7), textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
+          Row(
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (recovered ? const Color(0xFF22C55E) : resultColor)
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  recovered
+                      ? 'En equilibrio'
+                      : _positionStatusLabel(stats, sellFeePercent),
+                  style: TextStyle(
+                    color: recovered ? const Color(0xFF4ADE80) : resultColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: onDetails,
+                icon: const Icon(Icons.arrow_forward, size: 15),
+                label: const Text('Detalles'),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFC4B5FD),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ]),
-      ]),
+        ],
+      ),
     );
   }
 }
@@ -6242,125 +6473,197 @@ class _SummaryDetailLine extends StatelessWidget {
 }
 
 class _SummaryTinyMetric extends StatelessWidget {
-  final String label; final String value;
+  final String label;
+  final String value;
   final Color? color;
   final double valueFontSize;
-  const _SummaryTinyMetric({required this.label, required this.value, this.color, this.valueFontSize = 14});
+  const _SummaryTinyMetric({
+    required this.label,
+    required this.value,
+    this.color,
+    this.valueFontSize = 14,
+  });
   @override
   Widget build(BuildContext context) => Container(
     constraints: const BoxConstraints(minHeight: 58),
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-    decoration: _summaryBox(color: _summaryElevated.withValues(alpha: 0.72), radius: 8),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-      Text(
-        label,
-        maxLines: 2, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13, height: 1.05),
-      ),
-      const SizedBox(height: 2),
-      FittedBox(
-        fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
-        child: Text(
-          value,
-          maxLines: 1,
-          style: TextStyle(
-            color: color ?? const Color(0xFFDCE3F0), fontSize: valueFontSize, fontWeight: FontWeight.w700,
+    decoration: _summaryBox(
+      color: _summaryElevated.withValues(alpha: 0.72),
+      radius: 8,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 2,
+          style: const TextStyle(
+            color: Color(0xFFAAB3C5),
+            fontSize: 13,
+            height: 1.05,
           ),
         ),
-      ),
-    ]),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            style: TextStyle(
+              color: color ?? const Color(0xFFDCE3F0),
+              fontSize: valueFontSize,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
   );
 }
 
 class _SummaryCompactNotice extends StatelessWidget {
-  final IconData icon; final String title;
-  final String subtitle; final String? badge;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
   final Color color;
   const _SummaryCompactNotice({
-    required this.icon, required this.title,
+    required this.icon,
+    required this.title,
     required this.subtitle,
     this.badge,
     this.color = _summaryPurple,
   });
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(11), decoration: _summaryBox(radius: 12),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: <Widget>[
-      Container(
-        width: 30, height: 30,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12), shape: BoxShape.circle,
-        ),
-        child: Icon(icon, size: 16, color: color),
-      ),
-      const SizedBox(width: 10),
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-          Text(
-            title,
-            maxLines: 2, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.1),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            maxLines: 2, style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13, height: 1.1),
-          ),
-        ]),
-      ),
-      if (badge != null)
+    padding: const EdgeInsets.all(11),
+    decoration: _summaryBox(radius: 12),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: <Widget>[
         Container(
-          margin: const EdgeInsets.only(left: 8), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          width: 30,
+          height: 30,
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(7),
+            color: color.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
           ),
-          constraints: const BoxConstraints(maxWidth: 104),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              badge!,
-              maxLines: 1,
-              softWrap: false,
-              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
+          child: Icon(icon, size: 16, color: color),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                title,
+                maxLines: 2,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 2,
+                style: const TextStyle(
+                  color: Color(0xFFAAB3C5),
+                  fontSize: 13,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (badge != null)
+          Container(
+            margin: const EdgeInsets.only(left: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            constraints: const BoxConstraints(maxWidth: 104),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                badge!,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
-        ),
-    ]),
+      ],
+    ),
   );
 }
 
 class _SummaryPanel extends StatelessWidget {
-  final IconData icon; final String title;
-  final Widget child; final Widget? trailing;
+  final IconData icon;
+  final String title;
+  final Widget child;
+  final Widget? trailing;
   final double titleFontSize;
-  const _SummaryPanel({required this.icon, required this.title, required this.child, this.trailing, this.titleFontSize = 16});
+  const _SummaryPanel({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.trailing,
+    this.titleFontSize = 16,
+  });
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(12), decoration: _summaryBox(), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-      Row(children: <Widget>[
-        Icon(icon, size: 16, color: _summaryPurple),
-        const SizedBox(width: 7),
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white, fontSize: titleFontSize, fontWeight: FontWeight.w800),
-          ),
+    padding: const EdgeInsets.all(12),
+    decoration: _summaryBox(),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(icon, size: 16, color: _summaryPurple),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
         ),
-        if (trailing != null) trailing!,
-      ]),
-      const SizedBox(height: 10),
-      child,
-    ]),
+        const SizedBox(height: 10),
+        child,
+      ],
+    ),
   );
 }
 
 class _SummaryWelcomePanel extends StatelessWidget {
-  final VoidCallback onAddMovement; final VoidCallback onImportBackup;
+  final VoidCallback onAddMovement;
+  final VoidCallback onImportBackup;
   const _SummaryWelcomePanel({
-    required this.onAddMovement, required this.onImportBackup,
+    required this.onAddMovement,
+    required this.onImportBackup,
   });
   @override
   Widget build(BuildContext context) => _SummaryPanel(
-    icon: Icons.auto_awesome_outlined, title: 'Comienza tu cartera',
+    icon: Icons.auto_awesome_outlined,
+    title: 'Comienza tu cartera',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -6373,10 +6676,14 @@ class _SummaryWelcomePanel extends StatelessWidget {
           spacing: 7,
           children: <Widget>[
             FilledButton.icon(
-              onPressed: onAddMovement, icon: const Icon(Icons.add, size: 16), label: const Text('Agregar'),
+              onPressed: onAddMovement,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Agregar'),
             ),
             OutlinedButton.icon(
-              onPressed: onImportBackup, icon: const Icon(Icons.upload_file_outlined, size: 16), label: const Text('Restaurar'),
+              onPressed: onImportBackup,
+              icon: const Icon(Icons.upload_file_outlined, size: 16),
+              label: const Text('Restaurar'),
             ),
           ],
         ),
@@ -6384,7 +6691,6 @@ class _SummaryWelcomePanel extends StatelessWidget {
     ),
   );
 }
-
 
 class SummaryHeroPanel extends StatelessWidget {
   final String title;
@@ -10064,61 +10370,35 @@ class CoinsTab extends StatelessWidget {
       child: RefreshIndicator(
         onRefresh: onRefreshPrices,
         child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-        children: <Widget>[
-          _CoinsPremiumHeader(
-            activeCount: activeCount,
-            monitoredCount: coins.length,
-            pricedCount: pricedCount,
-          ),
-          const SizedBox(height: 16),
-          const _CoinsSectionHeader(),
-          const SizedBox(height: 10),
-          for (int index = 0; index < activeCoins.length; index++) ...<Widget>[
-            Builder(
-              builder: (BuildContext context) {
-                final String coin = activeCoins[index];
-                final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
-                final String priceMode =
-                    priceModes[coin] == PriceService.manualMode
-                    ? PriceService.manualMode
-                    : PriceService.automaticMode;
-                return PremiumCoinCard(
-                  stat: stat,
-                  sellFeePercent: sellFeePercent,
-                  priceMode: priceMode,
-                  manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
-                  onEditPrice: () => onEditPrice(coin),
-                  onDetails: () => _openCoinDetail(
-                    context,
-                    stat,
-                    priceMode,
-                    manualPriceUpdatedAtMs[coin],
-                  ),
-                );
-              },
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+          children: <Widget>[
+            _CoinsPremiumHeader(
+              activeCount: activeCount,
+              monitoredCount: coins.length,
+              pricedCount: pricedCount,
             ),
-            if (index != activeCoins.length - 1) const SizedBox(height: 10),
-          ],
-          if (activeCoins.isEmpty)
-            const _CoinsEmptyActiveState(),
-          if (trackedCoins.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 18),
-            _CoinsTrackingHeader(count: trackedCoins.length),
-            const SizedBox(height: 9),
-            for (int index = 0; index < trackedCoins.length; index++) ...<Widget>[
+            const SizedBox(height: 16),
+            const _CoinsSectionHeader(),
+            const SizedBox(height: 10),
+            for (
+              int index = 0;
+              index < activeCoins.length;
+              index++
+            ) ...<Widget>[
               Builder(
                 builder: (BuildContext context) {
-                  final String coin = trackedCoins[index];
+                  final String coin = activeCoins[index];
                   final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
                   final String priceMode =
                       priceModes[coin] == PriceService.manualMode
                       ? PriceService.manualMode
                       : PriceService.automaticMode;
-                  return _TrackedCoinTile(
+                  return PremiumCoinCard(
                     stat: stat,
+                    sellFeePercent: sellFeePercent,
                     priceMode: priceMode,
+                    manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
                     onEditPrice: () => onEditPrice(coin),
                     onDetails: () => _openCoinDetail(
                       context,
@@ -10129,11 +10409,43 @@ class CoinsTab extends StatelessWidget {
                   );
                 },
               ),
-              if (index != trackedCoins.length - 1)
-                const SizedBox(height: 8),
+              if (index != activeCoins.length - 1) const SizedBox(height: 10),
+            ],
+            if (activeCoins.isEmpty) const _CoinsEmptyActiveState(),
+            if (trackedCoins.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 18),
+              _CoinsTrackingHeader(count: trackedCoins.length),
+              const SizedBox(height: 9),
+              for (
+                int index = 0;
+                index < trackedCoins.length;
+                index++
+              ) ...<Widget>[
+                Builder(
+                  builder: (BuildContext context) {
+                    final String coin = trackedCoins[index];
+                    final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+                    final String priceMode =
+                        priceModes[coin] == PriceService.manualMode
+                        ? PriceService.manualMode
+                        : PriceService.automaticMode;
+                    return _TrackedCoinTile(
+                      stat: stat,
+                      priceMode: priceMode,
+                      onEditPrice: () => onEditPrice(coin),
+                      onDetails: () => _openCoinDetail(
+                        context,
+                        stat,
+                        priceMode,
+                        manualPriceUpdatedAtMs[coin],
+                      ),
+                    );
+                  },
+                ),
+                if (index != trackedCoins.length - 1) const SizedBox(height: 8),
+              ],
             ],
           ],
-        ],
         ),
       ),
     );
@@ -10215,30 +10527,30 @@ class _CoinsPremiumHeader extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-            Expanded(
-              child: _CoinsHeaderMetric(
-                icon: Icons.account_balance_wallet_outlined,
-                label: 'Activas',
-                value: '$activeCount/$monitoredCount',
+              Expanded(
+                child: _CoinsHeaderMetric(
+                  icon: Icons.account_balance_wallet_outlined,
+                  label: 'Activas',
+                  value: '$activeCount/$monitoredCount',
+                ),
               ),
-            ),
-            const SizedBox(width: 7),
-            Expanded(
-              child: _CoinsHeaderMetric(
-                icon: Icons.price_check_outlined,
-                label: 'Con precio',
-                value: '$pricedCount/$monitoredCount',
+              const SizedBox(width: 7),
+              Expanded(
+                child: _CoinsHeaderMetric(
+                  icon: Icons.price_check_outlined,
+                  label: 'Con precio',
+                  value: '$pricedCount/$monitoredCount',
+                ),
               ),
-            ),
-            const SizedBox(width: 7),
-            const Expanded(
-              child: _CoinsHeaderMetric(
-                icon: Icons.cloud_outlined,
-                label: 'Fuente',
-                value: 'CoinGecko',
-                valueFontSize: 16,
+              const SizedBox(width: 7),
+              const Expanded(
+                child: _CoinsHeaderMetric(
+                  icon: Icons.cloud_outlined,
+                  label: 'Fuente',
+                  value: 'CoinGecko',
+                  valueFontSize: 16,
+                ),
               ),
-            ),
             ],
           ),
         ),
@@ -10394,10 +10706,7 @@ class _CoinsEmptyActiveState extends StatelessWidget {
     ),
     child: const Row(
       children: <Widget>[
-        Icon(
-          Icons.account_balance_wallet_outlined,
-          color: Color(0xFFA78BFA),
-        ),
+        Icon(Icons.account_balance_wallet_outlined, color: Color(0xFFA78BFA)),
         SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -10496,10 +10805,7 @@ class _TrackedCoinTile extends StatelessWidget {
               children: <Widget>[
                 const Text(
                   'Precio actual',
-                  style: TextStyle(
-                    color: Color(0xFFAAB3C5),
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
                 ),
                 const SizedBox(height: 2),
                 FittedBox(
@@ -10595,8 +10901,7 @@ class PremiumCoinCard extends StatelessWidget {
               : 'Manual · ${longDate(manualUpdatedAt)}'
         : 'Precio automático';
     final Color resultColor = pnlColor(stat.unrealizedPL);
-    final String assetName =
-        cryptoAssetMetadata[stat.coin]?.name ?? stat.coin;
+    final String assetName = cryptoAssetMetadata[stat.coin]?.name ?? stat.coin;
     final Color modeColor = isManual
         ? const Color(0xFFF59E0B)
         : const Color(0xFF22C55E);
@@ -10604,9 +10909,7 @@ class PremiumCoinCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 11, 12, 9),
       decoration: BoxDecoration(
-        color: hasPosition
-            ? const Color(0xFF0F1726)
-            : const Color(0xFF0D1421),
+        color: hasPosition ? const Color(0xFF0F1726) : const Color(0xFF0D1421),
         borderRadius: BorderRadius.circular(13),
         border: Border.all(
           color: hasPosition
@@ -10615,29 +10918,42 @@ class PremiumCoinCard extends StatelessWidget {
         ),
       ),
       child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                CoinLogo(coin: stat.coin, size: 42),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        stat.coin,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          height: 1,
-                        ),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              CoinLogo(coin: stat.coin, size: 42),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      stat.coin,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        assetName,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      assetName,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        color: Color(0xFFB6BED0),
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '${crypto(stat.quantity)} en cartera',
                         maxLines: 1,
                         softWrap: false,
                         style: const TextStyle(
@@ -10645,168 +10961,146 @@ class PremiumCoinCard extends StatelessWidget {
                           fontSize: 15,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '${crypto(stat.quantity)} en cartera',
-                          maxLines: 1,
-                          softWrap: false,
-                          style: const TextStyle(
-                            color: Color(0xFFB6BED0),
-                            fontSize: 15,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                _CoinModeChip(isManual: isManual, color: modeColor),
-                const SizedBox(width: 5),
-                IconButton(
-                  tooltip: 'Editar precio',
-                  onPressed: onEditPrice,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 40,
-                    height: 40,
-                  ),
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF182236),
-                    foregroundColor: const Color(0xFFC4B5FD),
-                  ),
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                ),
-              ],
-            ),
-            if (isManual || !hasPrice)
-              Padding(
-                padding: const EdgeInsets.only(left: 52, top: 3),
-                child: Text(
-                  hasPrice ? priceModeLabel : 'Sin precio disponible',
-                  maxLines: 2,
-                  style: TextStyle(
-                    color: hasPrice
-                        ? const Color(0xFF8994AA)
-                        : const Color(0xFFF59E0B),
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            const SizedBox(height: 10),
-            Column(
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: _CoinFinancialMetric(
-                        label: 'Precio',
-                        value: _coinsPrice(stat.currentPrice),
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: _CoinFinancialMetric(
-                        label: 'Valor actual',
-                        value: _coinsMoney(stat.currentValue),
-                        color: const Color(0xFFC4B5FD),
-                        valueFontSize: 20,
-                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                _CoinResultMetric(
-                  value: _coinsMoney(stat.unrealizedPL),
-                  color: resultColor,
+              ),
+              const SizedBox(width: 6),
+              _CoinModeChip(isManual: isManual, color: modeColor),
+              const SizedBox(width: 5),
+              IconButton(
+                tooltip: 'Editar precio',
+                onPressed: onEditPrice,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
                 ),
-              ],
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF182236),
+                  foregroundColor: const Color(0xFFC4B5FD),
+                ),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+              ),
+            ],
+          ),
+          if (isManual || !hasPrice)
+            Padding(
+              padding: const EdgeInsets.only(left: 52, top: 3),
+              child: Text(
+                hasPrice ? priceModeLabel : 'Sin precio disponible',
+                maxLines: 2,
+                style: TextStyle(
+                  color: hasPrice
+                      ? const Color(0xFF8994AA)
+                      : const Color(0xFFF59E0B),
+                  fontSize: 13,
+                ),
+              ),
             ),
-            if (!hasPrice) ...<Widget>[
-              const SizedBox(height: 6),
-              const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 10),
+          Column(
+            children: <Widget>[
+              Row(
                 children: <Widget>[
-                  Icon(
-                    Icons.info_outline,
-                    size: 14,
-                    color: Color(0xFFF59E0B),
-                  ),
-                  SizedBox(width: 5),
                   Expanded(
-                    child: Text(
-                      'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
-                      style: TextStyle(
-                        color: Color(0xFFAAB3C5),
-                        fontSize: 13,
-                        height: 1.15,
-                      ),
+                    child: _CoinFinancialMetric(
+                      label: 'Precio',
+                      value: _coinsPrice(stat.currentPrice),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: _CoinFinancialMetric(
+                      label: 'Valor actual',
+                      value: _coinsMoney(stat.currentValue),
+                      color: const Color(0xFFC4B5FD),
+                      valueFontSize: 20,
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 6),
+              _CoinResultMetric(
+                value: _coinsMoney(stat.unrealizedPL),
+                color: resultColor,
+              ),
             ],
-            const SizedBox(height: 8),
-            Row(
+          ),
+          if (!hasPrice) ...<Widget>[
+            const SizedBox(height: 6),
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text(
-                  'Break-even',
-                  style: TextStyle(
-                    color: Color(0xFFAAB3C5),
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(width: 8),
+                Icon(Icons.info_outline, size: 14, color: Color(0xFFF59E0B)),
+                SizedBox(width: 5),
                 Expanded(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      _coinsMoney(
-                        stat.netBreakEvenPrice(sellFeePercent),
-                      ),
-                      maxLines: 1,
-                      softWrap: false,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 3),
-            Row(
-              children: <Widget>[
-                _CoinPositionChip(
-                  label: hasPosition
-                      ? (recovered ? 'Arriba del equilibrio' : 'Vigilar')
-                      : 'Sin posición',
-                  positive: !hasPosition || recovered,
-                ),
-                const Spacer(),
-                const SizedBox(width: 3),
-                TextButton.icon(
-                  onPressed: onDetails,
-                  icon: const Icon(Icons.arrow_forward, size: 15),
-                  label: const Text('Detalles'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFFC4B5FD),
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 7),
-                    textStyle: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                  child: Text(
+                    'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
+                    style: TextStyle(
+                      color: Color(0xFFAAB3C5),
+                      fontSize: 13,
+                      height: 1.15,
                     ),
                   ),
                 ),
               ],
             ),
           ],
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              const Text(
+                'Break-even',
+                style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _coinsMoney(stat.netBreakEvenPrice(sellFeePercent)),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            children: <Widget>[
+              _CoinPositionChip(
+                label: hasPosition
+                    ? (recovered ? 'Arriba del equilibrio' : 'Vigilar')
+                    : 'Sin posición',
+                positive: !hasPosition || recovered,
+              ),
+              const Spacer(),
+              const SizedBox(width: 3),
+              TextButton.icon(
+                onPressed: onDetails,
+                icon: const Icon(Icons.arrow_forward, size: 15),
+                label: const Text('Detalles'),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFC4B5FD),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -11021,17 +11315,18 @@ class _CoinDetailPageState extends State<_CoinDetailPage> {
   SummaryChartType _chartType = SummaryChartType.line;
 
   List<PortfolioSnapshot> get _coinSnapshots {
-    final List<PortfolioSnapshot> available = widget.snapshots
-        .where(
-          (PortfolioSnapshot snapshot) => snapshot.coins.any(
-            (CoinSnapshot coin) => coin.coin == widget.stat.coin,
-          ),
-        )
-        .toList()
-      ..sort(
-        (PortfolioSnapshot a, PortfolioSnapshot b) =>
-            a.createdAt.compareTo(b.createdAt),
-      );
+    final List<PortfolioSnapshot> available =
+        widget.snapshots
+            .where(
+              (PortfolioSnapshot snapshot) => snapshot.coins.any(
+                (CoinSnapshot coin) => coin.coin == widget.stat.coin,
+              ),
+            )
+            .toList()
+          ..sort(
+            (PortfolioSnapshot a, PortfolioSnapshot b) =>
+                a.createdAt.compareTo(b.createdAt),
+          );
     final int? days = _range.days;
     if (days == null || available.isEmpty) return available;
     final DateTime cutoff = available.last.createdAt.subtract(
@@ -11155,10 +11450,7 @@ class _CoinDetailTopBar extends StatelessWidget {
               ),
               Text(
                 coin,
-                style: const TextStyle(
-                  color: Color(0xFFAAB3C5),
-                  fontSize: 13,
-                ),
+                style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
               ),
             ],
           ),
@@ -11276,10 +11568,7 @@ class _CoinDetailViewSelector extends StatelessWidget {
   final _CoinDetailView value;
   final ValueChanged<_CoinDetailView> onChanged;
 
-  const _CoinDetailViewSelector({
-    required this.value,
-    required this.onChanged,
-  });
+  const _CoinDetailViewSelector({required this.value, required this.onChanged});
 
   @override
   Widget build(BuildContext context) => SegmentedButton<_CoinDetailView>(
@@ -11312,9 +11601,7 @@ class _CoinDetailViewSelector extends StatelessWidget {
             ? Colors.white
             : const Color(0xFFB6BED0),
       ),
-      side: WidgetStateProperty.all(
-        const BorderSide(color: Color(0x557C3AED)),
-      ),
+      side: WidgetStateProperty.all(const BorderSide(color: Color(0x557C3AED))),
       textStyle: WidgetStateProperty.all(
         const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
       ),
@@ -11713,10 +12000,7 @@ class _CoinDetailRow extends StatelessWidget {
           flex: 5,
           child: Text(
             label,
-            style: const TextStyle(
-              color: Color(0xFFAAB3C5),
-              fontSize: 14,
-            ),
+            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
           ),
         ),
         const SizedBox(width: 10),
@@ -12035,16 +12319,16 @@ class _AlertsTabState extends State<AlertsTab> {
             'Las alertas internas se revisan al abrir la app o actualizar precios. '
             'Las alertas automáticas locales dependen de Android, batería, '
             'permisos y conexión. Pueden no ser exactas al minuto.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
           ),
           const SizedBox(height: 6),
           Text(
             'Android puede agrupar o retrasar revisiones para ahorrar batería.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
           ),
           const SizedBox(height: 10),
           Text('Intervalo', style: Theme.of(context).textTheme.titleSmall),
@@ -12319,9 +12603,9 @@ class AlertCoinRow extends StatelessWidget {
               children: <Widget>[
                 Text(
                   '$coin · ${money(currentPrice)}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
                 ),
                 Text(
                   'Ref ${money(referencePrice)} · Δ $variationText',
@@ -12554,7 +12838,7 @@ extension SnapshotMetricDetails on SnapshotMetric {
       case SnapshotMetric.invested:
       case SnapshotMetric.unrealizedPnl:
       case SnapshotMetric.realizedPnl:
-        return money(value);
+        return _summaryMoney(value, decimals: 2);
     }
   }
 
@@ -12566,7 +12850,7 @@ extension SnapshotMetricDetails on SnapshotMetric {
       case SnapshotMetric.invested:
       case SnapshotMetric.unrealizedPnl:
       case SnapshotMetric.realizedPnl:
-        return moneyShort(value);
+        return _chartsAxisMoney(value);
     }
   }
 }
@@ -12578,14 +12862,52 @@ class SnapshotRangeOption {
   const SnapshotRangeOption(this.label, this.days);
 }
 
+const Color _chartsSurface = Color(0xFF101827);
+const Color _chartsElevated = Color(0xFF162033);
+const Color _chartsPurple = Color(0xFF8B5CF6);
+const Color _chartsBorder = Color(0x2EFFFFFF);
+
+String _chartsMoney(double value, {int decimals = 2}) =>
+    _summaryMoney(value, decimals: decimals);
+
+String _chartsSignedPercent(double value) =>
+    '${value >= 0 ? '+' : ''}${value.toStringAsFixed(2)}%';
+
+String _chartsAxisMoney(double value) {
+  final double absolute = value.abs();
+  if (absolute >= 1000000) {
+    return '${value < 0 ? '-' : ''}\$${(absolute / 1000000).toStringAsFixed(2)}M';
+  }
+  if (absolute >= 1000) {
+    return '${value < 0 ? '-' : ''}\$${(absolute / 1000).toStringAsFixed(1)}k';
+  }
+  return '${value < 0 ? '-' : ''}\$${absolute.toStringAsFixed(0)}';
+}
+
+BoxDecoration _chartsBox({Color color = _chartsSurface, double radius = 16}) {
+  return BoxDecoration(
+    color: color,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: _chartsBorder),
+  );
+}
+
 class AnalyticsControlPanel extends StatefulWidget {
   final List<PortfolioSnapshot> snapshots;
+  final PortfolioTotals totals;
   final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final VoidCallback onSaveSnapshot;
+  final VoidCallback onViewSnapshots;
 
   const AnalyticsControlPanel({
     super.key,
     required this.snapshots,
+    required this.totals,
     required this.chartType,
+    required this.onChartTypeChanged,
+    required this.onSaveSnapshot,
+    required this.onViewSnapshots,
   });
 
   @override
@@ -12644,120 +12966,990 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
   Widget build(BuildContext context) {
     final List<PortfolioSnapshot> filtered = _filteredSnapshots();
     final Color metricColor = _metricColor(context, filtered);
-    final double? latestValue = filtered.isEmpty
-        ? null
-        : _metric.valueFor(filtered.last);
-    final double? firstValue = filtered.isEmpty
-        ? null
-        : _metric.valueFor(filtered.first);
+    final List<double> values = filtered
+        .map((PortfolioSnapshot s) => _metric.valueFor(s))
+        .toList();
+    final double? latestValue = values.isEmpty ? null : values.last;
+    final double? firstValue = values.isEmpty ? null : values.first;
     final double? delta = latestValue == null || firstValue == null
         ? null
         : latestValue - firstValue;
+    final double? deltaPercent =
+        delta == null ||
+            firstValue == null ||
+            firstValue.abs() < 0.000001 ||
+            _metric == SnapshotMetric.btcDominance
+        ? null
+        : (delta / firstValue) * 100;
+    final List<PortfolioSnapshot> allSnapshots = widget.snapshots.toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+    final PortfolioSnapshot? latestSnapshot = allSnapshots.isEmpty
+        ? null
+        : allSnapshots.last;
+    final double? portfolioChange = filtered.length < 2
+        ? null
+        : filtered.last.totalCurrentValue - filtered.first.totalCurrentValue;
+    final double? portfolioChangePercent =
+        portfolioChange == null ||
+            filtered.first.totalCurrentValue.abs() < 0.000001
+        ? null
+        : (portfolioChange / filtered.first.totalCurrentValue) * 100;
 
-    return CardPanel(
-      title: 'Evolución histórica',
-      subtitle:
-          'Filtra instantáneas por rango y elige la métrica que quieres leer.',
-      child: Column(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _ChartsPortfolioHero(
+          currentValue: widget.totals.currentValue,
+          periodChange: portfolioChange,
+          periodChangePercent: portfolioChangePercent,
+          latestSnapshot: latestSnapshot,
+          snapshotCount: allSnapshots.length,
+        ),
+        const SizedBox(height: 14),
+        _ChartsSectionPanel(
+          title: 'Serie principal',
+          subtitle: 'Selecciona el periodo, la métrica y la lectura visual.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _ChartsRangeSelector(
+                ranges: _ranges,
+                selected: _range,
+                onSelected: (SnapshotRangeOption range) =>
+                    setState(() => _range = range),
+              ),
+              const SizedBox(height: 12),
+              LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final Widget chartTypeButton = _SummaryChartTypeButton(
+                    value: widget.chartType,
+                    onChanged: widget.onChartTypeChanged,
+                  );
+                  final Widget metricSelector = _ChartsMetricSelector(
+                    value: _metric,
+                    onChanged: (SnapshotMetric value) =>
+                        setState(() => _metric = value),
+                  );
+                  if (constraints.maxWidth < 430) {
+                    return Column(
+                      children: <Widget>[
+                        SizedBox(
+                          width: double.infinity,
+                          child: chartTypeButton,
+                        ),
+                        const SizedBox(height: 10),
+                        metricSelector,
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: <Widget>[
+                      Expanded(child: chartTypeButton),
+                      const SizedBox(width: 10),
+                      Expanded(child: metricSelector),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              if (filtered.isEmpty)
+                _ChartsDataState(
+                  icon: Icons.timeline_outlined,
+                  title: allSnapshots.isEmpty
+                      ? 'Aún no hay evolución disponible'
+                      : 'Sin datos para este periodo',
+                  subtitle: allSnapshots.isEmpty
+                      ? 'Guarda snapshots para construir el historial de tu cartera.'
+                      : 'Prueba otro rango o espera nuevos snapshots.',
+                  actions: allSnapshots.isEmpty
+                      ? Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: <Widget>[
+                            FilledButton.icon(
+                              onPressed: widget.onSaveSnapshot,
+                              icon: const Icon(Icons.add_a_photo_outlined),
+                              label: const Text('Guardar instantánea'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: widget.onViewSnapshots,
+                              icon: const Icon(Icons.folder_open_outlined),
+                              label: const Text('Ver instantáneas'),
+                            ),
+                          ],
+                        )
+                      : null,
+                )
+              else if (filtered.length == 1)
+                _ChartsDataState(
+                  icon: Icons.addchart_outlined,
+                  title: 'Se necesita otro snapshot',
+                  subtitle:
+                      'Con dos registros podrás visualizar la evolución de la cartera.',
+                  detail:
+                      '${longDate(filtered.single.createdAt)} · ${_metric.format(values.single)}',
+                )
+              else ...<Widget>[
+                _PortfolioInteractiveChart(
+                  snapshots: filtered,
+                  values: values,
+                  metric: _metric,
+                  color: metricColor,
+                  chartType: widget.chartType,
+                ),
+                const SizedBox(height: 12),
+                ChartLegendDot(label: _metric.label, color: metricColor),
+                const SizedBox(height: 14),
+                _ChartsReadoutGrid(
+                  metric: _metric,
+                  first: firstValue!,
+                  latest: latestValue!,
+                  minimum: values.reduce(math.min),
+                  maximum: values.reduce(math.max),
+                  change: delta!,
+                  changePercent: deltaPercent,
+                  snapshotCount: filtered.length,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChartsPageHeader extends StatelessWidget {
+  const _ChartsPageHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 4, 2, 16),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _ranges.map((SnapshotRangeOption range) {
-              return ChoiceChip(
-                selected: _range == range,
-                label: Text(range.label),
-                onSelected: (_) => setState(() => _range = range),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<SnapshotMetric>(
-            value: _metric,
-            decoration: const InputDecoration(
-              labelText: 'Métrica a mostrar',
-              border: OutlineInputBorder(),
-            ),
-            items: SnapshotMetric.values
-                .map(
-                  (SnapshotMetric metric) => DropdownMenuItem<SnapshotMetric>(
-                    value: metric,
-                    child: Text(metric.label),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Evolución de cartera',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
                   ),
-                )
-                .toList(),
-            onChanged: (SnapshotMetric? value) {
-              if (value != null) setState(() => _metric = value);
-            },
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Lectura histórica',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'La gráfica aparece con 2 o más instantáneas.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          if (filtered.length < 2)
-            EmptyState(
-              icon: Icons.show_chart_outlined,
-              title: filtered.isEmpty
-                  ? 'Sin instantáneas en este rango'
-                  : 'Solo hay un punto en este rango',
-              subtitle: filtered.isEmpty
-                  ? 'Guarda al menos dos instantáneas para dibujar una línea histórica.'
-                  : 'Con una sola instantánea solo verás una lectura; agrega otra para trazar la tendencia.',
-            )
-          else ...<Widget>[
-            SnapshotLineChart(
-              snapshots: filtered,
-              height: 240,
-              includeZero: _metric != SnapshotMetric.btcDominance,
-              chartType: widget.chartType,
-              series: <SnapshotChartSeries>[
-                SnapshotChartSeries(
-                  label: _metric.label,
-                  color: metricColor,
-                  values: filtered
-                      .map((PortfolioSnapshot s) => _metric.valueFor(s))
-                      .toList(),
-                  valueFormatter: (double value) => _metric.shortFormat(value),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Historial, rendimiento y composición de tus posiciones',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: const Color(0xFFAAB3C5),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            ChartLegendDot(label: _metric.label, color: metricColor),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: <Widget>[
-              MiniMetric(
-                label: 'Último dato',
-                value: latestValue == null ? '—' : _metric.format(latestValue),
-                color:
-                    _metric == SnapshotMetric.unrealizedPnl &&
-                        latestValue != null
-                    ? pnlColor(latestValue)
-                    : null,
-              ),
-              MiniMetric(
-                label: 'Cambio del periodo',
-                value: delta == null ? '—' : _metric.format(delta),
-                color: delta == null ? null : pnlColor(delta),
-              ),
-              MiniMetric(
-                label: 'Instantáneas filtradas',
-                value: filtered.length.toString(),
-              ),
-            ],
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _chartsPurple.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _chartsPurple.withValues(alpha: 0.32)),
+            ),
+            child: const Icon(Icons.insights_rounded, color: Color(0xFFC4B5FD)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ChartsPortfolioHero extends StatelessWidget {
+  final double currentValue;
+  final double? periodChange;
+  final double? periodChangePercent;
+  final PortfolioSnapshot? latestSnapshot;
+  final int snapshotCount;
+
+  const _ChartsPortfolioHero({
+    required this.currentValue,
+    required this.periodChange,
+    required this.periodChangePercent,
+    required this.latestSnapshot,
+    required this.snapshotCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color changeColor = pnlColor(periodChange ?? 0);
+    final String changeLabel = periodChange == null
+        ? 'Sin comparación de periodo'
+        : '${_chartsMoney(periodChange!)}${periodChangePercent == null ? '' : ' · ${_chartsSignedPercent(periodChangePercent!)}'}';
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 310),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _chartsPurple.withValues(alpha: 0.34)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[const Color(0xFF1B1640), const Color(0xFF111A2A)],
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Text(
+                      'VALOR DE CARTERA',
+                      style: TextStyle(
+                        color: Color(0xFFC9C2E6),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _chartsMoney(currentValue),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 29,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Cambio del periodo',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFFAAB3C5),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      changeLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: periodChange == null
+                            ? const Color(0xFFAAB3C5)
+                            : changeColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 13),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 5,
+                      children: <Widget>[
+                        _ChartsHeroMeta(
+                          icon: Icons.schedule_outlined,
+                          label: latestSnapshot == null
+                              ? 'Sin instantánea'
+                              : longDate(latestSnapshot!.createdAt),
+                        ),
+                        _ChartsHeroMeta(
+                          icon: Icons.photo_library_outlined,
+                          label:
+                              '$snapshotCount ${snapshotCount == 1 ? 'snapshot' : 'snapshots'}',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                width: 48,
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: Color(0xFFD8B4FE),
+                  size: 23,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ChartsHeroMeta extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _ChartsHeroMeta({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: 14, color: const Color(0xFFAAA3C7)),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFFBDB7D2), fontSize: 13),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChartsSectionPanel extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  const _ChartsSectionPanel({
+    required this.title,
+    required this.child,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: _chartsBox(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (subtitle != null) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(
+              subtitle!,
+              style: const TextStyle(
+                color: Color(0xFFAAB3C5),
+                fontSize: 14,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ChartsRangeSelector extends StatelessWidget {
+  final List<SnapshotRangeOption> ranges;
+  final SnapshotRangeOption selected;
+  final ValueChanged<SnapshotRangeOption> onSelected;
+
+  const _ChartsRangeSelector({
+    required this.ranges,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 6;
+        final double itemWidth =
+            (constraints.maxWidth - gap * (ranges.length - 1)) / ranges.length;
+        return Row(
+          children: ranges.map((SnapshotRangeOption range) {
+            final bool isSelected = range == selected;
+            return Padding(
+              padding: EdgeInsets.only(right: range == ranges.last ? 0 : gap),
+              child: SizedBox(
+                width: itemWidth,
+                height: 46,
+                child: Semantics(
+                  button: true,
+                  selected: isSelected,
+                  label: 'Periodo ${range.label}',
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => onSelected(range),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? _chartsPurple
+                              : const Color(0xFF182234),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFFD8B4FE)
+                                : const Color(0x25FFFFFF),
+                          ),
+                        ),
+                        child: Text(
+                          range.label,
+                          style: TextStyle(
+                            color: isSelected
+                                ? Colors.white
+                                : const Color(0xFFC0C9D8),
+                            fontSize: 15,
+                            fontWeight: isSelected
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ChartsMetricSelector extends StatelessWidget {
+  final SnapshotMetric value;
+  final ValueChanged<SnapshotMetric> onChanged;
+
+  const _ChartsMetricSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF182234),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x30FFFFFF)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<SnapshotMetric>(
+          value: value,
+          isExpanded: true,
+          icon: const Icon(Icons.expand_more, color: Color(0xFFC4B5FD)),
+          dropdownColor: const Color(0xFF162033),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+          items: SnapshotMetric.values
+              .map(
+                (SnapshotMetric metric) => DropdownMenuItem<SnapshotMetric>(
+                  value: metric,
+                  child: Text(metric.label),
+                ),
+              )
+              .toList(),
+          onChanged: (SnapshotMetric? metric) {
+            if (metric != null) onChanged(metric);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ChartsDataState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? detail;
+  final Widget? actions;
+
+  const _ChartsDataState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.detail,
+    this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: _chartsBox(color: _chartsElevated, radius: 14),
+      child: Column(
+        children: <Widget>[
+          Icon(icon, color: const Color(0xFFC4B5FD), size: 30),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+          ),
+          if (detail != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              detail!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFE2E8F0),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (actions != null) ...<Widget>[
+            const SizedBox(height: 16),
+            actions!,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ChartsReadoutGrid extends StatelessWidget {
+  final SnapshotMetric metric;
+  final double first;
+  final double latest;
+  final double minimum;
+  final double maximum;
+  final double change;
+  final double? changePercent;
+  final int snapshotCount;
+
+  const _ChartsReadoutGrid({
+    required this.metric,
+    required this.first,
+    required this.latest,
+    required this.minimum,
+    required this.maximum,
+    required this.change,
+    required this.changePercent,
+    required this.snapshotCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 10;
+        final double itemWidth = (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: <Widget>[
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Inicial',
+              value: metric.format(first),
+            ),
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Actual',
+              value: metric.format(latest),
+              valueColor: metric == SnapshotMetric.unrealizedPnl
+                  ? pnlColor(latest)
+                  : null,
+            ),
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Máximo',
+              value: metric.format(maximum),
+            ),
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Mínimo',
+              value: metric.format(minimum),
+            ),
+            _ChartsReadoutTile(
+              width: constraints.maxWidth,
+              label:
+                  'Cambio · $snapshotCount ${snapshotCount == 1 ? 'snapshot' : 'snapshots'}',
+              value:
+                  '${metric.format(change)}${changePercent == null ? '' : ' · ${_chartsSignedPercent(changePercent!)}'}',
+              valueColor: pnlColor(change),
+              wide: true,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ChartsReadoutTile extends StatelessWidget {
+  final double width;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool wide;
+
+  const _ChartsReadoutTile({
+    required this.width,
+    required this.label,
+    required this.value,
+    this.valueColor,
+    this.wide = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(minHeight: 76),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: _chartsBox(color: _chartsElevated, radius: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.white,
+                fontSize: wide ? 17 : 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PortfolioInteractiveChart extends StatefulWidget {
+  final List<PortfolioSnapshot> snapshots;
+  final List<double> values;
+  final SnapshotMetric metric;
+  final Color color;
+  final SummaryChartType chartType;
+
+  const _PortfolioInteractiveChart({
+    required this.snapshots,
+    required this.values,
+    required this.metric,
+    required this.color,
+    required this.chartType,
+  });
+
+  @override
+  State<_PortfolioInteractiveChart> createState() =>
+      _PortfolioInteractiveChartState();
+}
+
+class _PortfolioInteractiveChartState
+    extends State<_PortfolioInteractiveChart> {
+  int? _selectedIndex;
+  Timer? _dismissTimer;
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PortfolioInteractiveChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedIndex != null && _selectedIndex! >= widget.snapshots.length) {
+      _selectedIndex = null;
+    }
+  }
+
+  void _select(Offset localPosition, double width) {
+    _dismissTimer?.cancel();
+    final double usableWidth = math.max(1, width - 74);
+    final double normalized = ((localPosition.dx - 54) / usableWidth).clamp(
+      0.0,
+      1.0,
+    );
+    final int index = (normalized * (widget.snapshots.length - 1)).round();
+    if (index != _selectedIndex) setState(() => _selectedIndex = index);
+  }
+
+  void _dismissSelectionSoon() {
+    _dismissTimer?.cancel();
+    _dismissTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _selectedIndex = null);
+    });
+  }
+
+  void _dismissSelection() {
+    _dismissTimer?.cancel();
+    if (_selectedIndex != null) setState(() => _selectedIndex = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth;
+        final double height = (width * 1.04).clamp(355.0, 380.0);
+        final int? selectedIndex = _selectedIndex;
+        final double tooltipWidth = math.min(210, math.max(156, width - 20));
+        final double selectedX = selectedIndex == null
+            ? 0
+            : 54 +
+                  math.max(1, width - 74) *
+                      selectedIndex /
+                      (widget.snapshots.length - 1);
+        final double tooltipLeft = selectedIndex == null
+            ? 0
+            : (selectedX - tooltipWidth / 2).clamp(
+                8.0,
+                math.max(8.0, width - tooltipWidth - 8),
+              );
+
+        return SizedBox(
+          height: height,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (TapDownDetails details) =>
+                _select(details.localPosition, width),
+            onTapUp: (_) => _dismissSelectionSoon(),
+            onTapCancel: _dismissSelection,
+            onHorizontalDragStart: (_) => _dismissTimer?.cancel(),
+            onHorizontalDragUpdate: (DragUpdateDetails details) =>
+                _select(details.localPosition, width),
+            onHorizontalDragEnd: (_) => _dismissSelectionSoon(),
+            onHorizontalDragCancel: _dismissSelection,
+            child: Stack(
+              children: <Widget>[
+                SnapshotLineChart(
+                  snapshots: widget.snapshots,
+                  height: height,
+                  includeZero: widget.metric != SnapshotMetric.btcDominance,
+                  chartType: widget.chartType,
+                  series: <SnapshotChartSeries>[
+                    SnapshotChartSeries(
+                      label: widget.metric.label,
+                      color: widget.color,
+                      values: widget.values,
+                      valueFormatter: widget.metric.shortFormat,
+                    ),
+                  ],
+                ),
+                if (selectedIndex != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _ChartsSelectionPainter(
+                          index: selectedIndex,
+                          pointCount: widget.snapshots.length,
+                          chartType: widget.chartType,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (selectedIndex != null)
+                  Positioned(
+                    top: 10,
+                    left: tooltipLeft,
+                    width: tooltipWidth,
+                    child: _ChartsPointTooltip(
+                      snapshot: widget.snapshots[selectedIndex],
+                      value: widget.values[selectedIndex],
+                      previousValue: selectedIndex > 0
+                          ? widget.values[selectedIndex - 1]
+                          : null,
+                      metric: widget.metric,
+                      color: widget.color,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ChartsSelectionPainter extends CustomPainter {
+  final int index;
+  final int pointCount;
+  final SummaryChartType chartType;
+
+  const _ChartsSelectionPainter({
+    required this.index,
+    required this.pointCount,
+    required this.chartType,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double x = pointCount == 1
+        ? size.width / 2
+        : 54 + (size.width - 74) * index / (pointCount - 1);
+    final Paint paint = Paint()
+      ..color = _chartsPurple.withValues(alpha: 0.7)
+      ..strokeWidth = 1.2;
+    if (chartType == SummaryChartType.columns) {
+      final double slotWidth = (size.width - 74) / pointCount;
+      final Rect highlight = Rect.fromLTWH(
+        x - slotWidth / 2,
+        12,
+        slotWidth,
+        size.height - 42,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(highlight, const Radius.circular(4)),
+        Paint()..color = _chartsPurple.withValues(alpha: 0.10),
+      );
+    }
+    const double dash = 5;
+    for (double y = 12; y < size.height - 30; y += dash * 2) {
+      canvas.drawLine(Offset(x, y), Offset(x, y + dash), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ChartsSelectionPainter oldDelegate) {
+    return oldDelegate.index != index ||
+        oldDelegate.pointCount != pointCount ||
+        oldDelegate.chartType != chartType;
+  }
+}
+
+class _ChartsPointTooltip extends StatelessWidget {
+  final PortfolioSnapshot snapshot;
+  final double value;
+  final double? previousValue;
+  final SnapshotMetric metric;
+  final Color color;
+
+  const _ChartsPointTooltip({
+    required this.snapshot,
+    required this.value,
+    required this.previousValue,
+    required this.metric,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final double? variation = previousValue == null
+        ? null
+        : value - previousValue!;
+    final String seriesLabel = metric == SnapshotMetric.portfolioValue
+        ? 'Cartera total'
+        : metric.label;
+    return Semantics(
+      label: '${longDate(snapshot.createdAt)}, ${metric.format(value)}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0B1220).withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _chartsPurple.withValues(alpha: 0.6)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              longDate(snapshot.createdAt),
+              style: const TextStyle(
+                color: Color(0xFFAAB3C5),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              seriesLabel,
+              style: const TextStyle(
+                color: Color(0xFFC4B5FD),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                metric.format(value),
+                style: TextStyle(
+                  color: color,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            if (variation != null) ...<Widget>[
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Variación: ${metric.format(variation)}',
+                  style: TextStyle(
+                    color: pnlColor(variation),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -12792,65 +13984,32 @@ class ChartsTab extends StatelessWidget {
         );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
       children: <Widget>[
-        Text(
-          'Gráficas premium',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Vista histórica sobre instantáneas guardadas. Ajusta rango y métrica para leer una serie a la vez.',
-        ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: _SummaryChartTypeButton(
-            value: chartType,
-            onChanged: onChartTypeChanged,
-          ),
-        ),
-        const SizedBox(height: 16),
+        const _ChartsPageHeader(),
         AnalyticsControlPanel(
           snapshots: snapshots,
+          totals: totals,
           chartType: chartType,
+          onChartTypeChanged: onChartTypeChanged,
+          onSaveSnapshot: onSaveSnapshot,
+          onViewSnapshots: onViewSnapshots,
         ),
-        const SizedBox(height: 12),
-        _CommandSection(
-          title: 'Indicadores',
-          children: <Widget>[
-            PremiumMetricCard(
-              label: 'Valor de cartera',
-              value: moneyShort(totals.currentValue),
-              icon: Icons.account_balance_wallet_outlined,
-            ),
-            PremiumMetricCard(
-              label: 'Invertido',
-              value: moneyShort(totals.costBase),
-              icon: Icons.savings_outlined,
-            ),
-            PremiumMetricCard(
-              label: 'P&L no realizado',
-              value: moneyShort(totals.unrealizedPL),
-              icon: Icons.trending_up,
-              color: pnlColor(totals.unrealizedPL),
-            ),
-            PremiumMetricCard(
-              label: 'Dominancia BTC',
-              value: _btcDominance(stats, totals),
-              icon: Icons.currency_bitcoin,
-            ),
-          ],
+        const SizedBox(height: 14),
+        _ChartsSectionPanel(
+          title: 'Lectura actual',
+          subtitle:
+              'Cifras vigentes de la cartera para contextualizar el histórico.',
+          child: _ChartsCurrentMetrics(stats: stats, totals: totals),
         ),
-        CardPanel(
-          title: 'Distribución actual',
+        const SizedBox(height: 14),
+        _ChartsSectionPanel(
+          title: 'Composición actual',
           subtitle: totals.currentValue <= 0
               ? 'Sin valor cargado para graficar.'
-              : 'Valor total: ${money(totals.currentValue)}',
+              : 'Valor total: ${_chartsMoney(totals.currentValue)}',
           child: active.isEmpty
-              ? const EmptyState(
+              ? const _ChartsDataState(
                   icon: Icons.pie_chart_outline,
                   title: 'Sin valor de cartera para graficar',
                   subtitle:
@@ -12858,71 +14017,182 @@ class ChartsTab extends StatelessWidget {
                       'lectura visual premium.',
                 )
               : Column(
-                  children: active.map((CoinStats stat) {
-                    final double share = totals.currentValue <= 0
-                        ? 0.0
-                        : stat.currentValue / totals.currentValue;
-                    return AllocationBar(
-                      label: stat.coin,
-                      value: money(stat.currentValue),
-                      share: share,
-                      result: stat.unrealizedPL,
-                    );
-                  }).toList(),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    ...active.map((CoinStats stat) {
+                      final double share = totals.currentValue <= 0
+                          ? 0.0
+                          : stat.currentValue / totals.currentValue;
+                      return AllocationBar(
+                        label: stat.coin,
+                        value: _chartsMoney(stat.currentValue),
+                        share: share,
+                        result: stat.unrealizedPL,
+                      );
+                    }),
+                    const Divider(height: 26, color: Color(0x20FFFFFF)),
+                    const Text(
+                      'Resultado no realizado por moneda',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...active.map((CoinStats stat) {
+                      final double maxAbs = active.fold<double>(
+                        1,
+                        (double maxValue, CoinStats item) =>
+                            math.max(maxValue, item.unrealizedPL.abs()),
+                      );
+                      return ResultBar(
+                        label: stat.coin,
+                        amount: stat.unrealizedPL,
+                        intensity: stat.unrealizedPL.abs() / maxAbs,
+                      );
+                    }),
+                  ],
                 ),
         ),
-        CardPanel(
-          title: 'P&L no realizado por moneda',
-          subtitle: 'Barras semánticas: ganancias verdes, pérdidas rojas.',
-          child: active.isEmpty
-              ? const Text('Sin valor de posiciones para graficar.')
-              : Column(
-                  children: active.map((CoinStats stat) {
-                    final double maxAbs = active.fold<double>(
-                      1,
-                      (double maxValue, CoinStats item) =>
-                          math.max(maxValue, item.unrealizedPL.abs()),
-                    );
-                    return ResultBar(
-                      label: stat.coin,
-                      amount: stat.unrealizedPL,
-                      intensity: stat.unrealizedPL.abs() / maxAbs,
-                    );
-                  }).toList(),
-                ),
-        ),
-        if (snapshots.isEmpty)
-          CardPanel(
-            title: 'Histórico de instantáneas',
-            subtitle:
-                'Aún no hay instantáneas guardadas. Crea una manual para comenzar el histórico.',
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                FilledButton.tonalIcon(
-                  onPressed: onSaveSnapshot,
-                  icon: const Icon(Icons.add_a_photo_outlined),
-                  label: const Text('Guardar instantánea'),
-                ),
-                FilledButton.tonal(
-                  onPressed: onViewSnapshots,
-                  child: const Text('Ver instantáneas'),
-                ),
-              ],
+        if (snapshots.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 14),
+          const Padding(
+            padding: EdgeInsets.only(left: 2, bottom: 8),
+            child: Text(
+              'Comparativas históricas',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          )
-        else ...<Widget>[
+          ),
           SnapshotTrendPanel(snapshots: snapshots, chartType: chartType),
           Align(
             alignment: Alignment.centerRight,
-            child: FilledButton.tonal(
+            child: OutlinedButton.icon(
               onPressed: onViewSnapshots,
-              child: const Text('Administrar instantáneas'),
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('Administrar instantáneas'),
             ),
           ),
         ],
       ],
+    );
+  }
+}
+
+class _ChartsCurrentMetrics extends StatelessWidget {
+  final Map<String, CoinStats> stats;
+  final PortfolioTotals totals;
+
+  const _ChartsCurrentMetrics({required this.stats, required this.totals});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_ChartsCurrentMetric> metrics = <_ChartsCurrentMetric>[
+      _ChartsCurrentMetric(
+        label: 'Valor de cartera',
+        value: _chartsMoney(totals.currentValue),
+        icon: Icons.account_balance_wallet_outlined,
+      ),
+      _ChartsCurrentMetric(
+        label: 'Invertido',
+        value: _chartsMoney(totals.costBase),
+        icon: Icons.savings_outlined,
+      ),
+      _ChartsCurrentMetric(
+        label: 'P&L no realizado',
+        value: _chartsMoney(totals.unrealizedPL),
+        icon: Icons.trending_up,
+        color: pnlColor(totals.unrealizedPL),
+      ),
+      _ChartsCurrentMetric(
+        label: 'Dominancia BTC',
+        value: _btcDominance(stats, totals),
+        icon: Icons.currency_bitcoin,
+        color: const Color(0xFFF59E0B),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 10;
+        final double width = (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: metrics
+              .map(
+                (_ChartsCurrentMetric metric) =>
+                    _ChartsCurrentMetricTile(metric: metric, width: width),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ChartsCurrentMetric {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color? color;
+
+  const _ChartsCurrentMetric({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.color,
+  });
+}
+
+class _ChartsCurrentMetricTile extends StatelessWidget {
+  final _ChartsCurrentMetric metric;
+  final double width;
+
+  const _ChartsCurrentMetricTile({required this.metric, required this.width});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color valueColor = metric.color ?? Colors.white;
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(minHeight: 88),
+      padding: const EdgeInsets.all(12),
+      decoration: _chartsBox(color: _chartsElevated, radius: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Icon(
+            metric.icon,
+            size: 18,
+            color: metric.color ?? const Color(0xFFC4B5FD),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            metric.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+          ),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              metric.value,
+              style: TextStyle(
+                color: valueColor,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -13013,7 +14283,7 @@ class ResultBar extends StatelessWidget {
           SizedBox(
             width: 104,
             child: Text(
-              money(amount),
+              _chartsMoney(amount),
               textAlign: TextAlign.right,
               style: TextStyle(
                 color: pnlColor(amount),
@@ -13591,7 +14861,8 @@ class MoreTab extends StatelessWidget {
               PremiumActionTile(
                 icon: Icons.restart_alt_outlined,
                 title: 'Restablecer datos financieros',
-                subtitle: 'Borra datos financieros con copia previa y confirmación.',
+                subtitle:
+                    'Borra datos financieros con copia previa y confirmación.',
                 badge: 'Peligroso',
                 onTap: onOpenFinancialReset,
               ),
@@ -16307,7 +17578,10 @@ class SnapshotLineChartPainter extends CustomPainter {
         final double baseline = includeZero ? yFor(0) : chart.bottom;
         for (int i = 0; i < pointCount; i++) {
           final double top = math.min(points[i].dy, baseline);
-          final double barHeight = math.max(1.0, (points[i].dy - baseline).abs());
+          final double barHeight = math.max(
+            1.0,
+            (points[i].dy - baseline).abs(),
+          );
           final double left =
               points[i].dx - groupWidth / 2 + seriesIndex * barWidth;
           canvas.drawRRect(
