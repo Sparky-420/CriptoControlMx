@@ -8899,7 +8899,7 @@ class _SimulationTabState extends State<SimulationTab> {
             value: _simulationMoney(stats.unrealizedPL),
             color: pnlColor(stats.unrealizedPL),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -10715,7 +10715,7 @@ class _SimulationMetricCard extends StatelessWidget {
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       width: width,
-      height: compact ? 58 : 72,
+      height: 72,
       padding: EdgeInsets.all(compact ? 8 : 9),
       decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 12),
       child: Column(
@@ -10775,7 +10775,7 @@ class _SimulationMetricCard extends StatelessWidget {
                   textAlign: compact ? TextAlign.left : TextAlign.right,
                   style: TextStyle(
                     color: metric.color ?? Colors.white,
-                    fontSize: compact ? 14 : 16,
+                    fontSize: 16,
                     fontWeight: FontWeight.w800,
                     fontFeatures: const <FontFeature>[
                       FontFeature.tabularFigures(),
@@ -17952,7 +17952,6 @@ class _MoreActionTile extends StatelessWidget {
   final String subtitle;
   final String? badge;
   final bool loading;
-  final bool showChevron;
   final VoidCallback? onTap;
 
   const _MoreActionTile({
@@ -17961,7 +17960,6 @@ class _MoreActionTile extends StatelessWidget {
     required this.subtitle,
     this.badge,
     this.loading = false,
-    this.showChevron = true,
     this.onTap,
   });
 
@@ -18050,17 +18048,15 @@ class _MoreActionTile extends StatelessWidget {
                   ],
                 ),
               ),
-              if (showChevron) ...<Widget>[
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right,
-                  size: 20,
-                  color: colors.onSurfaceVariant.withValues(alpha: 0.72),
-                ),
-              ],
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: colors.onSurfaceVariant.withValues(alpha: 0.72),
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
