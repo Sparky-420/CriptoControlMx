@@ -435,6 +435,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   final Map<String, int> _manualPriceUpdatedAtMs = <String, int>{};
 
   int _currentIndex = 0;
+  final PageController _mainPageController = PageController();
   double _sellFeePercent = FinancialEngine.defaultExitFeePercent;
   AppVisualMode _visualMode = AppVisualMode.system;
   AppThemeStyle _themeStyle = AppThemeStyle.proDark;
@@ -515,6 +516,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   @override
   void dispose() {
     _cancelPriceRefreshTimer();
+    _mainPageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -526,6 +528,26 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     } else {
       _cancelPriceRefreshTimer();
     }
+  }
+
+  void _goToMainTab(int index) {
+    if (index == _currentIndex) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _currentIndex = index);
+    if (!_mainPageController.hasClients) return;
+    unawaited(
+      _mainPageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      ),
+    );
+  }
+
+  void _handleMainPageChanged(int index) {
+    if (index == _currentIndex) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _currentIndex = index);
   }
 
   Future<void> _ensureGoogleSignInInitialized() async {
@@ -2564,8 +2586,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     setState(() {
       _requestedSimulationMode = mode;
       _simulationOpenNonce++;
-      _currentIndex = 0;
     });
+    _goToMainTab(0);
   }
 
   Future<void> _showSellFeeDialog(BuildContext pageContext) async {
@@ -4605,7 +4627,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
           void openAlertsTab() {
             Navigator.of(pageContext).maybePop();
-            setState(() => _currentIndex = 3);
+            _goToMainTab(3);
           }
 
           Widget buildChartsTab({VoidCallback? refresh}) => ChartsTab(
@@ -4950,12 +4972,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 if (_currentIndex != 0) const SizedBox(width: 8),
               ],
             ),
-            body: IndexedStack(index: _currentIndex, children: pages),
+            body: PageView(
+              controller: _mainPageController,
+              onPageChanged: _handleMainPageChanged,
+              children: pages
+                  .map((Widget page) => _KeepAliveMainTab(child: page))
+                  .toList(),
+            ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _currentIndex,
               onDestinationSelected: (int index) {
                 unawaited(_logSafeAnalyticsEvent(name: 'tab_view'));
-                setState(() => _currentIndex = index);
+                _goToMainTab(index);
               },
               destinations: const <NavigationDestination>[
                 NavigationDestination(icon: Icon(Icons.tune), label: 'Simular'),
@@ -4981,6 +5009,27 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         },
       ),
     );
+  }
+}
+
+class _KeepAliveMainTab extends StatefulWidget {
+  final Widget child;
+
+  const _KeepAliveMainTab({required this.child});
+
+  @override
+  State<_KeepAliveMainTab> createState() => _KeepAliveMainTabState();
+}
+
+class _KeepAliveMainTabState extends State<_KeepAliveMainTab>
+    with AutomaticKeepAliveClientMixin<_KeepAliveMainTab> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
 
