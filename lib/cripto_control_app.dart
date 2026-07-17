@@ -8978,6 +8978,24 @@ class _SimulationTabState extends State<SimulationTab> {
     return 'No prioritaria';
   }
 
+  String _currentSimulationAlertLabel(bool valid) {
+    if (!valid) return 'Sin alerta';
+    return switch (_mode) {
+      SimulationMode.rotation => 'Alerta de rotación',
+      SimulationMode.operation =>
+        _operationMode == OperationSimulationMode.buy
+            ? 'Alerta de compra'
+            : 'Alerta de venta',
+    };
+  }
+
+  IconData _alertIconForLabel(String label) {
+    if (label.contains('compra')) return Icons.add_alert_outlined;
+    if (label.contains('venta')) return Icons.notification_important_outlined;
+    if (label.contains('rotación')) return Icons.swap_horiz_outlined;
+    return Icons.notifications_none_outlined;
+  }
+
   Future<void> _saveCurrentSimulation({
     required bool valid,
     required String primaryLabel,
@@ -9004,6 +9022,7 @@ class _SimulationTabState extends State<SimulationTab> {
         primaryValue: primaryValue,
         strategyScore: _currentStrategyScore(valid),
         strategyLabel: _strategyLabelForScore(_currentStrategyScore(valid)),
+        alertLabel: _currentSimulationAlertLabel(valid),
       ),
     );
     if (!mounted) return;
@@ -11364,6 +11383,51 @@ class _SimulationResultModalCard extends StatelessWidget {
 
 
 
+
+class _SimulationAlertBadge extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const _SimulationAlertBadge({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _SimulationStrategyBadge extends StatelessWidget {
   final int score;
   final String label;
@@ -11420,6 +11484,7 @@ class _SavedSimulationRecord {
   final String primaryValue;
   final int strategyScore;
   final String strategyLabel;
+  final String alertLabel;
 
   const _SavedSimulationRecord({
     required this.id,
@@ -11432,6 +11497,7 @@ class _SavedSimulationRecord {
     required this.primaryValue,
     this.strategyScore = 0,
     this.strategyLabel = 'Sin score',
+    this.alertLabel = 'Sin alerta',
   });
 
   Map<String, Object> toJson() => <String, Object>{
@@ -11445,6 +11511,7 @@ class _SavedSimulationRecord {
     'primaryValue': primaryValue,
     'strategyScore': strategyScore,
     'strategyLabel': strategyLabel,
+    'alertLabel': alertLabel,
   };
 
   _SavedSimulationRecord copyAsNew() => _SavedSimulationRecord(
@@ -11458,6 +11525,7 @@ class _SavedSimulationRecord {
     primaryValue: primaryValue,
     strategyScore: strategyScore,
     strategyLabel: strategyLabel,
+    alertLabel: alertLabel,
   );
 
   static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
@@ -11478,6 +11546,7 @@ class _SavedSimulationRecord {
       strategyScore:
           int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
       strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
+      alertLabel: (json['alertLabel'] ?? 'Sin alerta').toString(),
     );
   }
 }
@@ -11634,10 +11703,21 @@ class _SavedSimulationCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    _SimulationStrategyBadge(
-                      score: record.strategyScore,
-                      label: record.strategyLabel,
-                      color: const Color(0xFFC4B5FD),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        _SimulationStrategyBadge(
+                          score: record.strategyScore,
+                          label: record.strategyLabel,
+                          color: const Color(0xFFC4B5FD),
+                        ),
+                        _SimulationAlertBadge(
+                          label: record.alertLabel,
+                          icon: Icons.notifications_active_outlined,
+                          color: const Color(0xFF38BDF8),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -11873,10 +11953,21 @@ class _SimulationComparatorCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          _SimulationStrategyBadge(
-            score: record.strategyScore,
-            label: record.strategyLabel,
-            color: accentColor,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              _SimulationStrategyBadge(
+                score: record.strategyScore,
+                label: record.strategyLabel,
+                color: accentColor,
+              ),
+              _SimulationAlertBadge(
+                label: record.alertLabel,
+                icon: Icons.notifications_active_outlined,
+                color: accentColor,
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Text(
@@ -11932,6 +12023,7 @@ class _SimulationComparisonMatrix extends StatelessWidget {
             ? right.strategyLabel
             : '${right.strategyScore}/100 · ${right.strategyLabel}',
       ),
+      _SimulationComparisonRowData('Alerta', left.alertLabel, right.alertLabel),
       _SimulationComparisonRowData('Comisión', left.feeLabel, right.feeLabel),
       _SimulationComparisonRowData(
         left.primaryLabel == right.primaryLabel ? left.primaryLabel : 'Resultado',
