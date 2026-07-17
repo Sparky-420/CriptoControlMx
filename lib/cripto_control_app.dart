@@ -12200,6 +12200,7 @@ class _SavedSimulationsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final double maxHeight = MediaQuery.sizeOf(context).height * 0.82;
     return SafeArea(
       child: Align(
@@ -12209,7 +12210,7 @@ class _SavedSimulationsSheet extends StatelessWidget {
           child: Container(
             margin: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _simulationElevated,
+              color: tokens.surfaceElevated,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: const Color(0x338B5CF6)),
               boxShadow: <BoxShadow>[
@@ -12293,6 +12294,7 @@ class _SavedSimulationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return Container(
       decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
       padding: const EdgeInsets.all(12),
@@ -12342,7 +12344,7 @@ class _SavedSimulationCard extends StatelessWidget {
                 ),
               ),
               PopupMenuButton<String>(
-                color: _simulationElevated,
+                color: tokens.surfaceElevated,
                 iconColor: Colors.white,
                 onSelected: (String value) {
                   if (value == 'duplicate') onDuplicate();
