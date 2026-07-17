@@ -11754,11 +11754,12 @@ class _SimulationResultModalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 540, maxHeight: 720),
       child: Container(
         decoration: BoxDecoration(
-          color: _simulationElevated,
+          color: tokens.surfaceElevated,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: accentColor.withValues(alpha: 0.38)),
           boxShadow: <BoxShadow>[
