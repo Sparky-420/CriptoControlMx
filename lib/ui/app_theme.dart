@@ -280,6 +280,109 @@ class CcmxThemeTokens {
   static const FontWeight navigationLabelWeight = FontWeight.w700;
 }
 
+@immutable
+class CcmxVisualTokens {
+  const CcmxVisualTokens({
+    required this.backgroundSecondary,
+    required this.cardBackground,
+    required this.cardBorder,
+    required this.cardRadius,
+    required this.borderWidth,
+    required this.shadow,
+    required this.shadowOpacity,
+    required this.surfacePrimary,
+    required this.surfaceElevated,
+    required this.selectedBackground,
+    required this.selectedBorder,
+    required this.sheetBackground,
+    required this.menuBackground,
+    required this.pressedOverlay,
+    required this.divider,
+    required this.gradientStart,
+    required this.gradientEnd,
+    required this.primaryAccent,
+    required this.secondaryAccent,
+    required this.tertiaryAccent,
+    required this.glowColor,
+    required this.chartPrimary,
+    required this.chartSecondary,
+    required this.chartMarker,
+    required this.chartGrid,
+    required this.chartFill,
+    required this.chartTooltip,
+  });
+
+  final Color backgroundSecondary;
+  final Color cardBackground;
+  final Color cardBorder;
+  final double cardRadius;
+  final double borderWidth;
+  final Color shadow;
+  final double shadowOpacity;
+  final Color surfacePrimary;
+  final Color surfaceElevated;
+  final Color selectedBackground;
+  final Color selectedBorder;
+  final Color sheetBackground;
+  final Color menuBackground;
+  final Color pressedOverlay;
+  final Color divider;
+  final Color gradientStart;
+  final Color gradientEnd;
+  final Color primaryAccent;
+  final Color secondaryAccent;
+  final Color tertiaryAccent;
+  final Color glowColor;
+  final Color chartPrimary;
+  final Color chartSecondary;
+  final Color chartMarker;
+  final Color chartGrid;
+  final Color chartFill;
+  final Color chartTooltip;
+
+  static CcmxVisualTokens of(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+    final bool isDark = theme.brightness == Brightness.dark;
+
+    return CcmxVisualTokens(
+      backgroundSecondary: colors.surface.withValues(
+        alpha: isDark ? 0.84 : 0.96,
+      ),
+      cardBackground: colors.surface,
+      cardBorder: colors.outlineVariant.withValues(alpha: isDark ? 0.58 : 0.72),
+      cardRadius: CcmxThemeTokens.cardRadius,
+      borderWidth: 1,
+      shadow: colors.shadow,
+      shadowOpacity: isDark ? 0.22 : 0.10,
+      surfacePrimary: colors.surface,
+      surfaceElevated: colors.surfaceContainerHighest,
+      selectedBackground: colors.primaryContainer.withValues(
+        alpha: isDark ? 0.72 : 0.86,
+      ),
+      selectedBorder: colors.primary.withValues(alpha: isDark ? 0.70 : 0.82),
+      sheetBackground: colors.surface,
+      menuBackground: colors.surfaceContainerHighest,
+      pressedOverlay: colors.primary.withValues(alpha: 0.12),
+      divider: colors.outlineVariant.withValues(alpha: 0.42),
+      gradientStart: colors.primary.withValues(alpha: isDark ? 0.22 : 0.14),
+      gradientEnd: colors.surface.withValues(alpha: 0.0),
+      primaryAccent: colors.primary,
+      secondaryAccent: colors.secondary,
+      tertiaryAccent: colors.tertiary,
+      glowColor: colors.primary.withValues(alpha: isDark ? 0.28 : 0.18),
+      chartPrimary: colors.primary,
+      chartSecondary: colors.secondary,
+      chartMarker: colors.tertiary,
+      chartGrid: colors.outlineVariant.withValues(alpha: 0.36),
+      chartFill: colors.primary.withValues(alpha: isDark ? 0.18 : 0.12),
+      chartTooltip: colors.inverseSurface.withValues(
+        alpha: isDark ? 0.90 : 0.96,
+      ),
+    );
+  }
+}
+
 class CcmxAppTheme {
   const CcmxAppTheme._();
 
