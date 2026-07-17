@@ -8962,6 +8962,22 @@ class _SimulationTabState extends State<SimulationTab> {
     );
   }
 
+  int _currentStrategyScore(bool valid) {
+    if (!valid) return 0;
+    return switch (_mode) {
+      SimulationMode.rotation => 82,
+      SimulationMode.operation =>
+        _operationMode == OperationSimulationMode.buy ? 76 : 70,
+    };
+  }
+
+  String _strategyLabelForScore(int score) {
+    if (score >= 80) return 'Alta prioridad';
+    if (score >= 70) return 'Interesante';
+    if (score >= 55) return 'Revisar';
+    return 'No prioritaria';
+  }
+
   Future<void> _saveCurrentSimulation({
     required bool valid,
     required String primaryLabel,
@@ -8986,6 +9002,8 @@ class _SimulationTabState extends State<SimulationTab> {
         feeLabel: _activeFeeLabel,
         primaryLabel: primaryLabel,
         primaryValue: primaryValue,
+        strategyScore: _currentStrategyScore(valid),
+        strategyLabel: _strategyLabelForScore(_currentStrategyScore(valid)),
       ),
     );
     if (!mounted) return;
@@ -11345,6 +11363,52 @@ class _SimulationResultModalCard extends StatelessWidget {
 }
 
 
+
+class _SimulationStrategyBadge extends StatelessWidget {
+  final int score;
+  final String label;
+  final Color color;
+
+  const _SimulationStrategyBadge({
+    required this.score,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String text = score <= 0 ? label : '$score/100 · $label';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(Icons.query_stats_outlined, color: color, size: 16),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _SavedSimulationRecord {
   final String id;
   final DateTime createdAt;
@@ -11354,6 +11418,8 @@ class _SavedSimulationRecord {
   final String feeLabel;
   final String primaryLabel;
   final String primaryValue;
+  final int strategyScore;
+  final String strategyLabel;
 
   const _SavedSimulationRecord({
     required this.id,
@@ -11364,6 +11430,8 @@ class _SavedSimulationRecord {
     required this.feeLabel,
     required this.primaryLabel,
     required this.primaryValue,
+    this.strategyScore = 0,
+    this.strategyLabel = 'Sin score',
   });
 
   Map<String, Object> toJson() => <String, Object>{
@@ -11375,6 +11443,8 @@ class _SavedSimulationRecord {
     'feeLabel': feeLabel,
     'primaryLabel': primaryLabel,
     'primaryValue': primaryValue,
+    'strategyScore': strategyScore,
+    'strategyLabel': strategyLabel,
   };
 
   _SavedSimulationRecord copyAsNew() => _SavedSimulationRecord(
@@ -11386,6 +11456,8 @@ class _SavedSimulationRecord {
     feeLabel: feeLabel,
     primaryLabel: primaryLabel,
     primaryValue: primaryValue,
+    strategyScore: strategyScore,
+    strategyLabel: strategyLabel,
   );
 
   static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
@@ -11403,6 +11475,9 @@ class _SavedSimulationRecord {
       feeLabel: (json['feeLabel'] ?? '').toString(),
       primaryLabel: (json['primaryLabel'] ?? '').toString(),
       primaryValue: (json['primaryValue'] ?? '').toString(),
+      strategyScore:
+          int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
+      strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
     );
   }
 }
@@ -11557,6 +11632,12 @@ class _SavedSimulationCard extends StatelessWidget {
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    _SimulationStrategyBadge(
+                      score: record.strategyScore,
+                      label: record.strategyLabel,
+                      color: const Color(0xFFC4B5FD),
                     ),
                   ],
                 ),
@@ -11792,6 +11873,12 @@ class _SimulationComparatorCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+          _SimulationStrategyBadge(
+            score: record.strategyScore,
+            label: record.strategyLabel,
+            color: accentColor,
+          ),
+          const SizedBox(height: 10),
           Text(
             record.primaryLabel,
             style: const TextStyle(
@@ -11836,6 +11923,15 @@ class _SimulationComparisonMatrix extends StatelessWidget {
       _SimulationComparisonRowData('Activo', left.selectedAsset, right.selectedAsset),
       _SimulationComparisonRowData('Modo', left.modeLabel, right.modeLabel),
       _SimulationComparisonRowData('Escenario', left.scenario, right.scenario),
+      _SimulationComparisonRowData(
+        'Score',
+        left.strategyScore <= 0
+            ? left.strategyLabel
+            : '${left.strategyScore}/100 · ${left.strategyLabel}',
+        right.strategyScore <= 0
+            ? right.strategyLabel
+            : '${right.strategyScore}/100 · ${right.strategyLabel}',
+      ),
       _SimulationComparisonRowData('Comisión', left.feeLabel, right.feeLabel),
       _SimulationComparisonRowData(
         left.primaryLabel == right.primaryLabel ? left.primaryLabel : 'Resultado',
