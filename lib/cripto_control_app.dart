@@ -9769,17 +9769,25 @@ class _SimulationTabState extends State<SimulationTab> {
       return;
     }
 
-    final _SavedSimulationRecord record = _SavedSimulationRecord(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      createdAt: DateTime.now(),
-      modeLabel: _modeLabel,
-      selectedAsset: _simulationPairLabel,
-      scenario: _simulationScenarioLabel,
-      feeLabel: _activeFeeLabel,
-      primaryLabel: primaryLabel,
-      primaryValue: primaryValue,
+    await _addSavedSimulation(
+      _SavedSimulationRecord(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        createdAt: DateTime.now(),
+        modeLabel: _modeLabel,
+        selectedAsset: _simulationPairLabel,
+        scenario: _simulationScenarioLabel,
+        feeLabel: _activeFeeLabel,
+        primaryLabel: primaryLabel,
+        primaryValue: primaryValue,
+      ),
     );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Simulación guardada.')),
+    );
+  }
 
+  Future<void> _addSavedSimulation(_SavedSimulationRecord record) async {
     setState(() {
       _savedSimulations.insert(0, record);
       if (_savedSimulations.length > _savedSimulationsLimit) {
@@ -9790,9 +9798,47 @@ class _SimulationTabState extends State<SimulationTab> {
       }
     });
     await _persistSavedSimulations();
+  }
+
+  Future<void> _duplicateSavedSimulation(
+    _SavedSimulationRecord record,
+  ) async {
+    await _addSavedSimulation(record.copyAsNew());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Simulación guardada.')),
+      const SnackBar(content: Text('Simulación duplicada.')),
+    );
+  }
+
+  Future<void> _deleteSavedSimulation(String id) async {
+    setState(() {
+      _savedSimulations.removeWhere(
+        (_SavedSimulationRecord record) => record.id == id,
+      );
+    });
+    await _persistSavedSimulations();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Simulación eliminada.')),
+    );
+  }
+
+  void _showSavedSimulations() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) => _SavedSimulationsSheet(
+        records: List<_SavedSimulationRecord>.of(_savedSimulations),
+        onDuplicate: (_SavedSimulationRecord record) {
+          Navigator.of(sheetContext).pop();
+          unawaited(_duplicateSavedSimulation(record));
+        },
+        onDelete: (_SavedSimulationRecord record) {
+          Navigator.of(sheetContext).pop();
+          unawaited(_deleteSavedSimulation(record.id));
+        },
+      ),
     );
   }
 
@@ -9924,6 +9970,21 @@ class _SimulationTabState extends State<SimulationTab> {
                     _operationMode == OperationSimulationMode.sell
                 ? const Color(0xFFF87171)
                 : const Color(0xFF8B5CF6),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed:
+                  _savedSimulations.isEmpty ? null : _showSavedSimulations,
+              icon: const Icon(Icons.history_outlined),
+              label: Text('Historial (${_savedSimulations.length})'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0x338B5CF6)),
+                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
           ),
           const SizedBox(height: 8),
           PremiumSegmentShell(
@@ -12096,6 +12157,17 @@ class _SavedSimulationRecord {
     'primaryValue': primaryValue,
   };
 
+  _SavedSimulationRecord copyAsNew() => _SavedSimulationRecord(
+    id: DateTime.now().microsecondsSinceEpoch.toString(),
+    createdAt: DateTime.now(),
+    modeLabel: modeLabel,
+    selectedAsset: selectedAsset,
+    scenario: scenario,
+    feeLabel: feeLabel,
+    primaryLabel: primaryLabel,
+    primaryValue: primaryValue,
+  );
+
   static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
     final String id = (json['id'] ?? '').toString();
     final DateTime? createdAt = DateTime.tryParse(
@@ -12111,6 +12183,209 @@ class _SavedSimulationRecord {
       feeLabel: (json['feeLabel'] ?? '').toString(),
       primaryLabel: (json['primaryLabel'] ?? '').toString(),
       primaryValue: (json['primaryValue'] ?? '').toString(),
+    );
+  }
+}
+
+class _SavedSimulationsSheet extends StatelessWidget {
+  final List<_SavedSimulationRecord> records;
+  final ValueChanged<_SavedSimulationRecord> onDuplicate;
+  final ValueChanged<_SavedSimulationRecord> onDelete;
+
+  const _SavedSimulationsSheet({
+    required this.records,
+    required this.onDuplicate,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final double maxHeight = MediaQuery.sizeOf(context).height * 0.82;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 620),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: tokens.surfaceElevated,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0x338B5CF6)),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 26,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(
+                          Icons.history_outlined,
+                          color: Color(0xFFC4B5FD),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Historial de simulaciones (${records.length})',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 19,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Cerrar',
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close),
+                          color: Colors.white,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1, color: Color(0x22FFFFFF)),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: records.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (BuildContext context, int index) {
+                        final _SavedSimulationRecord record = records[index];
+                        return _SavedSimulationCard(
+                          record: record,
+                          onDuplicate: () => onDuplicate(record),
+                          onDelete: () => onDelete(record),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedSimulationCard extends StatelessWidget {
+  final _SavedSimulationRecord record;
+  final VoidCallback onDuplicate;
+  final VoidCallback onDelete;
+
+  const _SavedSimulationCard({
+    required this.record,
+    required this.onDuplicate,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0x1A8B5CF6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.bookmark_added_outlined,
+                  color: Color(0xFFC4B5FD),
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      record.selectedAsset,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${record.modeLabel} · ${record.scenario}',
+                      style: const TextStyle(
+                        color: Color(0xFFB7C0D4),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                color: tokens.surfaceElevated,
+                iconColor: Colors.white,
+                onSelected: (String value) {
+                  if (value == 'duplicate') onDuplicate();
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (BuildContext context) =>
+                    const <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: 'duplicate',
+                    child: Text('Duplicar'),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Text('Eliminar'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _SimulationMetricGrid(
+            metrics: <_SimulationMetricData>[
+              _SimulationMetricData(
+                label: record.primaryLabel,
+                value: record.primaryValue,
+                icon: Icons.insights_outlined,
+              ),
+              _SimulationMetricData(
+                label: 'Comisión',
+                value: record.feeLabel,
+                icon: Icons.percent_outlined,
+              ),
+              _SimulationMetricData(
+                label: 'Guardada',
+                value: shortDate(record.createdAt),
+                icon: Icons.event_available_outlined,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
