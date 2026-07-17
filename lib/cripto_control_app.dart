@@ -10407,113 +10407,290 @@ class _SimulationHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
+    final String animationKey =
+        '$selectedAsset|$scenario|$operationType|$feeLabel';
+
+    return TweenAnimationBuilder<double>(
+      key: ValueKey<String>(animationKey),
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 480),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accentColor.withValues(alpha: 0.28)),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF1B1640), Color(0xFF111A2A)],
+      builder: (BuildContext context, double value, Widget? child) {
+        final double eased = Curves.easeOutCubic.transform(value);
+        return Opacity(
+          opacity: 0.86 + (0.14 * eased),
+          child: Transform.translate(
+            offset: Offset(0, 10 * (1 - eased)),
+            child: child,
+          ),
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: accentColor.withValues(alpha: 0.36)),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.14),
+              blurRadius: 24,
+              offset: const Offset(0, 14),
+            ),
+          ],
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              Color.lerp(const Color(0xFF1B1640), accentColor, 0.10)!,
+              const Color(0xFF111A2A),
+              const Color(0xFF0B1020),
+            ],
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
             children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: Color(0xFFC2BCD9),
-                        fontSize: 13,
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
+              Positioned(
+                right: -42,
+                top: -48,
+                child: _SimulationHeroGlow(
+                  color: accentColor,
+                  size: 132,
+                  opacity: 0.18,
                 ),
               ),
-              Container(
-                width: 42,
-                height: 42,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
+              Positioned(
+                left: -34,
+                bottom: -58,
+                child: _SimulationHeroGlow(
+                  color: Colors.white,
+                  size: 116,
+                  opacity: 0.07,
                 ),
-                child: Icon(Icons.calculate_outlined, color: accentColor, size: 25),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 9,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: accentColor.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: accentColor.withValues(alpha: 0.36),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'FASE 4.1',
+                                    style: TextStyle(
+                                      color: accentColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.6,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'Overlay activo',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Color(0xFFC2BCD9),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 25,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              subtitle,
+                              style: const TextStyle(
+                                color: Color(0xFFC2BCD9),
+                                fontSize: 13,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        switchInCurve: Curves.easeOutBack,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder:
+                            (Widget child, Animation<double> animation) {
+                          return ScaleTransition(
+                            scale: animation,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Container(
+                          key: ValueKey<String>(operationType),
+                          width: 46,
+                          height: 46,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: accentColor.withValues(alpha: 0.32),
+                            ),
+                          ),
+                          child: Icon(
+                            operationType.contains('Venta')
+                                ? Icons.trending_down
+                                : operationType.contains('Rotación')
+                                ? Icons.sync_alt
+                                : Icons.trending_up,
+                            color: accentColor,
+                            size: 26,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 240),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder:
+                        (Widget child, Animation<double> animation) {
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 0.05),
+                            end: Offset.zero,
+                          ).animate(animation),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: LayoutBuilder(
+                      key: ValueKey<String>('metrics-$animationKey'),
+                      builder:
+                          (BuildContext context, BoxConstraints constraints) {
+                        const double gap = 8;
+                        final double width = constraints.maxWidth >= 340
+                            ? (constraints.maxWidth - gap * 2) / 3
+                            : (constraints.maxWidth - gap) / 2;
+                        final List<_SimulationMetricData> metrics =
+                            <_SimulationMetricData>[
+                          _SimulationMetricData(
+                            label: 'Moneda',
+                            value: selectedAsset,
+                            icon: Icons.token_outlined,
+                          ),
+                          _SimulationMetricData(
+                            label: 'Operación',
+                            value: operationType,
+                            icon: Icons.bolt_outlined,
+                            color: accentColor,
+                          ),
+                          _SimulationMetricData(
+                            label: 'Escenario',
+                            value: scenario,
+                            icon: Icons.auto_graph_outlined,
+                          ),
+                          _SimulationMetricData(
+                            label: 'Comisión',
+                            value: feeLabel,
+                            icon: Icons.percent_outlined,
+                          ),
+                          const _SimulationMetricData(
+                            label: 'Disponibles',
+                            value: 'Compra · Venta · Rotación',
+                            icon: Icons.tune_outlined,
+                          ),
+                        ];
+                        return Wrap(
+                          spacing: gap,
+                          runSpacing: gap,
+                          children: metrics
+                              .map(
+                                (_SimulationMetricData metric) =>
+                                    _SimulationMetricCard(
+                                  metric: metric,
+                                  width: width,
+                                  compact: true,
+                                ),
+                              )
+                              .toList(),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              const double gap = 8;
-              final double width = constraints.maxWidth >= 340
-                  ? (constraints.maxWidth - gap * 2) / 3
-                  : (constraints.maxWidth - gap) / 2;
-              final List<_SimulationMetricData> metrics =
-                  <_SimulationMetricData>[
-                _SimulationMetricData(
-                  label: 'Moneda',
-                  value: selectedAsset,
-                  icon: Icons.token_outlined,
-                ),
-                _SimulationMetricData(
-                  label: 'Operación',
-                  value: operationType,
-                  icon: Icons.bolt_outlined,
-                  color: accentColor,
-                ),
-                _SimulationMetricData(
-                  label: 'Escenario',
-                  value: scenario,
-                  icon: Icons.auto_graph_outlined,
-                ),
-                _SimulationMetricData(
-                  label: 'Comisión',
-                  value: feeLabel,
-                  icon: Icons.percent_outlined,
-                ),
-                const _SimulationMetricData(
-                  label: 'Disponibles',
-                  value: 'Compra · Venta · Rotación',
-                  icon: Icons.tune_outlined,
-                ),
-              ];
-              return Wrap(
-                spacing: gap,
-                runSpacing: gap,
-                children: metrics
-                    .map(
-                      (_SimulationMetricData metric) => _SimulationMetricCard(
-                        metric: metric,
-                        width: width,
-                        compact: true,
-                      ),
-                    )
-                    .toList(),
-              );
-            },
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationHeroGlow extends StatelessWidget {
+  final Color color;
+  final double size;
+  final double opacity;
+
+  const _SimulationHeroGlow({
+    required this.color,
+    required this.size,
+    required this.opacity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: <Color>[
+              color.withValues(alpha: opacity),
+              color.withValues(alpha: 0),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
