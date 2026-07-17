@@ -8989,12 +8989,6 @@ class _SimulationTabState extends State<SimulationTab> {
     };
   }
 
-  IconData _alertIconForLabel(String label) {
-    if (label.contains('compra')) return Icons.add_alert_outlined;
-    if (label.contains('venta')) return Icons.notification_important_outlined;
-    if (label.contains('rotación')) return Icons.swap_horiz_outlined;
-    return Icons.notifications_none_outlined;
-  }
 
   Future<void> _saveCurrentSimulation({
     required bool valid,
