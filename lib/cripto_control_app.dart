@@ -9049,6 +9049,26 @@ class _SimulationTabState extends State<SimulationTab> {
     );
   }
 
+  void _showSimulationComparator() {
+    if (_savedSimulations.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Guarda al menos dos simulaciones para comparar.'),
+        ),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) => _SimulationComparatorSheet(
+        left: _savedSimulations[0],
+        right: _savedSimulations[1],
+      ),
+    );
+  }
+
   Widget _buildSimulationPositionPanel(CoinStats stats, String title) {
     return _SimulationPanel(
       title: title,
@@ -9181,16 +9201,35 @@ class _SimulationTabState extends State<SimulationTab> {
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerRight,
-          child: OutlinedButton.icon(
-            onPressed:
-                _savedSimulations.isEmpty ? null : _showSavedSimulations,
-            icon: const Icon(Icons.history_outlined),
-            label: Text('Historial (${_savedSimulations.length})'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Color(0x338B5CF6)),
-              textStyle: const TextStyle(fontWeight: FontWeight.w800),
-            ),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            children: <Widget>[
+              OutlinedButton.icon(
+                onPressed:
+                    _savedSimulations.isEmpty ? null : _showSavedSimulations,
+                icon: const Icon(Icons.history_outlined),
+                label: Text('Historial (${_savedSimulations.length})'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0x338B5CF6)),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _savedSimulations.length < 2
+                    ? null
+                    : _showSimulationComparator,
+                icon: const Icon(Icons.compare_arrows_outlined),
+                label: const Text('Comparar'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0x338B5CF6)),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 8),
@@ -11568,6 +11607,326 @@ class _SavedSimulationCard extends StatelessWidget {
     );
   }
 }
+
+
+class _SimulationComparatorSheet extends StatelessWidget {
+  final _SavedSimulationRecord left;
+  final _SavedSimulationRecord right;
+
+  const _SimulationComparatorSheet({
+    required this.left,
+    required this.right,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final double maxHeight = MediaQuery.sizeOf(context).height * 0.84;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 680),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _simulationElevated,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0x338B5CF6)),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 26,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        const Icon(
+                          Icons.compare_arrows_outlined,
+                          color: Color(0xFFC4B5FD),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Comparador de simulaciones',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 19,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Cerrar',
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close),
+                          color: Colors.white,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Compara las dos simulaciones guardadas más recientes.',
+                      style: TextStyle(
+                        color: Color(0xFFB7C0D4),
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    LayoutBuilder(
+                      builder:
+                          (BuildContext context, BoxConstraints constraints) {
+                        final bool stacked = constraints.maxWidth < 560;
+                        final List<Widget> cards = <Widget>[
+                          Expanded(
+                            child: _SimulationComparatorCard(
+                              title: 'A · Más reciente',
+                              record: left,
+                              accentColor: const Color(0xFF8B5CF6),
+                            ),
+                          ),
+                          Expanded(
+                            child: _SimulationComparatorCard(
+                              title: 'B · Anterior',
+                              record: right,
+                              accentColor: const Color(0xFF38BDF8),
+                            ),
+                          ),
+                        ];
+
+                        if (stacked) {
+                          return Column(
+                            children: <Widget>[
+                              _SimulationComparatorCard(
+                                title: 'A · Más reciente',
+                                record: left,
+                                accentColor: const Color(0xFF8B5CF6),
+                              ),
+                              const SizedBox(height: 10),
+                              _SimulationComparatorCard(
+                                title: 'B · Anterior',
+                                record: right,
+                                accentColor: const Color(0xFF38BDF8),
+                              ),
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            cards[0],
+                            const SizedBox(width: 10),
+                            cards[1],
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _SimulationComparisonMatrix(left: left, right: right),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationComparatorCard extends StatelessWidget {
+  final String title;
+  final _SavedSimulationRecord record;
+  final Color accentColor;
+
+  const _SimulationComparatorCard({
+    required this.title,
+    required this.record,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: TextStyle(
+              color: accentColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            record.selectedAsset,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            record.modeLabel,
+            style: const TextStyle(
+              color: Color(0xFFB7C0D4),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            record.primaryLabel,
+            style: const TextStyle(
+              color: Color(0xFFB7C0D4),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              record.primaryValue,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationComparisonMatrix extends StatelessWidget {
+  final _SavedSimulationRecord left;
+  final _SavedSimulationRecord right;
+
+  const _SimulationComparisonMatrix({
+    required this.left,
+    required this.right,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_SimulationComparisonRowData> rows =
+        <_SimulationComparisonRowData>[
+      _SimulationComparisonRowData('Activo', left.selectedAsset, right.selectedAsset),
+      _SimulationComparisonRowData('Modo', left.modeLabel, right.modeLabel),
+      _SimulationComparisonRowData('Escenario', left.scenario, right.scenario),
+      _SimulationComparisonRowData('Comisión', left.feeLabel, right.feeLabel),
+      _SimulationComparisonRowData(
+        left.primaryLabel == right.primaryLabel ? left.primaryLabel : 'Resultado',
+        left.primaryValue,
+        right.primaryValue,
+      ),
+      _SimulationComparisonRowData(
+        'Guardada',
+        shortDate(left.createdAt),
+        shortDate(right.createdAt),
+      ),
+    ];
+
+    return Container(
+      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
+      child: Column(
+        children: <Widget>[
+          for (int index = 0; index < rows.length; index++) ...<Widget>[
+            _SimulationComparisonRow(data: rows[index]),
+            if (index != rows.length - 1)
+              const Divider(height: 1, color: Color(0x18FFFFFF)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationComparisonRowData {
+  final String label;
+  final String leftValue;
+  final String rightValue;
+
+  const _SimulationComparisonRowData(
+    this.label,
+    this.leftValue,
+    this.rightValue,
+  );
+}
+
+class _SimulationComparisonRow extends StatelessWidget {
+  final _SimulationComparisonRowData data;
+
+  const _SimulationComparisonRow({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final bool differs = data.leftValue != data.rightValue;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 86,
+            child: Text(
+              data.label,
+              style: const TextStyle(
+                color: Color(0xFFB7C0D4),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              data.leftValue,
+              style: TextStyle(
+                color: differs ? const Color(0xFFC4B5FD) : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              data.rightValue,
+              style: TextStyle(
+                color: differs ? const Color(0xFF7DD3FC) : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _SimulationMetricData {
   final String label;
