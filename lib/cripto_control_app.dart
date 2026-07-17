@@ -4981,6 +4981,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _currentIndex,
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
               onDestinationSelected: (int index) {
                 unawaited(_logSafeAnalyticsEvent(name: 'tab_view'));
                 _goToMainTab(index);
@@ -20559,11 +20560,11 @@ extension AppThemeStyleDetails on AppThemeStyle {
       case AppThemeStyle.graphite:
         return 'Neutros sobrios para lectura prolongada.';
       case AppThemeStyle.institutionalBlue:
-        return 'Azules financieros con contraste limpio.';
+        return 'Azul financiero frío, profundo y corporativo.';
       case AppThemeStyle.bitcoinDark:
-        return 'Carbón y naranja BTC en paleta completa.';
+        return 'Carbón cálido con naranja BTC dominante.';
       case AppThemeStyle.terminalGreen:
-        return 'Oscuro técnico con energía terminal.';
+        return 'Terminal sobria: verde técnico sin saturar.';
       case AppThemeStyle.highContrast:
         return 'Máxima legibilidad y bordes marcados.';
     }
@@ -20601,45 +20602,45 @@ extension AppThemeStyleDetails on AppThemeStyle {
         );
       case AppThemeStyle.institutionalBlue:
         return const AppPalette(
-          background: Color(0xFF07111F),
-          surface: Color(0xFF0E1B2E),
-          surfaceAlt: Color(0xFF162A46),
-          primary: Color(0xFF60A5FA),
-          primarySoft: Color(0xFF12345C),
-          border: Color(0xFF25496F),
-          positive: Color(0xFF10B981),
-          negative: Color(0xFFF43F5E),
-          warning: Color(0xFFFBBF24),
+          background: Color(0xFF031322),
+          surface: Color(0xFF071D33),
+          surfaceAlt: Color(0xFF0C2E4F),
+          primary: Color(0xFF38BDF8),
+          primarySoft: Color(0xFF082F49),
+          border: Color(0xFF155E75),
+          positive: Color(0xFF2DD4BF),
+          negative: Color(0xFFFB7185),
+          warning: Color(0xFFF59E0B),
           textMain: Color(0xFFF8FAFC),
-          textMuted: Color(0xFF93A8C2),
+          textMuted: Color(0xFFB6C7DA),
         );
       case AppThemeStyle.bitcoinDark:
         return const AppPalette(
-          background: Color(0xFF0D0A06),
-          surface: Color(0xFF17110A),
-          surfaceAlt: Color(0xFF2A1B0D),
-          primary: Color(0xFFF7931A),
-          primarySoft: Color(0xFF3A220C),
-          border: Color(0xFF5C3A16),
-          positive: Color(0xFF22C55E),
+          background: Color(0xFF130904),
+          surface: Color(0xFF1F1005),
+          surfaceAlt: Color(0xFF341A04),
+          primary: Color(0xFFFFB020),
+          primarySoft: Color(0xFF4A2604),
+          border: Color(0xFF8A4B0A),
+          positive: Color(0xFF84CC16),
           negative: Color(0xFFEF4444),
-          warning: Color(0xFFF59E0B),
-          textMain: Color(0xFFFFFBEB),
-          textMuted: Color(0xFFD6B98A),
+          warning: Color(0xFFFFC857),
+          textMain: Color(0xFFFFF7ED),
+          textMuted: Color(0xFFE7C99A),
         );
       case AppThemeStyle.terminalGreen:
         return const AppPalette(
-          background: Color(0xFF020A06),
-          surface: Color(0xFF07140D),
-          surfaceAlt: Color(0xFF0E2618),
-          primary: Color(0xFF39FF88),
-          primarySoft: Color(0xFF073D20),
-          border: Color(0xFF176B3A),
+          background: Color(0xFF020805),
+          surface: Color(0xFF06120B),
+          surfaceAlt: Color(0xFF0B2114),
+          primary: Color(0xFF00D26A),
+          primarySoft: Color(0xFF052E1A),
+          border: Color(0xFF128047),
           positive: Color(0xFF22C55E),
-          negative: Color(0xFFF87171),
-          warning: Color(0xFFFACC15),
-          textMain: Color(0xFFEFFFF5),
-          textMuted: Color(0xFF88B99C),
+          negative: Color(0xFFFF6B6B),
+          warning: Color(0xFFEAB308),
+          textMain: Color(0xFFF1FFF7),
+          textMuted: Color(0xFFB7F7C7),
         );
       case AppThemeStyle.highContrast:
         return const AppPalette(
