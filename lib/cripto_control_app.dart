@@ -10774,6 +10774,27 @@ class _SimulationResultPanel extends StatelessWidget {
     required this.child,
   });
 
+  void _showResultModal(BuildContext context, Color resolvedAccent) {
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: _SimulationResultModalCard(
+          title: title,
+          subtitle: subtitle,
+          accentColor: resolvedAccent,
+          valid: valid,
+          primaryLabel: primaryLabel,
+          primaryValue: primaryValue,
+          primaryColor: primaryColor,
+          detail: child,
+          onClose: () => Navigator.of(dialogContext).pop(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final Color resolvedAccent = valid ? accentColor : const Color(0xFFF59E0B);
@@ -10802,6 +10823,16 @@ class _SimulationResultPanel extends StatelessWidget {
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
                   ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _showResultModal(context, resolvedAccent),
+                icon: const Icon(Icons.open_in_full, size: 16),
+                label: const Text('Ver'),
+                style: TextButton.styleFrom(
+                  foregroundColor: resolvedAccent,
+                  visualDensity: VisualDensity.compact,
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -10875,6 +10906,189 @@ class _SimulationResultPanel extends StatelessWidget {
             child: child,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SimulationResultModalCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color accentColor;
+  final bool valid;
+  final String primaryLabel;
+  final String primaryValue;
+  final Color? primaryColor;
+  final Widget detail;
+  final VoidCallback onClose;
+
+  const _SimulationResultModalCard({
+    required this.title,
+    required this.subtitle,
+    required this.accentColor,
+    required this.valid,
+    required this.primaryLabel,
+    required this.primaryValue,
+    required this.primaryColor,
+    required this.detail,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 540, maxHeight: 720),
+      child: Container(
+        decoration: BoxDecoration(
+          color: _simulationElevated,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: accentColor.withValues(alpha: 0.38)),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.34),
+              blurRadius: 28,
+              offset: const Offset(0, 18),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Stack(
+            children: <Widget>[
+              Positioned(
+                right: -56,
+                top: -52,
+                child: _SimulationHeroGlow(
+                  color: accentColor,
+                  size: 156,
+                  opacity: 0.18,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: accentColor.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: accentColor.withValues(alpha: 0.34),
+                              ),
+                            ),
+                            child: Icon(
+                              valid
+                                  ? Icons.insights_outlined
+                                  : Icons.warning_amber_outlined,
+                              color: accentColor,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  title,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  subtitle,
+                                  style: const TextStyle(
+                                    color: Color(0xFFB7C0D4),
+                                    fontSize: 13,
+                                    height: 1.28,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cerrar',
+                            onPressed: onClose,
+                            icon: const Icon(Icons.close),
+                            color: Colors.white,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: _simulationBox(
+                          color: const Color(0xFF111A2A),
+                          radius: 16,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              primaryLabel,
+                              style: const TextStyle(
+                                color: Color(0xFFB7C0D4),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                primaryValue,
+                                style: TextStyle(
+                                  color: primaryColor ?? Colors.white,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w900,
+                                  fontFeatures: const <FontFeature>[
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      detail,
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: onClose,
+                          icon: const Icon(Icons.check_circle_outline),
+                          label: const Text('Cerrar resultado'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accentColor.withValues(alpha: 0.18),
+                            foregroundColor: Colors.white,
+                            textStyle: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
