@@ -8727,8 +8727,13 @@ class SimulationTab extends StatefulWidget {
 }
 
 class _SimulationTabState extends State<SimulationTab> {
+  static const String _savedSimulationsKey = 'saved_simulations_v1_json';
+  static const int _savedSimulationsLimit = 50;
+
   SimulationMode _mode = SimulationMode.operation;
   OperationSimulationMode _operationMode = OperationSimulationMode.buy;
+  final List<_SavedSimulationRecord> _savedSimulations =
+      <_SavedSimulationRecord>[];
 
   String _buyCoin = 'UNI';
   final TextEditingController _buyGrossAmountController = TextEditingController(
@@ -8780,6 +8785,7 @@ class _SimulationTabState extends State<SimulationTab> {
   void initState() {
     super.initState();
     _mode = widget.initialMode;
+    unawaited(_loadSavedSimulations());
   }
 
   @override
@@ -8918,6 +8924,85 @@ class _SimulationTabState extends State<SimulationTab> {
     );
   }
 
+  Future<void> _loadSavedSimulations() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString(_savedSimulationsKey);
+      if (raw == null || raw.trim().isEmpty) return;
+      final dynamic decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final List<_SavedSimulationRecord> loaded = decoded
+          .whereType<Map<dynamic, dynamic>>()
+          .map(
+            (Map<dynamic, dynamic> json) => _SavedSimulationRecord.fromJson(
+              Map<String, dynamic>.from(json),
+            ),
+          )
+          .whereType<_SavedSimulationRecord>()
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _savedSimulations
+          ..clear()
+          ..addAll(loaded.take(_savedSimulationsLimit));
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _persistSavedSimulations() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _savedSimulationsKey,
+      jsonEncode(
+        _savedSimulations
+            .take(_savedSimulationsLimit)
+            .map((_SavedSimulationRecord record) => record.toJson())
+            .toList(),
+      ),
+    );
+  }
+
+  Future<void> _saveCurrentSimulation({
+    required bool valid,
+    required String primaryLabel,
+    required String primaryValue,
+  }) async {
+    if (!valid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Corrige la simulación antes de guardarla.'),
+        ),
+      );
+      return;
+    }
+
+    final _SavedSimulationRecord record = _SavedSimulationRecord(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      createdAt: DateTime.now(),
+      modeLabel: _modeLabel,
+      selectedAsset: _simulationPairLabel,
+      scenario: _simulationScenarioLabel,
+      feeLabel: _activeFeeLabel,
+      primaryLabel: primaryLabel,
+      primaryValue: primaryValue,
+    );
+
+    setState(() {
+      _savedSimulations.insert(0, record);
+      if (_savedSimulations.length > _savedSimulationsLimit) {
+        _savedSimulations.removeRange(
+          _savedSimulationsLimit,
+          _savedSimulations.length,
+        );
+      }
+    });
+    await _persistSavedSimulations();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Simulación guardada.')),
+    );
+  }
+
   Widget _buildSimulationPositionPanel(CoinStats stats, String title) {
     return _SimulationPanel(
       title: title,
@@ -9040,6 +9125,7 @@ class _SimulationTabState extends State<SimulationTab> {
           scenario: _simulationScenarioLabel,
           operationType: _modeLabel,
           feeLabel: _activeFeeLabel,
+          savedCount: _savedSimulations.length,
           accentColor:
               _mode == SimulationMode.operation &&
                   _operationMode == OperationSimulationMode.sell
@@ -9237,6 +9323,13 @@ class _SimulationTabState extends State<SimulationTab> {
             ? _simulationMoney(result.avgAfter)
             : 'Sin resultado',
         primaryColor: Colors.white,
+        onSave: () => _saveCurrentSimulation(
+          valid: result.valid,
+          primaryLabel: 'Nuevo promedio',
+          primaryValue: result.valid
+              ? _simulationMoney(result.avgAfter)
+              : 'Sin resultado',
+        ),
         child: result.valid
             ? _SimulationMetricGrid(
                 metrics: <_SimulationMetricData>[
@@ -9444,6 +9537,13 @@ class _SimulationTabState extends State<SimulationTab> {
             ? _simulationMoney(result.realizedPLEstimate)
             : 'Sin resultado',
         primaryColor: result.valid ? pnlColor(result.realizedPLEstimate) : null,
+        onSave: () => _saveCurrentSimulation(
+          valid: result.valid,
+          primaryLabel: 'P&L realizado estimado',
+          primaryValue: result.valid
+              ? _simulationMoney(result.realizedPLEstimate)
+              : 'Sin resultado',
+        ),
         child: result.valid
             ? Column(
                 children: <Widget>[
@@ -9763,6 +9863,13 @@ class _SimulationTabState extends State<SimulationTab> {
             ? _simulationCrypto(result.targetQuantityBought)
             : 'Sin resultado',
         primaryColor: Colors.white,
+        onSave: () => _saveCurrentSimulation(
+          valid: result.valid,
+          primaryLabel: '$_rotationTargetCoin comprado',
+          primaryValue: result.valid
+              ? _simulationCrypto(result.targetQuantityBought)
+              : 'Sin resultado',
+        ),
         child: result.valid
             ? _SimulationMetricGrid(
                 metrics: <_SimulationMetricData>[
@@ -10393,6 +10500,7 @@ class _SimulationHero extends StatelessWidget {
   final String scenario;
   final String operationType;
   final String feeLabel;
+  final int savedCount;
   final Color accentColor;
 
   const _SimulationHero({
@@ -10402,6 +10510,7 @@ class _SimulationHero extends StatelessWidget {
     required this.scenario,
     required this.operationType,
     required this.feeLabel,
+    required this.savedCount,
     required this.accentColor,
   });
 
@@ -10631,10 +10740,10 @@ class _SimulationHero extends StatelessWidget {
                             value: feeLabel,
                             icon: Icons.percent_outlined,
                           ),
-                          const _SimulationMetricData(
-                            label: 'Disponibles',
-                            value: 'Compra · Venta · Rotación',
-                            icon: Icons.tune_outlined,
+                          _SimulationMetricData(
+                            label: 'Guardadas',
+                            value: savedCount.toString(),
+                            icon: Icons.bookmark_added_outlined,
                           ),
                         ];
                         return Wrap(
@@ -10761,6 +10870,7 @@ class _SimulationResultPanel extends StatelessWidget {
   final String primaryLabel;
   final String primaryValue;
   final Color? primaryColor;
+  final VoidCallback? onSave;
   final Widget child;
 
   const _SimulationResultPanel({
@@ -10771,6 +10881,7 @@ class _SimulationResultPanel extends StatelessWidget {
     required this.primaryLabel,
     required this.primaryValue,
     required this.primaryColor,
+    this.onSave,
     required this.child,
   });
 
@@ -10789,6 +10900,7 @@ class _SimulationResultPanel extends StatelessWidget {
           primaryValue: primaryValue,
           primaryColor: primaryColor,
           detail: child,
+          onSave: onSave,
           onClose: () => Navigator.of(dialogContext).pop(),
         ),
       ),
@@ -10825,15 +10937,30 @@ class _SimulationResultPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              TextButton.icon(
-                onPressed: () => _showResultModal(context, resolvedAccent),
-                icon: const Icon(Icons.open_in_full, size: 16),
-                label: const Text('Ver'),
-                style: TextButton.styleFrom(
-                  foregroundColor: resolvedAccent,
-                  visualDensity: VisualDensity.compact,
-                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
-                ),
+              Wrap(
+                spacing: 4,
+                children: <Widget>[
+                  TextButton.icon(
+                    onPressed: onSave,
+                    icon: const Icon(Icons.bookmark_add_outlined, size: 16),
+                    label: const Text('Guardar'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: resolvedAccent,
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _showResultModal(context, resolvedAccent),
+                    icon: const Icon(Icons.open_in_full, size: 16),
+                    label: const Text('Ver'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: resolvedAccent,
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -10920,6 +11047,7 @@ class _SimulationResultModalCard extends StatelessWidget {
   final String primaryValue;
   final Color? primaryColor;
   final Widget detail;
+  final VoidCallback? onSave;
   final VoidCallback onClose;
 
   const _SimulationResultModalCard({
@@ -10931,6 +11059,7 @@ class _SimulationResultModalCard extends StatelessWidget {
     required this.primaryValue,
     required this.primaryColor,
     required this.detail,
+    this.onSave,
     required this.onClose,
   });
 
@@ -11067,20 +11196,41 @@ class _SimulationResultModalCard extends StatelessWidget {
                       const SizedBox(height: 12),
                       detail,
                       const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: onClose,
-                          icon: const Icon(Icons.check_circle_outline),
-                          label: const Text('Cerrar resultado'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: accentColor.withValues(alpha: 0.18),
-                            foregroundColor: Colors.white,
-                            textStyle: const TextStyle(
-                              fontWeight: FontWeight.w900,
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: onSave,
+                              icon: const Icon(Icons.bookmark_add_outlined),
+                              label: const Text('Guardar'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: BorderSide(
+                                  color: accentColor.withValues(alpha: 0.42),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: onClose,
+                              icon: const Icon(Icons.check_circle_outline),
+                              label: const Text('Cerrar'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor:
+                                    accentColor.withValues(alpha: 0.18),
+                                foregroundColor: Colors.white,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -11090,6 +11240,58 @@ class _SimulationResultModalCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+class _SavedSimulationRecord {
+  final String id;
+  final DateTime createdAt;
+  final String modeLabel;
+  final String selectedAsset;
+  final String scenario;
+  final String feeLabel;
+  final String primaryLabel;
+  final String primaryValue;
+
+  const _SavedSimulationRecord({
+    required this.id,
+    required this.createdAt,
+    required this.modeLabel,
+    required this.selectedAsset,
+    required this.scenario,
+    required this.feeLabel,
+    required this.primaryLabel,
+    required this.primaryValue,
+  });
+
+  Map<String, Object> toJson() => <String, Object>{
+    'id': id,
+    'createdAt': createdAt.toIso8601String(),
+    'modeLabel': modeLabel,
+    'selectedAsset': selectedAsset,
+    'scenario': scenario,
+    'feeLabel': feeLabel,
+    'primaryLabel': primaryLabel,
+    'primaryValue': primaryValue,
+  };
+
+  static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
+    final String id = (json['id'] ?? '').toString();
+    final DateTime? createdAt = DateTime.tryParse(
+      (json['createdAt'] ?? '').toString(),
+    );
+    if (id.isEmpty || createdAt == null) return null;
+    return _SavedSimulationRecord(
+      id: id,
+      createdAt: createdAt,
+      modeLabel: (json['modeLabel'] ?? '').toString(),
+      selectedAsset: (json['selectedAsset'] ?? '').toString(),
+      scenario: (json['scenario'] ?? '').toString(),
+      feeLabel: (json['feeLabel'] ?? '').toString(),
+      primaryLabel: (json['primaryLabel'] ?? '').toString(),
+      primaryValue: (json['primaryValue'] ?? '').toString(),
     );
   }
 }
