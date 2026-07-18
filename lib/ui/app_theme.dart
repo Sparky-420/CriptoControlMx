@@ -65,11 +65,11 @@ extension CcmxThemeStyleDetails on CcmxThemeStyle {
       case CcmxThemeStyle.graphite:
         return 'Neutros sobrios para lectura prolongada.';
       case CcmxThemeStyle.institutionalBlue:
-        return 'Azules financieros con contraste limpio.';
+        return 'Azul financiero frio, profundo y corporativo.';
       case CcmxThemeStyle.bitcoinDark:
-        return 'Carbon y naranja BTC en paleta completa.';
+        return 'Carbon calido con naranja BTC dominante.';
       case CcmxThemeStyle.terminalGreen:
-        return 'Oscuro tecnico con energia terminal.';
+        return 'Terminal sobria: verde tecnico sin saturar.';
       case CcmxThemeStyle.highContrast:
         return 'Maxima legibilidad y bordes marcados.';
       case CcmxThemeStyle.seriousLight:
@@ -82,10 +82,11 @@ extension CcmxThemeStyleDetails on CcmxThemeStyle {
       return switch (this) {
         CcmxThemeStyle.proDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF5B4FCF), const Color(0xFFE7E3FF)),
         CcmxThemeStyle.graphite => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF334155), const Color(0xFFE2E8F0)),
-        CcmxThemeStyle.bitcoinDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFFC26A00), const Color(0xFFFFEDD5)),
-        CcmxThemeStyle.terminalGreen => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF047857), const Color(0xFFDCFCE7)),
+        CcmxThemeStyle.institutionalBlue => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF075985), const Color(0xFFE0F2FE)),
+        CcmxThemeStyle.bitcoinDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFFB45309), const Color(0xFFFFEDD5)),
+        CcmxThemeStyle.terminalGreen => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF047857), const Color(0xFFD1FAE5)),
         CcmxThemeStyle.highContrast => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF000000), const Color(0xFFE5E7EB)),
-        CcmxThemeStyle.institutionalBlue || CcmxThemeStyle.seriousLight => CcmxThemePalette.seriousLight,
+        CcmxThemeStyle.seriousLight => CcmxThemePalette.seriousLight,
       };
     }
 
@@ -167,45 +168,45 @@ class CcmxThemePalette {
   );
 
   static const CcmxThemePalette institutionalBlue = CcmxThemePalette(
-    background: Color(0xFF07111F),
-    surface: Color(0xFF0E1B2E),
-    surfaceAlt: Color(0xFF162A46),
-    primary: Color(0xFF60A5FA),
-    primarySoft: Color(0xFF12345C),
-    border: Color(0xFF25496F),
-    positive: Color(0xFF10B981),
-    negative: Color(0xFFF43F5E),
-    warning: Color(0xFFFBBF24),
+    background: Color(0xFF031322),
+    surface: Color(0xFF071D33),
+    surfaceAlt: Color(0xFF0C2E4F),
+    primary: Color(0xFF38BDF8),
+    primarySoft: Color(0xFF082F49),
+    border: Color(0xFF155E75),
+    positive: Color(0xFF2DD4BF),
+    negative: Color(0xFFFB7185),
+    warning: Color(0xFFF59E0B),
     textMain: Color(0xFFF8FAFC),
-    textMuted: Color(0xFF93A8C2),
+    textMuted: Color(0xFFB6C7DA),
   );
 
   static const CcmxThemePalette bitcoinDark = CcmxThemePalette(
-    background: Color(0xFF0D0A06),
-    surface: Color(0xFF17110A),
-    surfaceAlt: Color(0xFF2A1B0D),
-    primary: Color(0xFFF7931A),
-    primarySoft: Color(0xFF3A220C),
-    border: Color(0xFF5C3A16),
-    positive: Color(0xFF22C55E),
+    background: Color(0xFF130904),
+    surface: Color(0xFF1F1005),
+    surfaceAlt: Color(0xFF341A04),
+    primary: Color(0xFFFFB020),
+    primarySoft: Color(0xFF4A2604),
+    border: Color(0xFF8A4B0A),
+    positive: Color(0xFF84CC16),
     negative: Color(0xFFEF4444),
-    warning: Color(0xFFF59E0B),
-    textMain: Color(0xFFFFFBEB),
-    textMuted: Color(0xFFD6B98A),
+    warning: Color(0xFFFFC857),
+    textMain: Color(0xFFFFF7ED),
+    textMuted: Color(0xFFE7C99A),
   );
 
   static const CcmxThemePalette terminalGreen = CcmxThemePalette(
-    background: Color(0xFF020A06),
-    surface: Color(0xFF07140D),
-    surfaceAlt: Color(0xFF0E2618),
-    primary: Color(0xFF39FF88),
-    primarySoft: Color(0xFF073D20),
-    border: Color(0xFF176B3A),
+    background: Color(0xFF020805),
+    surface: Color(0xFF06120B),
+    surfaceAlt: Color(0xFF0B2114),
+    primary: Color(0xFF00D26A),
+    primarySoft: Color(0xFF052E1A),
+    border: Color(0xFF128047),
     positive: Color(0xFF22C55E),
-    negative: Color(0xFFF87171),
-    warning: Color(0xFFFACC15),
-    textMain: Color(0xFFEFFFF5),
-    textMuted: Color(0xFF88B99C),
+    negative: Color(0xFFFF6B6B),
+    warning: Color(0xFFEAB308),
+    textMain: Color(0xFFF1FFF7),
+    textMuted: Color(0xFFB7F7C7),
   );
 
   static const CcmxThemePalette highContrast = CcmxThemePalette(
@@ -274,7 +275,112 @@ class CcmxThemeTokens {
   static const double cardRadius = 20;
   static const double inputRadius = 14;
   static const double cardBorderAlpha = 0.42;
-  static const FontWeight navigationLabelWeight = FontWeight.w600;
+  static const double navigationHeight = 72;
+  static const double navigationLabelSize = 11.5;
+  static const FontWeight navigationLabelWeight = FontWeight.w700;
+}
+
+@immutable
+class CcmxVisualTokens {
+  const CcmxVisualTokens({
+    required this.backgroundSecondary,
+    required this.cardBackground,
+    required this.cardBorder,
+    required this.cardRadius,
+    required this.borderWidth,
+    required this.shadow,
+    required this.shadowOpacity,
+    required this.surfacePrimary,
+    required this.surfaceElevated,
+    required this.selectedBackground,
+    required this.selectedBorder,
+    required this.sheetBackground,
+    required this.menuBackground,
+    required this.pressedOverlay,
+    required this.divider,
+    required this.gradientStart,
+    required this.gradientEnd,
+    required this.primaryAccent,
+    required this.secondaryAccent,
+    required this.tertiaryAccent,
+    required this.glowColor,
+    required this.chartPrimary,
+    required this.chartSecondary,
+    required this.chartMarker,
+    required this.chartGrid,
+    required this.chartFill,
+    required this.chartTooltip,
+  });
+
+  final Color backgroundSecondary;
+  final Color cardBackground;
+  final Color cardBorder;
+  final double cardRadius;
+  final double borderWidth;
+  final Color shadow;
+  final double shadowOpacity;
+  final Color surfacePrimary;
+  final Color surfaceElevated;
+  final Color selectedBackground;
+  final Color selectedBorder;
+  final Color sheetBackground;
+  final Color menuBackground;
+  final Color pressedOverlay;
+  final Color divider;
+  final Color gradientStart;
+  final Color gradientEnd;
+  final Color primaryAccent;
+  final Color secondaryAccent;
+  final Color tertiaryAccent;
+  final Color glowColor;
+  final Color chartPrimary;
+  final Color chartSecondary;
+  final Color chartMarker;
+  final Color chartGrid;
+  final Color chartFill;
+  final Color chartTooltip;
+
+  static CcmxVisualTokens of(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+    final bool isDark = theme.brightness == Brightness.dark;
+
+    return CcmxVisualTokens(
+      backgroundSecondary: colors.surface.withValues(
+        alpha: isDark ? 0.84 : 0.96,
+      ),
+      cardBackground: colors.surface,
+      cardBorder: colors.outlineVariant.withValues(alpha: isDark ? 0.58 : 0.72),
+      cardRadius: CcmxThemeTokens.cardRadius,
+      borderWidth: 1,
+      shadow: colors.shadow,
+      shadowOpacity: isDark ? 0.22 : 0.10,
+      surfacePrimary: colors.surface,
+      surfaceElevated: colors.surfaceContainerHighest,
+      selectedBackground: colors.primaryContainer.withValues(
+        alpha: isDark ? 0.72 : 0.86,
+      ),
+      selectedBorder: colors.primary.withValues(alpha: isDark ? 0.70 : 0.82),
+      sheetBackground: colors.surface,
+      menuBackground: colors.surfaceContainerHighest,
+      pressedOverlay: colors.primary.withValues(alpha: 0.12),
+      divider: colors.outlineVariant.withValues(alpha: 0.42),
+      gradientStart: colors.primary.withValues(alpha: isDark ? 0.22 : 0.14),
+      gradientEnd: colors.surface.withValues(alpha: 0.0),
+      primaryAccent: colors.primary,
+      secondaryAccent: colors.secondary,
+      tertiaryAccent: colors.tertiary,
+      glowColor: colors.primary.withValues(alpha: isDark ? 0.28 : 0.18),
+      chartPrimary: colors.primary,
+      chartSecondary: colors.secondary,
+      chartMarker: colors.tertiary,
+      chartGrid: colors.outlineVariant.withValues(alpha: 0.36),
+      chartFill: colors.primary.withValues(alpha: isDark ? 0.18 : 0.12),
+      chartTooltip: colors.inverseSurface.withValues(
+        alpha: isDark ? 0.90 : 0.96,
+      ),
+    );
+  }
 }
 
 class CcmxAppTheme {
@@ -322,14 +428,33 @@ class CcmxAppTheme {
         elevation: 0,
       ),
       navigationBarTheme: NavigationBarThemeData(
+        height: CcmxThemeTokens.navigationHeight,
         backgroundColor: palette.surface,
-        indicatorColor: palette.primarySoft.withValues(alpha: 0.82),
-        labelTextStyle: WidgetStateProperty.all(
-          TextStyle(
-            color: palette.textMain,
-            fontWeight: CcmxThemeTokens.navigationLabelWeight,
-          ),
+        elevation: 0,
+        indicatorColor: palette.primarySoft.withValues(alpha: 0.92),
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: palette.border.withValues(alpha: 0.48)),
         ),
+        iconTheme: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+          final bool selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected ? palette.primary : palette.textMuted,
+            size: selected ? 27 : 25,
+          );
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+          final bool selected = states.contains(WidgetState.selected);
+          return TextStyle(
+            color: selected ? palette.primary : palette.textMuted,
+            fontSize: CcmxThemeTokens.navigationLabelSize,
+            fontWeight: selected
+                ? FontWeight.w800
+                : CcmxThemeTokens.navigationLabelWeight,
+            height: 1.0,
+            letterSpacing: -0.1,
+          );
+        }),
       ),
       dividerColor: palette.border,
       dividerTheme: DividerThemeData(
