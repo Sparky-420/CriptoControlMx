@@ -9860,6 +9860,27 @@ class _SimulationTabState extends State<SimulationTab> {
     );
   }
 
+  void _showSimulationComparator() {
+    if (_savedSimulations.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Guarda al menos dos simulaciones para comparar.'),
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) => _SimulationComparatorSheet(
+        left: _savedSimulations[0],
+        right: _savedSimulations[1],
+      ),
+    );
+  }
+
   Widget _buildSimulationPositionPanel(CoinStats stats, String title) {
     return _SimulationPanel(
       title: title,
@@ -9992,16 +10013,35 @@ class _SimulationTabState extends State<SimulationTab> {
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerRight,
-            child: OutlinedButton.icon(
-              onPressed:
-                  _savedSimulations.isEmpty ? null : _showSavedSimulations,
-              icon: const Icon(Icons.history_outlined),
-              label: Text('Historial (${_savedSimulations.length})'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Color(0x338B5CF6)),
-                textStyle: const TextStyle(fontWeight: FontWeight.w800),
-              ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: <Widget>[
+                OutlinedButton.icon(
+                  onPressed:
+                      _savedSimulations.isEmpty ? null : _showSavedSimulations,
+                  icon: const Icon(Icons.history_outlined),
+                  label: Text('Historial (${_savedSimulations.length})'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x338B5CF6)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _savedSimulations.length < 2
+                      ? null
+                      : _showSimulationComparator,
+                  icon: const Icon(Icons.compare_arrows_outlined),
+                  label: const Text('Comparar'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x338B5CF6)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 8),
