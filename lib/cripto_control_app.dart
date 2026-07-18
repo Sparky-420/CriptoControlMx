@@ -74,6 +74,17 @@ const Set<String> _safeAnalyticsEvents = <String>{
   'financial_reset_opened',
   'financial_reset_completed',
 };
+
+enum GoogleDriveSessionStatus {
+  accountChecking,
+  accountConnected,
+  accountDisconnected,
+  localPendingVerification,
+  driveAuthorized,
+  driveAuthorizationRequired,
+  temporaryError,
+}
+
 const Map<String, Set<Object>> _safeAnalyticsParameterValues =
     <String, Set<Object>>{
       'source': <Object>{'local', 'drive', 'firebase', 'ocr', 'manual'},
@@ -399,6 +410,22 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'google_drive_backup_updated_at_ms_v1';
   static const String _googleDriveBackupAccountEmailKey =
       'google_drive_backup_account_email_v1';
+  static const String _googleDriveSessionEmailKey =
+      'google_drive_session_email_v1';
+  static const String _googleDriveSessionDisplayNameKey =
+      'google_drive_session_display_name_v1';
+  static const String _googleDriveSessionConnectedAtKey =
+      'google_drive_session_connected_at_ms_v1';
+  static const String _googleDriveSessionWasConnectedKey =
+      'google_drive_session_was_connected_v1';
+  static const String _googleDriveAuthorizationKnownKey =
+      'google_drive_authorization_known_v1';
+  static const String _googleWebClientId =
+      '767407830346-bf771ge1ba2roalchb21a4j3fl8v8258.apps.googleusercontent.com';
+  static const Set<String> _googleAndroidClientIds = <String>{
+    '767407830346-bjlqgsn828sjq677b4t65mmrdgooc35o.apps.googleusercontent.com',
+    '767407830346-fhs53hlvnonjb7befttucbq5shqs0a6v.apps.googleusercontent.com',
+  };
   static const String _firebaseDeviceIdKey = 'firebase_device_id_v1';
   static const String _firebaseCloudStateUploadedAtKey =
       'firebase_cloud_state_uploaded_at_ms_v1';
@@ -468,7 +495,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Map<String, double> _recoveryAlertReferences = <String, double>{};
   bool _bootstrapped = false;
   Future<void>? _googleSignInInitFuture;
+  Future<void>? _googleDriveSessionRestoreFuture;
+  StreamSubscription<GoogleSignInAuthenticationEvent>?
+  _googleAuthenticationEventsSubscription;
   GoogleSignInAccount? _googleAccount;
+  String? _googleDriveSessionEmail;
+  String? _googleDriveSessionDisplayName;
+  DateTime? _googleDriveSessionConnectedAt;
+  bool _googleDriveWasConnected = false;
+  bool _googleDriveAuthorizationKnown = false;
+  GoogleDriveSessionStatus _googleDriveSessionStatus =
+      GoogleDriveSessionStatus.accountDisconnected;
+  int _googleDriveAuthGeneration = 0;
   User? _firebaseUser;
   bool _isFirebaseAuthBusy = false;
   bool _isCloudProfilePreparing = false;
@@ -481,14 +519,27 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
+  bool _isGoogleDriveDisconnectingExplicitly = false;
+  bool _driveAuthUserInitiated = false;
+  final bool _driveGoogleStartupLock = true;
   String? _googleDriveBackupFileId;
   DateTime? _googleDriveBackupUpdatedAt;
   String? _googleDriveBackupAccountEmail;
   bool _analyticsConsent = false;
   bool _crashlyticsConsent = false;
 
+  bool get _isGoogleDriveSessionChecking =>
+      _googleDriveSessionStatus == GoogleDriveSessionStatus.accountChecking;
+
+  bool get _isGoogleDriveAuthorized =>
+      _googleAccount != null &&
+      _googleDriveSessionStatus == GoogleDriveSessionStatus.driveAuthorized;
+
   bool get _isGoogleDriveBusy =>
-      _isGoogleConnecting || _isGoogleDriveCreating || _isGoogleDriveRestoring;
+      _isGoogleDriveSessionChecking ||
+      _isGoogleConnecting ||
+      _isGoogleDriveCreating ||
+      _isGoogleDriveRestoring;
 
   @override
   void initState() {
@@ -500,6 +551,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _analyticsConsent = widget.initialAnalyticsEnabled;
     _crashlyticsConsent = widget.initialCrashlyticsEnabled;
     _loadFirebaseAuthUser();
+    unawaited(_loadLocalGoogleDriveSessionState());
     unawaited(_loadCloudStateUploadMetadata());
     if (_firebaseUser != null) {
       unawaited(_ensureCloudProfile(showError: false));
@@ -516,6 +568,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   @override
   void dispose() {
     _cancelPriceRefreshTimer();
+    _googleAuthenticationEventsSubscription?.cancel();
     _mainPageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -550,13 +603,458 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     setState(() => _currentIndex = index);
   }
 
+  bool _canTouchGoogleFromCurrentContext(String method) {
+    if (_driveAuthUserInitiated) return true;
+    if (_driveGoogleStartupLock) {
+      debugPrint('DRIVE_AUTH blocked:google_call_during_startup $method');
+      debugPrint(StackTrace.current.toString());
+      return false;
+    }
+    debugPrint('DRIVE_AUTH blocked:google_call_without_user_action $method');
+    debugPrint(StackTrace.current.toString());
+    return false;
+  }
+
+  void _ensureGoogleAuthenticationListenerRegistered() {
+    if (!_canTouchGoogleFromCurrentContext('authenticationEvents.listen')) {
+      throw StateError('Google Sign-In listener blocked during startup');
+    }
+    if (_googleAuthenticationEventsSubscription != null) return;
+    _googleAuthenticationEventsSubscription =
+        GoogleSignIn.instance.authenticationEvents.listen(
+          _handleGoogleAuthenticationEvent,
+        )..onError(_handleGoogleAuthenticationError);
+    debugPrint('DRIVE_AUTH listener:registered');
+  }
+
   Future<void> _ensureGoogleSignInInitialized() async {
-    _googleSignInInitFuture ??= GoogleSignIn.instance.initialize();
+    if (!_canTouchGoogleFromCurrentContext('initialize')) {
+      throw StateError('Google Sign-In initialize blocked during startup');
+    }
+    debugPrint('DRIVE_AUTH google_init:manual_only');
+    _ensureGoogleAuthenticationListenerRegistered();
+    _googleSignInInitFuture ??= _initializeGoogleSignInOnce();
     try {
       await _googleSignInInitFuture;
     } catch (_) {
       _googleSignInInitFuture = null;
       rethrow;
+    }
+  }
+
+  Future<void> _ensureGoogleDriveAuthInitializedFromUserAction(
+    String action,
+  ) async {
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:google_call_during_startup $action');
+      debugPrint(StackTrace.current.toString());
+      throw StateError('Google Drive auth requires explicit user action');
+    }
+    await _ensureGoogleSignInInitialized();
+  }
+
+  Future<void> _initializeGoogleSignInOnce() async {
+    const bool manualServerClientId = true;
+    final bool webClientIdPresent = _googleWebClientId.isNotEmpty;
+    final bool androidClientIdUsedAsServer = _googleAndroidClientIds.contains(
+      _googleWebClientId,
+    );
+    debugPrint('DRIVE_AUTH config:using_google_services_json');
+    debugPrint(
+      'DRIVE_AUTH config:manual_server_client_id=$manualServerClientId',
+    );
+    debugPrint('DRIVE_AUTH config:web_client_id_present=$webClientIdPresent');
+    debugPrint(
+      'DRIVE_AUTH config:android_client_id_used_as_server=$androidClientIdUsedAsServer',
+    );
+    debugPrint('DRIVE_AUTH initialize:start');
+    await GoogleSignIn.instance.initialize(serverClientId: _googleWebClientId);
+    debugPrint('DRIVE_AUTH initialize:success');
+  }
+
+  String _redactedDriveEmail(String? email) {
+    final String value = email?.trim() ?? '';
+    if (value.isEmpty) return 'none';
+    final int atIndex = value.indexOf('@');
+    if (atIndex <= 0 || atIndex == value.length - 1) return 'redacted';
+    return '${value[0]}***${value.substring(atIndex)}';
+  }
+
+  Future<T?> _runDriveInteractiveCall<T>(
+    String method,
+    Future<T> Function() action,
+  ) async {
+    debugPrint(
+      'DRIVE_AUTH INTERACTIVE_CALL $method userInitiated=$_driveAuthUserInitiated',
+    );
+    debugPrint(StackTrace.current.toString());
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:interactive_call_without_user_action');
+      return null;
+    }
+    return action();
+  }
+
+  Future<void> _runUserInitiatedDriveAuth(
+    String actionName,
+    Future<void> Function() action,
+  ) async {
+    if (_driveAuthUserInitiated) return;
+    _driveAuthUserInitiated = true;
+    debugPrint('DRIVE_AUTH user_action:$actionName');
+    try {
+      await action();
+    } finally {
+      _driveAuthUserInitiated = false;
+    }
+  }
+
+  String _googleDriveUserActionForConnect() {
+    if (_googleDriveSessionStatus ==
+        GoogleDriveSessionStatus.localPendingVerification) {
+      return 'verify_connection';
+    }
+    if (_googleDriveSessionStatus == GoogleDriveSessionStatus.temporaryError) {
+      return 'reconnect';
+    }
+    if (_googleAccount != null ||
+        _googleDriveSessionStatus ==
+            GoogleDriveSessionStatus.driveAuthorizationRequired) {
+      return 'authorize';
+    }
+    return 'connect';
+  }
+
+  void _handleGoogleAuthenticationEvent(GoogleSignInAuthenticationEvent event) {
+    if (!mounted) return;
+    switch (event) {
+      case GoogleSignInAuthenticationEventSignIn():
+        debugPrint('DRIVE_AUTH event:authenticated email=${event.user.email}');
+        final int generation = ++_googleDriveAuthGeneration;
+        setState(() {
+          _googleAccount = event.user;
+          _googleDriveSessionEmail = event.user.email;
+          _googleDriveSessionDisplayName = event.user.displayName;
+          _googleDriveSessionConnectedAt = DateTime.now();
+          _googleDriveWasConnected = true;
+          _googleDriveSessionStatus = GoogleDriveSessionStatus.accountConnected;
+        });
+        debugPrint('DRIVE_AUTH ui:connected');
+        unawaited(_saveGoogleDriveSessionMetadata(event.user));
+        unawaited(_refreshGoogleDriveAuthorization(event.user, generation));
+      case GoogleSignInAuthenticationEventSignOut():
+        debugPrint('DRIVE_AUTH event:unauthenticated');
+        _googleDriveAuthGeneration++;
+        if (_isGoogleDriveDisconnectingExplicitly) {
+          unawaited(_clearGoogleDriveSessionMetadata());
+        }
+        setState(() {
+          _googleAccount = null;
+          if (_isGoogleDriveDisconnectingExplicitly) {
+            _googleDriveSessionEmail = null;
+            _googleDriveSessionDisplayName = null;
+            _googleDriveSessionConnectedAt = null;
+            _googleDriveWasConnected = false;
+            _googleDriveAuthorizationKnown = false;
+            _googleDriveSessionStatus =
+                GoogleDriveSessionStatus.accountDisconnected;
+            debugPrint('DRIVE_AUTH ui:disconnected');
+          } else {
+            final bool hasKnownDriveSession =
+                _googleDriveWasConnected || _googleDriveSessionEmail != null;
+            _googleDriveSessionStatus = hasKnownDriveSession
+                ? GoogleDriveSessionStatus.temporaryError
+                : GoogleDriveSessionStatus.accountDisconnected;
+            debugPrint(
+              hasKnownDriveSession
+                  ? 'DRIVE_AUTH ui:temporary_error'
+                  : 'DRIVE_AUTH ui:disconnected',
+            );
+          }
+        });
+    }
+  }
+
+  void _handleGoogleAuthenticationError(Object error) {
+    debugPrint('DRIVE_AUTH error:${error.runtimeType}');
+    debugPrint('DRIVE_AUTH restore:error_preserving_local_state');
+    if (!mounted) return;
+    _googleDriveAuthGeneration++;
+    setState(() {
+      final bool hasKnownDriveSession =
+          _googleDriveWasConnected || _googleDriveSessionEmail != null;
+      _googleDriveSessionStatus =
+          _googleAccount != null && !hasKnownDriveSession
+          ? GoogleDriveSessionStatus.accountConnected
+          : GoogleDriveSessionStatus.temporaryError;
+    });
+    debugPrint('DRIVE_AUTH ui:temporary_error');
+  }
+
+  Future<void> _refreshGoogleDriveAuthorization(
+    GoogleSignInAccount account,
+    int generation,
+  ) async {
+    if (!_canTouchGoogleFromCurrentContext('authorizationForScopes')) return;
+    try {
+      final GoogleSignInClientAuthorization? authorization = await account
+          .authorizationClient
+          .authorizationForScopes(_googleDriveScopes);
+      if (!mounted ||
+          generation != _googleDriveAuthGeneration ||
+          _googleAccount?.email != account.email) {
+        return;
+      }
+      setState(() {
+        _googleDriveSessionStatus = authorization == null
+            ? GoogleDriveSessionStatus.driveAuthorizationRequired
+            : GoogleDriveSessionStatus.driveAuthorized;
+        _googleDriveAuthorizationKnown = authorization != null;
+      });
+      debugPrint(
+        authorization == null
+            ? 'DRIVE_AUTH scopes:required'
+            : 'DRIVE_AUTH scopes:authorized',
+      );
+      debugPrint(
+        authorization == null
+            ? 'DRIVE_AUTH ui:authorization_required'
+            : 'DRIVE_AUTH ui:connected',
+      );
+      unawaited(_saveGoogleDriveAuthorizationKnown(authorization != null));
+    } catch (error) {
+      debugPrint('DRIVE_AUTH error:${error.runtimeType}');
+      debugPrint('DRIVE_AUTH restore:error_preserving_local_state');
+      if (!mounted ||
+          generation != _googleDriveAuthGeneration ||
+          _googleAccount?.email != account.email) {
+        return;
+      }
+      setState(() {
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.temporaryError;
+      });
+      debugPrint('DRIVE_AUTH ui:temporary_error');
+    }
+  }
+
+  Future<void> _saveGoogleDriveSessionMetadata(
+    GoogleSignInAccount account, {
+    bool authorizationKnown = false,
+  }) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final int connectedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await prefs.setString(_googleDriveSessionEmailKey, account.email);
+    final String? displayName = account.displayName?.trim();
+    if (displayName == null || displayName.isEmpty) {
+      await prefs.remove(_googleDriveSessionDisplayNameKey);
+    } else {
+      await prefs.setString(_googleDriveSessionDisplayNameKey, displayName);
+    }
+    await prefs.setInt(_googleDriveSessionConnectedAtKey, connectedAtMs);
+    await prefs.setBool(_googleDriveSessionWasConnectedKey, true);
+    await prefs.setBool(_googleDriveAuthorizationKnownKey, authorizationKnown);
+  }
+
+  Future<void> _saveGoogleDriveAuthorizationKnown(bool value) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_googleDriveAuthorizationKnownKey, value);
+  }
+
+  Future<void> _clearGoogleDriveSessionMetadata() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_googleDriveSessionEmailKey);
+    await prefs.remove(_googleDriveSessionDisplayNameKey);
+    await prefs.remove(_googleDriveSessionConnectedAtKey);
+    await prefs.remove(_googleDriveSessionWasConnectedKey);
+    await prefs.remove(_googleDriveAuthorizationKnownKey);
+  }
+
+  Future<void> _loadLocalGoogleDriveSessionState() async {
+    debugPrint('DRIVE_AUTH startup:local_only');
+    debugPrint('DRIVE_AUTH startup:no_google_sign_in_calls');
+    debugPrint('DRIVE_AUTH startup:no_interactive_login');
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? expectedEmail = prefs.getString(
+        _googleDriveSessionEmailKey,
+      );
+      final String? expectedName = prefs.getString(
+        _googleDriveSessionDisplayNameKey,
+      );
+      final int? connectedAtMs = prefs.getInt(
+        _googleDriveSessionConnectedAtKey,
+      );
+      final bool lastKnownConnected =
+          prefs.getBool(_googleDriveSessionWasConnectedKey) ??
+          (expectedEmail != null);
+      final bool authorizationKnown =
+          prefs.getBool(_googleDriveAuthorizationKnownKey) ?? false;
+      debugPrint('DRIVE_AUTH prefs:last_known_connected=$lastKnownConnected');
+      debugPrint(
+        'DRIVE_AUTH prefs:last_known_email=${_redactedDriveEmail(expectedEmail)}',
+      );
+      if (!mounted) return;
+      setState(() {
+        _googleAccount = null;
+        _googleDriveSessionEmail = expectedEmail;
+        _googleDriveSessionDisplayName = expectedName;
+        _googleDriveSessionConnectedAt = connectedAtMs == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(connectedAtMs);
+        _googleDriveWasConnected = lastKnownConnected;
+        _googleDriveAuthorizationKnown = authorizationKnown;
+        _googleDriveSessionStatus = lastKnownConnected
+            ? GoogleDriveSessionStatus.localPendingVerification
+            : GoogleDriveSessionStatus.accountDisconnected;
+      });
+      debugPrint(
+        lastKnownConnected
+            ? 'DRIVE_AUTH ui:connected_local'
+            : 'DRIVE_AUTH ui:never_connected',
+      );
+    } catch (error) {
+      debugPrint('DRIVE_AUTH prefs:error_local_only ${error.runtimeType}');
+      if (!mounted) return;
+      setState(() {
+        _googleAccount = null;
+        _googleDriveSessionStatus =
+            GoogleDriveSessionStatus.accountDisconnected;
+      });
+      debugPrint('DRIVE_AUTH ui:never_connected');
+    }
+  }
+
+  Future<void> _restoreGoogleDriveSession() {
+    if (!_canTouchGoogleFromCurrentContext('restoreGoogleDriveSession')) {
+      return Future<void>.value();
+    }
+    final Future<void>? pending = _googleDriveSessionRestoreFuture;
+    if (pending != null) return pending;
+    final Future<void> restore = _restoreGoogleDriveSessionOnce();
+    _googleDriveSessionRestoreFuture = restore;
+    return restore.whenComplete(() {
+      if (identical(_googleDriveSessionRestoreFuture, restore)) {
+        _googleDriveSessionRestoreFuture = null;
+      }
+    });
+  }
+
+  Future<void> _restoreGoogleDriveSessionOnce() async {
+    final int generation = ++_googleDriveAuthGeneration;
+    String? expectedEmail = _googleDriveSessionEmail;
+    bool lastKnownConnected = _googleDriveWasConnected;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      expectedEmail = prefs.getString(_googleDriveSessionEmailKey);
+      final String? expectedName = prefs.getString(
+        _googleDriveSessionDisplayNameKey,
+      );
+      final int? connectedAtMs = prefs.getInt(
+        _googleDriveSessionConnectedAtKey,
+      );
+      lastKnownConnected =
+          prefs.getBool(_googleDriveSessionWasConnectedKey) ??
+          (expectedEmail != null);
+      final bool authorizationKnown =
+          prefs.getBool(_googleDriveAuthorizationKnownKey) ?? false;
+      debugPrint('DRIVE_AUTH prefs:last_known_connected=$lastKnownConnected');
+      debugPrint(
+        'DRIVE_AUTH prefs:last_known_email=${_redactedDriveEmail(expectedEmail)}',
+      );
+      if (mounted && expectedEmail != null) {
+        setState(() {
+          _googleDriveSessionEmail = expectedEmail;
+          _googleDriveSessionDisplayName = expectedName;
+          _googleDriveSessionConnectedAt = connectedAtMs == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(connectedAtMs);
+          _googleDriveWasConnected = lastKnownConnected;
+          _googleDriveAuthorizationKnown = authorizationKnown;
+        });
+      }
+    } catch (_) {}
+    debugPrint('DRIVE_AUTH silent_check:no_interactive_login');
+    if (mounted) {
+      setState(
+        () => _googleDriveSessionStatus =
+            GoogleDriveSessionStatus.accountChecking,
+      );
+      if (lastKnownConnected) {
+        debugPrint('DRIVE_AUTH manual_verify:show_restoring_state');
+        debugPrint('DRIVE_AUTH ui:restoring');
+      }
+    }
+    try {
+      await _ensureGoogleDriveAuthInitializedFromUserAction(
+        'verify_connection',
+      );
+      if (!_canTouchGoogleFromCurrentContext(
+        'attemptLightweightAuthentication',
+      )) {
+        return;
+      }
+      debugPrint('DRIVE_AUTH silent_check:start');
+      final Future<GoogleSignInAccount?>? lightweightAttempt = GoogleSignIn
+          .instance
+          .attemptLightweightAuthentication();
+      final GoogleSignInAccount? account = lightweightAttempt == null
+          ? null
+          : await lightweightAttempt;
+      if (!mounted || generation != _googleDriveAuthGeneration) return;
+      if (account == null) {
+        debugPrint(
+          'DRIVE_AUTH silent_check:unauthenticated_preserving_local_state',
+        );
+        setState(() {
+          _googleAccount = null;
+          _googleDriveSessionStatus = lastKnownConnected
+              ? GoogleDriveSessionStatus.temporaryError
+              : GoogleDriveSessionStatus.accountDisconnected;
+        });
+        debugPrint(
+          lastKnownConnected
+              ? 'DRIVE_AUTH ui:temporary_error'
+              : 'DRIVE_AUTH ui:disconnected',
+        );
+        return;
+      }
+      debugPrint('DRIVE_AUTH silent_check:authenticated');
+      debugPrint('DRIVE_AUTH event:authenticated email=${account.email}');
+      setState(() {
+        _googleAccount = account;
+        _googleDriveSessionEmail = account.email;
+        _googleDriveSessionDisplayName = account.displayName;
+        _googleDriveSessionConnectedAt = DateTime.now();
+        _googleDriveWasConnected = true;
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.accountConnected;
+      });
+      debugPrint('DRIVE_AUTH ui:connected');
+      unawaited(_saveGoogleDriveSessionMetadata(account));
+      await _refreshGoogleDriveAuthorization(account, generation);
+    } catch (error, stackTrace) {
+      debugPrint('DRIVE_AUTH error:${error.runtimeType}');
+      debugPrint('DRIVE_AUTH silent_check:error_preserving_local_state');
+      unawaited(
+        recordSafeError(
+          area: 'drive',
+          code: 'drive_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      if (!mounted || generation != _googleDriveAuthGeneration) return;
+      setState(() {
+        _googleDriveSessionStatus =
+            lastKnownConnected ||
+                expectedEmail != null ||
+                _googleAccount != null
+            ? GoogleDriveSessionStatus.temporaryError
+            : GoogleDriveSessionStatus.accountDisconnected;
+      });
+      debugPrint(
+        lastKnownConnected || expectedEmail != null || _googleAccount != null
+            ? 'DRIVE_AUTH ui:temporary_error'
+            : 'DRIVE_AUTH ui:disconnected',
+      );
     }
   }
 
@@ -1209,12 +1707,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     setState(() => _isFirebaseAuthBusy = true);
     try {
-      await _ensureGoogleSignInInitialized();
+      await _ensureGoogleDriveAuthInitializedFromUserAction('firebase_sign_in');
       if (!mounted || !pageContext.mounted) return;
       if (!GoogleSignIn.instance.supportsAuthenticate()) {
         throw UnsupportedError('Google Sign-In no disponible');
       }
 
+      debugPrint(
+        'DRIVE_AUTH INTERACTIVE_CALL firebase_authenticate userInitiated=$_driveAuthUserInitiated',
+      );
+      debugPrint(StackTrace.current.toString());
       final GoogleSignInAccount account = await GoogleSignIn.instance
           .authenticate();
       if (!mounted || !pageContext.mounted) return;
@@ -1301,38 +1803,110 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _connectGoogleDrive(BuildContext pageContext) async {
     if (_isGoogleDriveBusy) return;
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:interactive_flow_without_user_action');
+      debugPrint(StackTrace.current.toString());
+      return;
+    }
+    final bool verifyOnly =
+        _googleDriveSessionStatus ==
+        GoogleDriveSessionStatus.localPendingVerification;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     var errorMessage = 'No se pudo conectar Google Drive.';
 
-    setState(() => _isGoogleConnecting = true);
+    setState(() {
+      _isGoogleConnecting = true;
+      _googleDriveSessionStatus = GoogleDriveSessionStatus.accountChecking;
+    });
     try {
-      await _ensureGoogleSignInInitialized();
-      if (!GoogleSignIn.instance.supportsAuthenticate()) {
-        throw UnsupportedError('Google Sign-In no disponible');
+      if (verifyOnly) {
+        debugPrint(
+          'DRIVE_AUTH local:authorization_known=$_googleDriveAuthorizationKnown',
+        );
+        await _restoreGoogleDriveSession();
+        if (!mounted || !pageContext.mounted) return;
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Verificacion de Drive finalizada.')),
+        );
+        return;
+      }
+      await _ensureGoogleDriveAuthInitializedFromUserAction('connect');
+      GoogleSignInAccount? account = _googleAccount;
+      if (account == null) {
+        if (!GoogleSignIn.instance.supportsAuthenticate()) {
+          throw UnsupportedError('Google Sign-In no disponible');
+        }
+        account = await _runDriveInteractiveCall<GoogleSignInAccount>(
+          'authenticate',
+          () =>
+              GoogleSignIn.instance.authenticate(scopeHint: _googleDriveScopes),
+        );
+        if (account == null) {
+          throw StateError('Google authentication blocked');
+        }
+        if (!mounted || !pageContext.mounted) return;
+        final GoogleSignInAccount authenticatedAccount = account;
+        debugPrint(
+          'DRIVE_AUTH event:authenticated email=${authenticatedAccount.email}',
+        );
+        final int generation = ++_googleDriveAuthGeneration;
+        setState(() {
+          _googleAccount = authenticatedAccount;
+          _googleDriveSessionEmail = authenticatedAccount.email;
+          _googleDriveSessionDisplayName = authenticatedAccount.displayName;
+          _googleDriveSessionConnectedAt = DateTime.now();
+          _googleDriveWasConnected = true;
+          _googleDriveSessionStatus = GoogleDriveSessionStatus.accountConnected;
+        });
+        debugPrint('DRIVE_AUTH ui:connected');
+        unawaited(_saveGoogleDriveSessionMetadata(authenticatedAccount));
+        if (generation != _googleDriveAuthGeneration) return;
       }
 
-      final GoogleSignInAccount account = await GoogleSignIn.instance
-          .authenticate(scopeHint: _googleDriveScopes);
-      if (!mounted || !pageContext.mounted) return;
+      final GoogleSignInAccount activeAccount = account;
       errorMessage = 'No se pudo autorizar Google Drive.';
       final GoogleSignInClientAuthorization? currentAuthorization =
-          await account.authorizationClient.authorizationForScopes(
+          await activeAccount.authorizationClient.authorizationForScopes(
             _googleDriveScopes,
           );
       if (!mounted || !pageContext.mounted) return;
-      await (currentAuthorization == null
-          ? account.authorizationClient.authorizeScopes(_googleDriveScopes)
-          : Future<GoogleSignInClientAuthorization>.value(
-              currentAuthorization,
-            ));
-      final Map<String, String>? authHeaders = await account.authorizationClient
+      final GoogleSignInClientAuthorization? grantedAuthorization =
+          currentAuthorization ??
+          await _runDriveInteractiveCall<GoogleSignInClientAuthorization>(
+            'authorizeScopes',
+            () => activeAccount.authorizationClient.authorizeScopes(
+              _googleDriveScopes,
+            ),
+          );
+      if (grantedAuthorization == null) {
+        throw StateError('Google Drive authorization blocked');
+      }
+      final Map<String, String>? authHeaders = await activeAccount
+          .authorizationClient
           .authorizationHeaders(_googleDriveScopes);
       if (authHeaders == null) {
         throw StateError('Google Drive authorization headers unavailable');
       }
 
       if (!mounted || !pageContext.mounted) return;
-      setState(() => _googleAccount = account);
+      _googleDriveAuthGeneration++;
+      unawaited(
+        _saveGoogleDriveSessionMetadata(
+          activeAccount,
+          authorizationKnown: true,
+        ),
+      );
+      setState(() {
+        _googleAccount = activeAccount;
+        _googleDriveSessionEmail = activeAccount.email;
+        _googleDriveSessionDisplayName = activeAccount.displayName;
+        _googleDriveSessionConnectedAt = DateTime.now();
+        _googleDriveWasConnected = true;
+        _googleDriveAuthorizationKnown = true;
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.driveAuthorized;
+      });
+      debugPrint('DRIVE_AUTH scopes:authorized');
+      debugPrint('DRIVE_AUTH ui:connected');
       messenger.showSnackBar(
         const SnackBar(content: Text('Google Drive conectado.')),
       );
@@ -1349,6 +1923,23 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         ),
       );
       if (!mounted || !pageContext.mounted) return;
+      setState(() {
+        _googleDriveSessionStatus = canceled
+            ? _googleAccount == null
+                  ? _googleDriveWasConnected
+                        ? GoogleDriveSessionStatus.temporaryError
+                        : GoogleDriveSessionStatus.accountDisconnected
+                  : GoogleDriveSessionStatus.driveAuthorizationRequired
+            : GoogleDriveSessionStatus.temporaryError;
+      });
+      if (_googleAccount == null && !_googleDriveWasConnected) {
+        debugPrint('DRIVE_AUTH ui:disconnected');
+      } else if (_googleAccount == null) {
+        debugPrint('DRIVE_AUTH ui:temporary_error');
+      } else {
+        debugPrint('DRIVE_AUTH scopes:required');
+        debugPrint('DRIVE_AUTH ui:authorization_required');
+      }
       if (canceled) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se conectó Google Drive.')),
@@ -1369,6 +1960,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         ),
       );
       if (!mounted || !pageContext.mounted) return;
+      setState(() {
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.temporaryError;
+      });
+      debugPrint('DRIVE_AUTH restore:error_preserving_local_state');
+      debugPrint('DRIVE_AUTH ui:temporary_error');
       messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
     } finally {
       if (mounted) setState(() => _isGoogleConnecting = false);
@@ -1385,16 +1981,42 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     BuildContext pageContext,
     Future<T> Function(drive.DriveApi api, GoogleSignInAccount account) action,
   ) async {
-    final GoogleSignInAccount? account = _googleAccount;
+    if (!_canTouchGoogleFromCurrentContext('withGoogleDriveApi')) {
+      throw StateError('Google Drive blocked outside user action');
+    }
+    GoogleSignInAccount? account = _googleAccount;
+    if (account == null) {
+      await _restoreGoogleDriveSession();
+      account = _googleAccount;
+    }
     if (account == null) {
       throw StateError('Google Drive no conectado');
     }
-    await _ensureGoogleSignInInitialized();
-    final GoogleSignInClientAuthorization authorization =
-        await account.authorizationClient.authorizationForScopes(
-          _googleDriveScopes,
-        ) ??
-        await account.authorizationClient.authorizeScopes(_googleDriveScopes);
+    await _ensureGoogleDriveAuthInitializedFromUserAction('drive_api');
+    final GoogleSignInClientAuthorization? authorization = await account
+        .authorizationClient
+        .authorizationForScopes(_googleDriveScopes);
+    if (authorization == null) {
+      if (mounted) {
+        setState(() {
+          _googleDriveSessionStatus =
+              GoogleDriveSessionStatus.driveAuthorizationRequired;
+          _googleDriveAuthorizationKnown = false;
+        });
+      }
+      debugPrint('DRIVE_AUTH scopes:required');
+      debugPrint('DRIVE_AUTH ui:authorization_required');
+      unawaited(_saveGoogleDriveAuthorizationKnown(false));
+      throw StateError('Google Drive authorization required');
+    }
+    if (mounted) {
+      setState(() {
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.driveAuthorized;
+        _googleDriveAuthorizationKnown = true;
+      });
+    }
+    debugPrint('DRIVE_AUTH scopes:authorized');
+    unawaited(_saveGoogleDriveAuthorizationKnown(true));
     final client = authorization.authClient(scopes: _googleDriveScopes);
     try {
       return await action(drive.DriveApi(client), account);
@@ -1510,7 +2132,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
       if (mounted && pageContext.mounted) {
         if (code == 'auth_required') {
-          setState(() => _googleAccount = null);
+          setState(
+            () => _googleDriveSessionStatus =
+                GoogleDriveSessionStatus.driveAuthorizationRequired,
+          );
         }
         messenger.showSnackBar(
           SnackBar(
@@ -1677,7 +2302,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
       if (mounted && pageContext.mounted) {
         if (code == 'auth_required') {
-          setState(() => _googleAccount = null);
+          setState(
+            () => _googleDriveSessionStatus =
+                GoogleDriveSessionStatus.driveAuthorizationRequired,
+          );
         }
         messenger.showSnackBar(
           SnackBar(
@@ -1696,15 +2324,27 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _disconnectGoogleDrive(BuildContext pageContext) async {
     if (_isGoogleDriveBusy) return;
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:interactive_flow_without_user_action');
+      debugPrint(StackTrace.current.toString());
+      return;
+    }
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
     setState(() => _isGoogleConnecting = true);
     try {
-      await _ensureGoogleSignInInitialized();
+      await _ensureGoogleDriveAuthInitializedFromUserAction('sign_out');
+      _isGoogleDriveDisconnectingExplicitly = true;
       try {
-        await GoogleSignIn.instance.disconnect();
+        await _runDriveInteractiveCall<void>(
+          'disconnect',
+          () => GoogleSignIn.instance.disconnect(),
+        );
       } catch (_) {
-        await GoogleSignIn.instance.signOut();
+        await _runDriveInteractiveCall<void>(
+          'signOut',
+          () => GoogleSignIn.instance.signOut(),
+        );
       }
     } catch (_) {
       // Local UI state is cleared even if the provider cannot be reached.
@@ -1712,9 +2352,19 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         setState(() {
           _googleAccount = null;
+          _googleDriveSessionEmail = null;
+          _googleDriveSessionDisplayName = null;
+          _googleDriveSessionConnectedAt = null;
+          _googleDriveWasConnected = false;
+          _googleDriveAuthorizationKnown = false;
+          _googleDriveSessionStatus =
+              GoogleDriveSessionStatus.accountDisconnected;
           _isGoogleConnecting = false;
         });
       }
+      _isGoogleDriveDisconnectingExplicitly = false;
+      unawaited(_clearGoogleDriveSessionMetadata());
+      debugPrint('DRIVE_AUTH ui:disconnected');
       messenger.showSnackBar(
         const SnackBar(content: Text('Google Drive desconectado.')),
       );
@@ -1837,6 +2487,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _googleDriveBackupAccountEmail = prefs.getString(
         _googleDriveBackupAccountEmailKey,
       );
+      _googleDriveSessionEmail = prefs.getString(_googleDriveSessionEmailKey);
+      _googleDriveSessionDisplayName = prefs.getString(
+        _googleDriveSessionDisplayNameKey,
+      );
+      final int? driveSessionConnectedAt = prefs.getInt(
+        _googleDriveSessionConnectedAtKey,
+      );
+      _googleDriveSessionConnectedAt = driveSessionConnectedAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(driveSessionConnectedAt);
+      _googleDriveWasConnected =
+          prefs.getBool(_googleDriveSessionWasConnectedKey) ??
+          (_googleDriveSessionEmail != null);
+      _googleDriveAuthorizationKnown =
+          prefs.getBool(_googleDriveAuthorizationKnownKey) ?? false;
       await _loadPriceAlertSettings(prefs);
 
       if (mounted) setState(() => _bootstrapped = true);
@@ -2061,16 +2726,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await showDialog<void>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF101827),
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        titleTextStyle: const TextStyle(
-          color: Colors.white,
-          fontSize: 21,
-          fontWeight: FontWeight.w900,
-        ),
-        contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 6),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actionsAlignment: MainAxisAlignment.end,
         title: const Text('Umbral de recuperación'),
         content: SafeArea(
@@ -2090,21 +2745,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               decoration: const InputDecoration(
                 labelText: 'Puntos porcentuales',
                 helperText: 'Predeterminado: 2.0',
-                filled: true,
-                fillColor: Color(0xFF162033),
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.trending_up_outlined),
               ),
             ),
           ),
         ),
         actions: <Widget>[
           TextButton(
-            style: _alertsGhostButtonStyle,
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            style: _alertsPrimaryButtonStyle,
             onPressed: () async {
               final double? value = double.tryParse(controller.text.trim());
               if (value == null || value <= 0 || value > 100) return;
@@ -2131,16 +2782,6 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await showDialog<void>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF101827),
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        titleTextStyle: const TextStyle(
-          color: Colors.white,
-          fontSize: 21,
-          fontWeight: FontWeight.w900,
-        ),
-        contentPadding: const EdgeInsets.fromLTRB(22, 12, 22, 6),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actionsAlignment: MainAxisAlignment.end,
         title: const Text('Umbral'),
         content: SafeArea(
@@ -2160,21 +2801,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               decoration: const InputDecoration(
                 labelText: 'Umbral %',
                 helperText: 'Predeterminado: 2.0',
-                filled: true,
-                fillColor: Color(0xFF162033),
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.percent_outlined),
               ),
             ),
           ),
         ),
         actions: <Widget>[
           TextButton(
-            style: _alertsGhostButtonStyle,
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            style: _alertsPrimaryButtonStyle,
             onPressed: () async {
               final double? value = double.tryParse(controller.text.trim());
               if (value == null || value <= 0 || value > 100) return;
@@ -2616,7 +3253,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               decoration: const InputDecoration(
                 labelText: 'Porcentaje',
                 helperText: 'Ejemplo: 1.5',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.percent_outlined),
               ),
             ),
           ),
@@ -2672,7 +3309,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   ),
                   decoration: const InputDecoration(
                     labelText: 'Precio MXN',
-                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money_rounded),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -2850,7 +3487,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       initialValue: selectedType,
                       decoration: const InputDecoration(
                         labelText: 'Tipo',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.swap_vert_rounded),
                       ),
                       items: MovementType.values
                           .map(
@@ -2872,7 +3509,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       initialValue: selectedCoin,
                       decoration: const InputDecoration(
                         labelText: 'Moneda',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.currency_bitcoin),
                       ),
                       items: _coins
                           .map(
@@ -2949,7 +3586,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Cantidad cripto',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.token_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2960,7 +3597,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Precio unitario MXN',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.attach_money_rounded),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2971,7 +3608,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Comisión MXN',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.receipt_long_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2979,7 +3616,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       controller: sourceController,
                       decoration: const InputDecoration(
                         labelText: 'Plataforma',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.account_balance_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2998,7 +3635,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                     selectedType == MovementType.transferOut)
                             ? 'Ej.: Bitso, MetaMask, Binance, Coinbase u otra'
                             : null,
-                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(
+                          Icons.account_balance_wallet_outlined,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -3006,7 +3645,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       controller: networkController,
                       decoration: const InputDecoration(
                         labelText: 'Red',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.hub_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -3014,7 +3653,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       controller: noteController,
                       decoration: const InputDecoration(
                         labelText: 'Nota',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.notes_outlined),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -4272,7 +4911,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               maxLines: 14,
               decoration: const InputDecoration(
                 hintText: 'Pega aquí el contenido de tu copia',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.data_object_outlined),
               ),
             ),
           ),
@@ -4541,9 +5180,41 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   void _snack(BuildContext context, String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String normalized = message.toLowerCase();
+    final bool isError =
+        normalized.contains('no se pudo') ||
+        normalized.contains('pon ') ||
+        normalized.contains('inválid') ||
+        normalized.contains('inval') ||
+        normalized.contains('error');
+    final bool isWarning =
+        normalized.contains('revisa') ||
+        normalized.contains('debe') ||
+        normalized.contains('riesgo');
+    final Color tone = isError
+        ? colors.error
+        : isWarning
+        ? const Color(0xFFF59E0B)
+        : colors.primary;
+    final IconData icon = isError
+        ? Icons.error_outline_rounded
+        : isWarning
+        ? Icons.warning_amber_rounded
+        : Icons.check_circle_outline_rounded;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: colors.surfaceContainerHighest,
+        content: Row(
+          children: <Widget>[
+            Icon(icon, color: tone, size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -4557,6 +5228,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         debugShowCheckedModeBanner: false,
         title: 'CriptoControlMx',
         themeMode: _visualMode.themeMode,
+        themeAnimationDuration: const Duration(milliseconds: 260),
+        themeAnimationCurve: Curves.easeOutCubic,
         theme: ccmx.CcmxAppTheme.build(
           style: themeStyle,
           brightness: Brightness.light,
@@ -4592,6 +5265,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       debugShowCheckedModeBanner: false,
       title: 'CriptoControlMx',
       themeMode: _visualMode.themeMode,
+      themeAnimationDuration: const Duration(milliseconds: 260),
+      themeAnimationCurve: Curves.easeOutCubic,
       theme: ccmx.CcmxAppTheme.build(
         style: themeStyle,
         brightness: Brightness.light,
@@ -4876,7 +5551,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               hasLocalFirebaseDeviceId: _firebaseDeviceId != null,
               cloudStateUploadedAt: _cloudStateUploadedAt,
               cloudStateDownloadedAt: _cloudStateDownloadedAt,
-              googleAccountEmail: _googleAccount?.email,
+              googleAccountEmail:
+                  _googleAccount?.email ?? _googleDriveSessionEmail,
+              googleAccountDisplayName:
+                  _googleAccount?.displayName ?? _googleDriveSessionDisplayName,
+              googleDriveLastConnectedAt: _googleDriveSessionConnectedAt,
+              googleDriveWasConnected: _googleDriveWasConnected,
+              googleDriveSessionStatus: _googleDriveSessionStatus,
+              isGoogleDriveAuthorized: _isGoogleDriveAuthorized,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isFirebaseAuthBusy: _isFirebaseAuthBusy,
               isCloudUploading: _isCloudUploading,
@@ -4931,21 +5613,54 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               },
               onImportBackup: () => _importBackup(pageContext),
               onImportBackupFile: () => _importBackupFile(pageContext),
-              onSignInFirebaseWithGoogle: () =>
-                  _signInFirebaseWithGoogle(pageContext),
+              onSignInFirebaseWithGoogle: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'firebase_sign_in',
+                  () => _signInFirebaseWithGoogle(pageContext),
+                ),
+              ),
               onSignOutFirebase: () => _signOutFirebase(pageContext),
               onPrepareCloudProfile: () => _retryCloudProfile(pageContext),
               onUploadFinancialStateToFirebase: () =>
                   _uploadFinancialStateToFirebase(pageContext),
               onDownloadFinancialStateFromFirebase: () =>
                   _downloadFinancialStateFromFirebase(pageContext),
-              onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
-              onDisconnectGoogleDrive: () =>
-                  _disconnectGoogleDrive(pageContext),
-              onCreateGoogleDriveBackup: () =>
-                  _createGoogleDriveBackup(pageContext),
-              onRestoreGoogleDriveBackup: () =>
-                  _restoreGoogleDriveBackup(pageContext),
+              onConnectGoogleDrive: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  _googleDriveUserActionForConnect(),
+                  () => _connectGoogleDrive(pageContext),
+                ),
+              ),
+              onReconnectGoogleDrive: () => unawaited(
+                _runUserInitiatedDriveAuth('reconnect', () async {
+                  if (mounted) {
+                    setState(() {
+                      _googleAccount = null;
+                      _googleDriveSessionStatus =
+                          GoogleDriveSessionStatus.temporaryError;
+                    });
+                  }
+                  await _connectGoogleDrive(pageContext);
+                }),
+              ),
+              onDisconnectGoogleDrive: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'sign_out',
+                  () => _disconnectGoogleDrive(pageContext),
+                ),
+              ),
+              onCreateGoogleDriveBackup: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'backup_now',
+                  () => _createGoogleDriveBackup(pageContext),
+                ),
+              ),
+              onRestoreGoogleDriveBackup: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'restore_from_drive',
+                  () => _restoreGoogleDriveBackup(pageContext),
+                ),
+              ),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
@@ -5226,17 +5941,7 @@ class SummaryTab extends StatelessWidget {
   }
 }
 
-const Color _summarySurface = Color(0xFF0F1726);
-const Color _summaryElevated = Color(0xFF162033);
 const Color _summaryPurple = Color(0xFF8B5CF6);
-const Color _summaryBorder = Color(0x24FFFFFF);
-const List<Color> _summaryDistributionColors = <Color>[
-  Color(0xFF8B5CF6),
-  Color(0xFFF59E0B),
-  Color(0xFF22C55E),
-  Color(0xFF38BDF8),
-  Color(0xFFEC4899),
-];
 String _summaryMoney(double value, {int decimals = 0}) {
   final List<String> parts = value.abs().toStringAsFixed(decimals).split('.');
   final String digits = parts.first;
@@ -5249,14 +5954,38 @@ String _summaryMoney(double value, {int decimals = 0}) {
   return '${value < 0 ? '-' : ''}\$${grouped.toString()}$fraction MXN';
 }
 
-BoxDecoration _summaryBox({
-  Color color = _summarySurface,
+BoxDecoration _summaryTokenBox(
+  BuildContext context, {
+  Color? color,
   double radius = 13,
-}) => BoxDecoration(
-  color: color,
-  borderRadius: BorderRadius.circular(radius),
-  border: Border.all(color: _summaryBorder),
-);
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: tokens.shadowOpacity == 0
+        ? null
+        : <BoxShadow>[
+            BoxShadow(
+              color: tokens.shadow.withValues(alpha: tokens.shadowOpacity),
+              blurRadius: 18,
+              offset: const Offset(0, 9),
+            ),
+          ],
+  );
+}
+
+List<Color> _summaryDistributionPalette(BuildContext context) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return <Color>[
+    tokens.chartPrimary,
+    tokens.chartSecondary,
+    tokens.chartMarker,
+    tokens.primaryAccent.withValues(alpha: 0.72),
+    tokens.tertiaryAccent.withValues(alpha: 0.86),
+  ];
+}
 
 class _SummaryViewModeSwitcher extends StatelessWidget {
   final SummaryViewMode value;
@@ -5269,10 +5998,15 @@ class _SummaryViewModeSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return Container(
       height: 48,
       padding: const EdgeInsets.all(4),
-      decoration: _summaryBox(color: const Color(0xFF0B1220), radius: 13),
+      decoration: _summaryTokenBox(
+        context,
+        color: tokens.surfacePrimary,
+        radius: 13,
+      ),
       child: Row(
         children: SummaryViewMode.values.map((SummaryViewMode mode) {
           final bool selected = mode == value;
@@ -5284,11 +6018,13 @@ class _SummaryViewModeSwitcher extends StatelessWidget {
                 duration: const Duration(milliseconds: 180),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: selected ? _summaryPurple : Colors.transparent,
+                  color: selected
+                      ? tokens.selectedBackground
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(9),
                   boxShadow: selected
-                      ? const <BoxShadow>[
-                          BoxShadow(color: Color(0x357C3AED), blurRadius: 12),
+                      ? <BoxShadow>[
+                          BoxShadow(color: tokens.glowColor, blurRadius: 12),
                         ]
                       : null,
                 ),
@@ -5298,15 +6034,17 @@ class _SummaryViewModeSwitcher extends StatelessWidget {
                     Icon(
                       mode.icon,
                       size: 16,
-                      color: selected ? Colors.white : const Color(0xFF98A2B5),
+                      color: selected
+                          ? tokens.primaryAccent
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 7),
                     Text(
                       mode.label,
                       style: TextStyle(
                         color: selected
-                            ? Colors.white
-                            : const Color(0xFF98A2B5),
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
                       ),
@@ -5395,18 +6133,19 @@ class _SummaryQuickMetricsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final List<_SummaryQuickMetricData> metrics = <_SummaryQuickMetricData>[
       _SummaryQuickMetricData(
         'Valor actual',
         _summaryMoney(totals.currentValue),
         Icons.account_balance_wallet_outlined,
-        _summaryPurple,
+        tokens.primaryAccent,
       ),
       _SummaryQuickMetricData(
         'Invertido',
         _summaryMoney(totals.costBase),
         Icons.savings_outlined,
-        const Color(0xFF38BDF8),
+        tokens.chartSecondary,
       ),
       _SummaryQuickMetricData(
         'P&L no realizado',
@@ -5458,10 +6197,15 @@ class _SummaryQuickMetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return Container(
       height: 92,
       padding: const EdgeInsets.all(11),
-      decoration: _summaryBox(color: const Color(0xFF111A2B), radius: 12),
+      decoration: _summaryTokenBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 12,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -5521,7 +6265,7 @@ class _SummaryQuickEvolutionPanel extends StatelessWidget {
         (PortfolioSnapshot a, PortfolioSnapshot b) =>
             a.createdAt.compareTo(b.createdAt),
       );
-    final Color primary = Theme.of(context).colorScheme.primary;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
 
     return _SummaryPanel(
       icon: Icons.show_chart,
@@ -5569,7 +6313,7 @@ class _SummaryQuickEvolutionPanel extends StatelessWidget {
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'Valor actual',
-                  color: primary,
+                  color: tokens.chartPrimary,
                   values: ordered
                       .map((PortfolioSnapshot s) => s.totalCurrentValue)
                       .toList(),
@@ -5594,7 +6338,7 @@ class _SummaryQuickCoinRow extends StatelessWidget {
     return Container(
       height: 66,
       padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: _summaryBox(radius: 11),
+      decoration: _summaryTokenBox(context, radius: 11),
       child: Row(
         children: <Widget>[
           CoinLogo(coin: stats.coin, size: 30),
@@ -5680,6 +6424,7 @@ class _SummaryChartTypeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return OutlinedButton.icon(
       onPressed: () => _showSummaryChartTypeSheet(
         context,
@@ -5692,10 +6437,10 @@ class _SummaryChartTypeButton extends StatelessWidget {
         compact ? 'Tipo de gráfico' : 'Tipo de gráfico · ${value.label}',
       ),
       style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFFC4B5FD),
+        foregroundColor: tokens.primaryAccent,
         minimumSize: Size(0, compact ? 40 : 44),
         visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
-        side: const BorderSide(color: Color(0x447C3AED)),
+        side: BorderSide(color: tokens.selectedBorder),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
       ),
     );
@@ -5712,59 +6457,66 @@ Future<void> _showSummaryChartTypeSheet(
     context: context,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
-    builder: (BuildContext sheetContext) => Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF0B1220),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Tipo de gráfico',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 25,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Elige cómo representar la serie temporal actual.',
-              style: TextStyle(color: Color(0xFFB6BED0), fontSize: 16),
-            ),
-            const SizedBox(height: 14),
-            for (final SummaryChartType type in SummaryChartType.values)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _SummaryChartTypeOption(
-                  type: type,
-                  selected: value == type,
-                  enabled: type != SummaryChartType.candles || hasOhlc,
-                  onTap: () {
-                    onChanged(type);
-                    Navigator.of(sheetContext).pop();
-                  },
-                ),
-              ),
-          ],
+    builder: (BuildContext sheetContext) {
+      final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(
+        sheetContext,
+      );
+      final ColorScheme colors = Theme.of(sheetContext).colorScheme;
+      return Container(
+        decoration: BoxDecoration(
+          color: tokens.sheetBackground,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border(top: BorderSide(color: tokens.cardBorder)),
         ),
-      ),
-    ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: tokens.primaryAccent.withValues(alpha: 0.22),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Tipo de gráfico',
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: 25,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Elige cómo representar la serie temporal actual.',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 16),
+              ),
+              const SizedBox(height: 14),
+              for (final SummaryChartType type in SummaryChartType.values)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _SummaryChartTypeOption(
+                    type: type,
+                    selected: value == type,
+                    enabled: type != SummaryChartType.candles || hasOhlc,
+                    onTap: () {
+                      onChanged(type);
+                      Navigator.of(sheetContext).pop();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    },
   );
 }
 
@@ -5783,11 +6535,13 @@ class _SummaryChartTypeOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final Color accent = enabled
-        ? const Color(0xFF8B5CF6)
-        : const Color(0xFF586174);
+        ? tokens.primaryAccent
+        : colors.onSurfaceVariant.withValues(alpha: 0.62);
     return Material(
-      color: selected ? const Color(0xFF241A46) : const Color(0xFF111A2B),
+      color: selected ? tokens.selectedBackground : tokens.surfaceElevated,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: enabled ? onTap : null,
@@ -5798,7 +6552,7 @@ class _SummaryChartTypeOption extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? const Color(0x887C3AED) : _summaryBorder,
+              color: selected ? tokens.selectedBorder : tokens.cardBorder,
             ),
           ),
           child: Row(
@@ -5837,7 +6591,7 @@ class _SummaryChartTypeOption extends StatelessWidget {
                 ),
               ),
               if (selected)
-                const Icon(Icons.check_circle, color: _summaryPurple, size: 20),
+                Icon(Icons.check_circle, color: tokens.primaryAccent, size: 20),
             ],
           ),
         ),
@@ -5852,22 +6606,24 @@ class _SummaryMockupHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color resultColor = pnlColor(totals.unrealizedPL);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       height: 180,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF17213A), Color(0xFF211449)],
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x427C3AED)),
-        boxShadow: const <BoxShadow>[
+        border: Border.all(color: tokens.selectedBorder),
+        boxShadow: <BoxShadow>[
           BoxShadow(
-            color: Color(0x267C3AED),
+            color: tokens.glowColor,
             blurRadius: 22,
-            offset: Offset(0, 10),
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -5880,20 +6636,20 @@ class _SummaryMockupHero extends StatelessWidget {
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
+                  color: tokens.primaryAccent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(7),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.account_balance_wallet_outlined,
                   size: 14,
-                  color: Color(0xFFC4B5FD),
+                  color: tokens.primaryAccent,
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'Valor de cartera',
                 style: TextStyle(
-                  color: Color(0xFFD0D7E5),
+                  color: colors.onSurfaceVariant,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -5907,15 +6663,15 @@ class _SummaryMockupHero extends StatelessWidget {
             child: Text(
               _summaryMoney(totals.currentValue),
               maxLines: 1,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colors.onSurface,
                 fontSize: 30,
                 fontWeight: FontWeight.w800,
               ),
             ),
           ),
           const Spacer(),
-          Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+          Container(height: 1, color: tokens.divider),
           const SizedBox(height: 8),
           Row(
             children: <Widget>[
@@ -5923,9 +6679,12 @@ class _SummaryMockupHero extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    const Text(
+                    Text(
                       'P&L no realizado',
-                      style: TextStyle(color: Color(0xFFB6BED0), fontSize: 16),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 16,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -6032,48 +6791,56 @@ class _SummaryMiniMetricCard extends StatelessWidget {
     this.color = _summaryPurple,
   });
   @override
-  Widget build(BuildContext context) => Container(
-    height: 90,
-    padding: const EdgeInsets.all(10),
-    decoration: _summaryBox(radius: 12),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 2,
-                style: const TextStyle(
-                  color: Color(0xFFB6BED0),
-                  fontSize: 14,
-                  height: 1.05,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final Color resolvedColor = color == _summaryPurple
+        ? tokens.primaryAccent
+        : color;
+    return Container(
+      height: 90,
+      padding: const EdgeInsets.all(10),
+      decoration: _summaryTokenBox(context, radius: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(icon, size: 14, color: resolvedColor),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  style: const TextStyle(
+                    color: Color(0xFFB6BED0),
+                    fontSize: 14,
+                    height: 1.05,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-        const Spacer(),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: TextStyle(
-              color: color == _summaryPurple ? Colors.white : color,
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
+            ],
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: color == _summaryPurple
+                    ? Theme.of(context).colorScheme.onSurface
+                    : resolvedColor,
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _SummaryDistributionPanel extends StatelessWidget {
@@ -6085,6 +6852,7 @@ class _SummaryDistributionPanel extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
+    final List<Color> distributionColors = _summaryDistributionPalette(context);
     final List<CoinStats> valued = positions
         .where((CoinStats item) => item.currentValue > 0)
         .take(5)
@@ -6110,9 +6878,7 @@ class _SummaryDistributionPanel extends StatelessWidget {
                       share: totalValue > 0
                           ? valued[i].currentValue / totalValue
                           : 0,
-                      color:
-                          _summaryDistributionColors[i %
-                              _summaryDistributionColors.length],
+                      color: distributionColors[i % distributionColors.length],
                     ),
                   ),
               ],
@@ -6340,7 +7106,7 @@ class _SummaryCompactCoinTile extends StatelessWidget {
     final Color resultColor = pnlColor(stats.unrealizedPL);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 11, 12, 8),
-      decoration: _summaryBox(),
+      decoration: _summaryTokenBox(context),
       child: Column(
         children: <Widget>[
           Row(
@@ -6562,42 +7328,46 @@ class _SummaryTinyMetric extends StatelessWidget {
     this.valueFontSize = 14,
   });
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 58),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-    decoration: _summaryBox(
-      color: _summaryElevated.withValues(alpha: 0.72),
-      radius: 8,
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          label,
-          maxLines: 2,
-          style: const TextStyle(
-            color: Color(0xFFAAB3C5),
-            fontSize: 13,
-            height: 1.05,
-          ),
-        ),
-        const SizedBox(height: 2),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: TextStyle(
-              color: color ?? const Color(0xFFDCE3F0),
-              fontSize: valueFontSize,
-              fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 58),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: _summaryTokenBox(
+        context,
+        color: tokens.surfaceElevated.withValues(alpha: 0.72),
+        radius: 8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 2,
+            style: const TextStyle(
+              color: Color(0xFFAAB3C5),
+              fontSize: 13,
+              height: 1.05,
             ),
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: color ?? const Color(0xFFDCE3F0),
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _SummaryCompactNotice extends StatelessWidget {
@@ -6616,7 +7386,7 @@ class _SummaryCompactNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(11),
-    decoration: _summaryBox(radius: 12),
+    decoration: _summaryTokenBox(context, radius: 12),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
@@ -6699,36 +7469,39 @@ class _SummaryPanel extends StatelessWidget {
     this.titleFontSize = 16,
   });
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(12),
-    decoration: _summaryBox(),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(icon, size: 16, color: _summaryPurple),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: titleFontSize,
-                  fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: _summaryTokenBox(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 16, color: tokens.primaryAccent),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: titleFontSize,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-            ),
-            if (trailing != null) trailing!,
-          ],
-        ),
-        const SizedBox(height: 10),
-        child,
-      ],
-    ),
-  );
+              if (trailing != null) trailing!,
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
 }
 
 class _SummaryWelcomePanel extends StatelessWidget {
@@ -8265,12 +9038,15 @@ class _MovementsTabState extends State<MovementsTab> {
               Container(
                 width: double.infinity,
                 constraints: const BoxConstraints(maxHeight: 180),
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
+                  color: Theme.of(
+                    sheetContext,
+                  ).colorScheme.surfaceContainerHighest,
                   border: Border.all(
                     color: Theme.of(sheetContext).colorScheme.outlineVariant,
                   ),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: SingleChildScrollView(
                   child: SelectableText(
@@ -8513,7 +9289,7 @@ class _MovementsTabState extends State<MovementsTab> {
                       initialValue: _coinFilter,
                       decoration: const InputDecoration(
                         labelText: 'Moneda',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.currency_bitcoin),
                       ),
                       items: <DropdownMenuItem<String>>[
                         const DropdownMenuItem<String>(
@@ -8538,7 +9314,7 @@ class _MovementsTabState extends State<MovementsTab> {
                       initialValue: _typeFilter,
                       decoration: const InputDecoration(
                         labelText: 'Tipo',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.swap_vert_rounded),
                       ),
                       items: <DropdownMenuItem<String>>[
                         const DropdownMenuItem<String>(
@@ -8568,7 +9344,6 @@ class _MovementsTabState extends State<MovementsTab> {
             decoration: const InputDecoration(
               labelText: 'Buscar',
               prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 12),
@@ -8655,21 +9430,34 @@ class _MovementsTabState extends State<MovementsTab> {
                     if (value == 'edit') _editMovement(m);
                     if (value == 'delete') _confirmDeleteMovement(context, m);
                   },
-                  itemBuilder: (BuildContext context) =>
-                      const <PopupMenuEntry<String>>[
-                        PopupMenuItem<String>(
-                          value: 'details',
-                          child: Text('Ver detalle'),
+                  itemBuilder: (BuildContext context) {
+                    final ColorScheme colors = Theme.of(context).colorScheme;
+                    return <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
+                        value: 'details',
+                        child: _PopupActionLabel(
+                          icon: Icons.visibility_outlined,
+                          label: 'Ver detalle',
                         ),
-                        PopupMenuItem<String>(
-                          value: 'edit',
-                          child: Text('Editar'),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'edit',
+                        child: _PopupActionLabel(
+                          icon: Icons.edit_outlined,
+                          label: 'Editar',
                         ),
-                        PopupMenuItem<String>(
-                          value: 'delete',
-                          child: Text('Borrar'),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: _PopupActionLabel(
+                          icon: Icons.delete_outline,
+                          label: 'Borrar',
+                          color: colors.error,
                         ),
-                      ],
+                      ),
+                    ];
+                  },
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -8824,6 +9612,9 @@ class _SimulationTabState extends State<SimulationTab> {
     String? suffixText,
     String? helperText,
   }) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final inputTheme = Theme.of(context).inputDecorationTheme;
+
     return InputDecoration(
       isDense: false,
       labelText: label,
@@ -8832,53 +9623,55 @@ class _SimulationTabState extends State<SimulationTab> {
       prefixText: prefixText,
       suffixText: suffixText,
       helperText: helperText,
-      prefixStyle: const TextStyle(
-        color: Color(0xFFE2E8F0),
+      prefixStyle: TextStyle(
+        color: colors.onSurface,
         fontSize: 15,
         fontWeight: FontWeight.w700,
-        fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
       ),
-      suffixStyle: const TextStyle(
-        color: Color(0xFFB7C0D4),
+      suffixStyle: TextStyle(
+        color: colors.onSurfaceVariant,
         fontSize: 14,
         fontWeight: FontWeight.w700,
-        fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
       ),
-      helperStyle: const TextStyle(
-        color: Color(0xFFB7C0D4),
+      helperStyle: TextStyle(
+        color: colors.onSurfaceVariant,
         fontSize: 12,
         fontWeight: FontWeight.w600,
-        fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
       ),
       filled: true,
-      fillColor: const Color(0xFF111A2A),
+      fillColor: inputTheme.fillColor ?? colors.surfaceContainerHighest,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+        borderSide: BorderSide(color: colors.outlineVariant),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+        borderSide: BorderSide(color: colors.outlineVariant),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 1.4),
+        borderSide: BorderSide(color: colors.primary, width: 1.4),
       ),
     );
   }
 
   Widget _simulationQuickChip(String label, VoidCallback onPressed) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
     return ConstrainedBox(
       constraints: const BoxConstraints(minWidth: 74, minHeight: 36),
       child: ActionChip(
         label: Center(child: Text(label)),
         onPressed: onPressed,
-        backgroundColor: const Color(0x1A8B5CF6),
-        side: const BorderSide(color: Color(0x248B5CF6)),
+        backgroundColor: colors.primaryContainer.withValues(alpha: 0.56),
+        side: BorderSide(color: colors.primary.withValues(alpha: 0.22)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        labelStyle: const TextStyle(
-          color: Color(0xFFE9D5FF),
+        labelStyle: TextStyle(
+          color: colors.onPrimaryContainer,
           fontSize: 13,
           fontWeight: FontWeight.w800,
         ),
@@ -8962,6 +9755,22 @@ class _SimulationTabState extends State<SimulationTab> {
     );
   }
 
+  int _currentStrategyScore(bool valid) {
+    if (!valid) return 0;
+    return switch (_mode) {
+      SimulationMode.rotation => 82,
+      SimulationMode.operation =>
+        _operationMode == OperationSimulationMode.buy ? 76 : 70,
+    };
+  }
+
+  String _strategyLabelForScore(int score) {
+    if (score >= 80) return 'Alta prioridad';
+    if (score >= 70) return 'Interesante';
+    if (score >= 55) return 'Revisar';
+    return 'No prioritaria';
+  }
+
   Future<void> _saveCurrentSimulation({
     required bool valid,
     required String primaryLabel,
@@ -8986,6 +9795,8 @@ class _SimulationTabState extends State<SimulationTab> {
         feeLabel: _activeFeeLabel,
         primaryLabel: primaryLabel,
         primaryValue: primaryValue,
+        strategyScore: _currentStrategyScore(valid),
+        strategyLabel: _strategyLabelForScore(_currentStrategyScore(valid)),
       ),
     );
     if (!mounted) return;
@@ -9058,6 +9869,7 @@ class _SimulationTabState extends State<SimulationTab> {
       );
       return;
     }
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -9182,133 +9994,133 @@ class _SimulationTabState extends State<SimulationTab> {
 
     return PremiumScaffoldSurface(
       child: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      children: <Widget>[
-        _SimulationHero(
-          title: 'Simular',
-          subtitle: 'Calculadora profesional para escenarios de cartera.',
-          selectedAsset: _simulationPairLabel,
-          scenario: _simulationScenarioLabel,
-          operationType: _modeLabel,
-          feeLabel: _activeFeeLabel,
-          savedCount: _savedSimulations.length,
-          accentColor:
-              _mode == SimulationMode.operation &&
-                  _operationMode == OperationSimulationMode.sell
-              ? const Color(0xFFF87171)
-              : const Color(0xFF8B5CF6),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.end,
-            children: <Widget>[
-              OutlinedButton.icon(
-                onPressed:
-                    _savedSimulations.isEmpty ? null : _showSavedSimulations,
-                icon: const Icon(Icons.history_outlined),
-                label: Text('Historial (${_savedSimulations.length})'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Color(0x338B5CF6)),
-                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: _savedSimulations.length < 2
-                    ? null
-                    : _showSimulationComparator,
-                icon: const Icon(Icons.compare_arrows_outlined),
-                label: const Text('Comparar'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Color(0x338B5CF6)),
-                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ],
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: <Widget>[
+          _SimulationHero(
+            title: 'Simular',
+            subtitle: 'Calculadora profesional para escenarios de cartera.',
+            selectedAsset: _simulationPairLabel,
+            scenario: _simulationScenarioLabel,
+            operationType: _modeLabel,
+            feeLabel: _activeFeeLabel,
+            savedCount: _savedSimulations.length,
+            accentColor:
+                _mode == SimulationMode.operation &&
+                    _operationMode == OperationSimulationMode.sell
+                ? const Color(0xFFF87171)
+                : const Color(0xFF8B5CF6),
           ),
-        ),
-        const SizedBox(height: 8),
-        PremiumSegmentShell(
-          child: SegmentedButton<SimulationMode>(
-            segments: const <ButtonSegment<SimulationMode>>[
-              ButtonSegment<SimulationMode>(
-                value: SimulationMode.operation,
-                label: Text('Operación'),
-                icon: Icon(Icons.calculate_outlined),
-              ),
-              ButtonSegment<SimulationMode>(
-                value: SimulationMode.rotation,
-                label: Text('Rotar'),
-                icon: Icon(Icons.sync_alt),
-              ),
-            ],
-            selected: <SimulationMode>{_mode},
-            onSelectionChanged: (Set<SimulationMode> value) {
-              setState(() => _mode = value.first);
-            },
-          ),
-        ),
-        if (_mode == SimulationMode.operation) ...<Widget>[
           const SizedBox(height: 8),
-          PremiumSegmentShell(
-            child: SegmentedButton<OperationSimulationMode>(
-              segments: const <ButtonSegment<OperationSimulationMode>>[
-                ButtonSegment<OperationSimulationMode>(
-                  value: OperationSimulationMode.buy,
-                  label: Text('Compra'),
-                  icon: Icon(Icons.add_circle_outline),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: <Widget>[
+                OutlinedButton.icon(
+                  onPressed:
+                      _savedSimulations.isEmpty ? null : _showSavedSimulations,
+                  icon: const Icon(Icons.history_outlined),
+                  label: Text('Historial (${_savedSimulations.length})'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x338B5CF6)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
-                ButtonSegment<OperationSimulationMode>(
-                  value: OperationSimulationMode.sell,
-                  label: Text('Venta'),
-                  icon: Icon(Icons.remove_circle_outline),
+                OutlinedButton.icon(
+                  onPressed: _savedSimulations.length < 2
+                      ? null
+                      : _showSimulationComparator,
+                  icon: const Icon(Icons.compare_arrows_outlined),
+                  label: const Text('Comparar'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x338B5CF6)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
               ],
-              selected: <OperationSimulationMode>{_operationMode},
-              onSelectionChanged: (Set<OperationSimulationMode> value) {
-                setState(() => _operationMode = value.first);
+            ),
+          ),
+          const SizedBox(height: 8),
+          PremiumSegmentShell(
+            child: SegmentedButton<SimulationMode>(
+              segments: const <ButtonSegment<SimulationMode>>[
+                ButtonSegment<SimulationMode>(
+                  value: SimulationMode.operation,
+                  label: Text('Operación'),
+                  icon: Icon(Icons.calculate_outlined),
+                ),
+                ButtonSegment<SimulationMode>(
+                  value: SimulationMode.rotation,
+                  label: Text('Rotar'),
+                  icon: Icon(Icons.sync_alt),
+                ),
+              ],
+              selected: <SimulationMode>{_mode},
+              onSelectionChanged: (Set<SimulationMode> value) {
+                setState(() => _mode = value.first);
+              },
+            ),
+          ),
+          if (_mode == SimulationMode.operation) ...<Widget>[
+            const SizedBox(height: 8),
+            PremiumSegmentShell(
+              child: SegmentedButton<OperationSimulationMode>(
+                segments: const <ButtonSegment<OperationSimulationMode>>[
+                  ButtonSegment<OperationSimulationMode>(
+                    value: OperationSimulationMode.buy,
+                    label: Text('Compra'),
+                    icon: Icon(Icons.add_circle_outline),
+                  ),
+                  ButtonSegment<OperationSimulationMode>(
+                    value: OperationSimulationMode.sell,
+                    label: Text('Venta'),
+                    icon: Icon(Icons.remove_circle_outline),
+                  ),
+                ],
+                selected: <OperationSimulationMode>{_operationMode},
+                onSelectionChanged: (Set<OperationSimulationMode> value) {
+                  setState(() => _operationMode = value.first);
+                },
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.025),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: Column(
+              key: ValueKey<String>('${_mode.name}-${_operationMode.name}'),
+              children: switch (_mode) {
+                SimulationMode.operation =>
+                  _operationMode == OperationSimulationMode.buy
+                      ? _buildBuyMode(buyStats, buyResult)
+                      : _buildSellMode(sellStats, sellResult),
+                SimulationMode.rotation => _buildRotationMode(
+                  rotationOriginStats,
+                  rotationTargetStats,
+                  rotationResult,
+                ),
               },
             ),
           ),
         ],
-        const SizedBox(height: 8),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (Widget child, Animation<double> animation) {
-            return FadeTransition(
-              opacity: animation,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 0.025),
-                  end: Offset.zero,
-                ).animate(animation),
-                child: child,
-              ),
-            );
-          },
-          child: Column(
-            key: ValueKey<String>('${_mode.name}-${_operationMode.name}'),
-            children: switch (_mode) {
-              SimulationMode.operation =>
-                _operationMode == OperationSimulationMode.buy
-                    ? _buildBuyMode(buyStats, buyResult)
-                    : _buildSellMode(sellStats, sellResult),
-              SimulationMode.rotation => _buildRotationMode(
-                rotationOriginStats,
-                rotationTargetStats,
-                rotationResult,
-              ),
-            },
-          ),
-        ),
-      ],
       ),
     );
   }
@@ -9585,11 +10397,10 @@ class _SimulationTabState extends State<SimulationTab> {
                 children: <Widget>[
                   for (final double value in _quickPercentValues)
                     _simulationQuickChip(pct(value), () {
-                        setState(
-                          () => _sellPercentController.text = compact(value),
-                        );
-                      },
-                    ),
+                      setState(
+                        () => _sellPercentController.text = compact(value),
+                      );
+                    }),
                 ],
               ),
             ],
@@ -9910,12 +10721,10 @@ class _SimulationTabState extends State<SimulationTab> {
                 children: <Widget>[
                   for (final double value in _quickPercentValues)
                     _simulationQuickChip(pct(value), () {
-                        setState(
-                          () =>
-                              _rotationPercentController.text = compact(value),
-                        );
-                      },
-                    ),
+                      setState(
+                        () => _rotationPercentController.text = compact(value),
+                      );
+                    }),
                 ],
               ),
             ],
@@ -10020,121 +10829,121 @@ class _SimulationTabState extends State<SimulationTab> {
           subtitle: 'Venta simulada y compra proyectada.',
           icon: Icons.receipt_long_outlined,
           child: result.valid
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'Venta simulada de $_rotationOriginCoin',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  InfoLine(
-                    '$_rotationOriginCoin vendido',
-                    _simulationCrypto(result.originQuantitySold),
-                  ),
-                  InfoLine(
-                    'Venta bruta $_rotationOriginCoin',
-                    _simulationMoney(result.originGrossSale),
-                  ),
-                  InfoLine(
-                    'Comisión venta $_rotationOriginCoin',
-                    _simulationMoney(result.originSellCommission),
-                  ),
-                  InfoLine(
-                    'Neto disponible',
-                    _simulationMoney(result.netAvailable),
-                  ),
-                  InfoLine(
-                    'Costo base removido $_rotationOriginCoin',
-                    _simulationMoney(result.originRemovedAverageCost),
-                  ),
-                  InfoLine(
-                    'Promedio $_rotationOriginCoin removido',
-                    '\$${result.originRemovedAveragePrice.toStringAsFixed(2)}'
-                        '/$_rotationOriginCoin',
-                  ),
-                  InfoLine(
-                    'P&L realizado estimado',
-                    _simulationMoney(result.originRealizedPLEstimate),
-                    valueColor: pnlColor(result.originRealizedPLEstimate),
-                    emphasized: true,
-                  ),
-                  InfoLine(
-                    '$_rotationOriginCoin restante',
-                    _simulationCrypto(result.originQuantityRemaining),
-                  ),
-                  InfoLine(
-                    'Costo base restante $_rotationOriginCoin',
-                    _simulationMoney(result.originCostBaseRemaining),
-                  ),
-                  InfoLine(
-                    'Promedio restante $_rotationOriginCoin',
-                    _simulationMoney(result.originAvgRemaining),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Compra simulada de $_rotationTargetCoin',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  InfoLine(
-                    'Comisión compra $_rotationTargetCoin',
-                    _simulationMoney(result.targetBuyCommission),
-                  ),
-                  InfoLine(
-                    'Capital convertido $_rotationTargetCoin',
-                    _simulationMoney(result.targetConvertedCapital),
-                  ),
-                  InfoLine(
-                    '$_rotationTargetCoin comprado',
-                    _simulationCrypto(result.targetQuantityBought),
-                  ),
-                  InfoLine(
-                    '$_rotationTargetCoin después',
-                    _simulationCrypto(result.targetBalanceAfter),
-                  ),
-                  InfoLine(
-                    'Promedio $_rotationTargetCoin antes',
-                    _simulationMoney(result.targetAvgBefore),
-                  ),
-                  InfoLine(
-                    'Promedio $_rotationTargetCoin después',
-                    _simulationMoney(result.targetAvgAfter),
-                    emphasized: true,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Resultado de rotación',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  InfoLine(
-                    'Costo base $_rotationTargetCoin después',
-                    _simulationMoney(result.targetCostBaseAfter),
-                  ),
-                  InfoLine(
-                    'Break even $_rotationTargetCoin después',
-                    _simulationMoney(result.targetBreakEvenAfter),
-                  ),
-                  InfoLine(
-                    'Faltante a break even',
-                    _percentOrNa(result.targetDistanceToBreakEvenPct),
-                    valueColor: result.targetDistanceToBreakEvenPct == null
-                        ? null
-                        : pnlColor(-result.targetDistanceToBreakEvenPct!),
-                  ),
-                  InfoLine(
-                    'Comisiones totales',
-                    _simulationMoney(result.totalCommissions),
-                    emphasized: true,
-                  ),
-                  if (result.warnings.isNotEmpty) ...<Widget>[
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      'Venta simulada de $_rotationOriginCoin',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     const SizedBox(height: 8),
-                    ...result.warnings.map(_warningLine),
+                    InfoLine(
+                      '$_rotationOriginCoin vendido',
+                      _simulationCrypto(result.originQuantitySold),
+                    ),
+                    InfoLine(
+                      'Venta bruta $_rotationOriginCoin',
+                      _simulationMoney(result.originGrossSale),
+                    ),
+                    InfoLine(
+                      'Comisión venta $_rotationOriginCoin',
+                      _simulationMoney(result.originSellCommission),
+                    ),
+                    InfoLine(
+                      'Neto disponible',
+                      _simulationMoney(result.netAvailable),
+                    ),
+                    InfoLine(
+                      'Costo base removido $_rotationOriginCoin',
+                      _simulationMoney(result.originRemovedAverageCost),
+                    ),
+                    InfoLine(
+                      'Promedio $_rotationOriginCoin removido',
+                      '\$${result.originRemovedAveragePrice.toStringAsFixed(2)}'
+                          '/$_rotationOriginCoin',
+                    ),
+                    InfoLine(
+                      'P&L realizado estimado',
+                      _simulationMoney(result.originRealizedPLEstimate),
+                      valueColor: pnlColor(result.originRealizedPLEstimate),
+                      emphasized: true,
+                    ),
+                    InfoLine(
+                      '$_rotationOriginCoin restante',
+                      _simulationCrypto(result.originQuantityRemaining),
+                    ),
+                    InfoLine(
+                      'Costo base restante $_rotationOriginCoin',
+                      _simulationMoney(result.originCostBaseRemaining),
+                    ),
+                    InfoLine(
+                      'Promedio restante $_rotationOriginCoin',
+                      _simulationMoney(result.originAvgRemaining),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Compra simulada de $_rotationTargetCoin',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    InfoLine(
+                      'Comisión compra $_rotationTargetCoin',
+                      _simulationMoney(result.targetBuyCommission),
+                    ),
+                    InfoLine(
+                      'Capital convertido $_rotationTargetCoin',
+                      _simulationMoney(result.targetConvertedCapital),
+                    ),
+                    InfoLine(
+                      '$_rotationTargetCoin comprado',
+                      _simulationCrypto(result.targetQuantityBought),
+                    ),
+                    InfoLine(
+                      '$_rotationTargetCoin después',
+                      _simulationCrypto(result.targetBalanceAfter),
+                    ),
+                    InfoLine(
+                      'Promedio $_rotationTargetCoin antes',
+                      _simulationMoney(result.targetAvgBefore),
+                    ),
+                    InfoLine(
+                      'Promedio $_rotationTargetCoin después',
+                      _simulationMoney(result.targetAvgAfter),
+                      emphasized: true,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Resultado de rotación',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    InfoLine(
+                      'Costo base $_rotationTargetCoin después',
+                      _simulationMoney(result.targetCostBaseAfter),
+                    ),
+                    InfoLine(
+                      'Break even $_rotationTargetCoin después',
+                      _simulationMoney(result.targetBreakEvenAfter),
+                    ),
+                    InfoLine(
+                      'Faltante a break even',
+                      _percentOrNa(result.targetDistanceToBreakEvenPct),
+                      valueColor: result.targetDistanceToBreakEvenPct == null
+                          ? null
+                          : pnlColor(-result.targetDistanceToBreakEvenPct!),
+                    ),
+                    InfoLine(
+                      'Comisiones totales',
+                      _simulationMoney(result.totalCommissions),
+                      emphasized: true,
+                    ),
+                    if (result.warnings.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 8),
+                      ...result.warnings.map(_warningLine),
+                    ],
                   ],
-                ],
-              )
-            : const SizedBox.shrink(),
+                )
+              : const SizedBox.shrink(),
         ),
       ] else if (result.warnings.isNotEmpty) ...<Widget>[
         const SizedBox(height: 8),
@@ -10553,7 +11362,6 @@ class _SimulationTabState extends State<SimulationTab> {
 }
 
 const Color _simulationSurface = Color(0xFF101827);
-const Color _simulationElevated = Color(0xFF162033);
 const TextStyle _simulationInputTextStyle = TextStyle(
   color: Colors.white,
   fontSize: 15,
@@ -10593,6 +11401,19 @@ BoxDecoration _simulationBox({
   );
 }
 
+BoxDecoration _simulationTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+  );
+}
+
 class _SimulationHero extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -10616,6 +11437,8 @@ class _SimulationHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final String animationKey =
         '$selectedAsset|$scenario|$operationType|$feeLabel';
 
@@ -10640,10 +11463,10 @@ class _SimulationHero extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: accentColor.withValues(alpha: 0.36)),
+          border: Border.all(color: tokens.selectedBorder),
           boxShadow: <BoxShadow>[
             BoxShadow(
-              color: accentColor.withValues(alpha: 0.14),
+              color: tokens.glowColor,
               blurRadius: 24,
               offset: const Offset(0, 14),
             ),
@@ -10652,9 +11475,9 @@ class _SimulationHero extends StatelessWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: <Color>[
-              Color.lerp(const Color(0xFF1B1640), accentColor, 0.10)!,
-              const Color(0xFF111A2A),
-              const Color(0xFF0B1020),
+              tokens.gradientStart,
+              tokens.surfaceElevated,
+              tokens.backgroundSecondary,
             ],
           ),
         ),
@@ -10666,7 +11489,7 @@ class _SimulationHero extends StatelessWidget {
                 right: -42,
                 top: -48,
                 child: _SimulationHeroGlow(
-                  color: accentColor,
+                  color: tokens.primaryAccent,
                   size: 132,
                   opacity: 0.18,
                 ),
@@ -10698,16 +11521,20 @@ class _SimulationHero extends StatelessWidget {
                                     vertical: 5,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: accentColor.withValues(alpha: 0.16),
+                                    color: tokens.primaryAccent.withValues(
+                                      alpha: 0.16,
+                                    ),
                                     borderRadius: BorderRadius.circular(999),
                                     border: Border.all(
-                                      color: accentColor.withValues(alpha: 0.36),
+                                      color: tokens.selectedBorder.withValues(
+                                        alpha: 0.42,
+                                      ),
                                     ),
                                   ),
                                   child: Text(
                                     'FASE 4.1',
                                     style: TextStyle(
-                                      color: accentColor,
+                                      color: tokens.primaryAccent,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w900,
                                       letterSpacing: 0.6,
@@ -10715,13 +11542,13 @@ class _SimulationHero extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                const Expanded(
+                                Expanded(
                                   child: Text(
                                     'Overlay activo',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      color: Color(0xFFC2BCD9),
+                                      color: colors.onSurfaceVariant,
                                       fontSize: 12,
                                       fontWeight: FontWeight.w800,
                                     ),
@@ -10732,8 +11559,8 @@ class _SimulationHero extends StatelessWidget {
                             const SizedBox(height: 8),
                             Text(
                               title,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: colors.onSurface,
                                 fontSize: 25,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: -0.3,
@@ -10742,8 +11569,8 @@ class _SimulationHero extends StatelessWidget {
                             const SizedBox(height: 3),
                             Text(
                               subtitle,
-                              style: const TextStyle(
-                                color: Color(0xFFC2BCD9),
+                              style: TextStyle(
+                                color: colors.onSurfaceVariant,
                                 fontSize: 13,
                                 height: 1.25,
                               ),
@@ -10772,10 +11599,12 @@ class _SimulationHero extends StatelessWidget {
                           height: 46,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: accentColor.withValues(alpha: 0.15),
+                            color: tokens.primaryAccent.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(15),
                             border: Border.all(
-                              color: accentColor.withValues(alpha: 0.32),
+                              color: tokens.selectedBorder.withValues(
+                                alpha: 0.42,
+                              ),
                             ),
                           ),
                           child: Icon(
@@ -10784,7 +11613,7 @@ class _SimulationHero extends StatelessWidget {
                                 : operationType.contains('Rotación')
                                 ? Icons.sync_alt
                                 : Icons.trending_up,
-                            color: accentColor,
+                            color: tokens.primaryAccent,
                             size: 26,
                           ),
                         ),
@@ -10920,24 +11749,26 @@ class _SimulationPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: _simulationBox(),
+      decoration: _simulationTokenBox(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(icon, size: 18, color: const Color(0xFFC4B5FD)),
+              Icon(icon, size: 18, color: tokens.primaryAccent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: colors.onSurface,
                     fontSize: 19,
                     fontWeight: FontWeight.w900,
                   ),
@@ -10948,8 +11779,8 @@ class _SimulationPanel extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: Color(0xFFB7C0D4),
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
               fontSize: 14,
               height: 1.3,
             ),
@@ -11010,13 +11841,15 @@ class _SimulationResultPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color resolvedAccent = valid ? accentColor : const Color(0xFFF59E0B);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _simulationElevated,
+        color: tokens.surfaceElevated,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: resolvedAccent.withValues(alpha: 0.30)),
       ),
@@ -11030,8 +11863,8 @@ class _SimulationResultPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: colors.onSurface,
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
                   ),
@@ -11067,8 +11900,8 @@ class _SimulationResultPanel extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: Color(0xFFB7C0D4),
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
               fontSize: 14,
               height: 1.3,
             ),
@@ -11077,7 +11910,11 @@ class _SimulationResultPanel extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
-            decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 14),
+            decoration: _simulationTokenBox(
+              context,
+              color: tokens.surfacePrimary,
+              radius: 14,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -11096,17 +11933,17 @@ class _SimulationResultPanel extends StatelessWidget {
                   switchOutCurve: Curves.easeOutCubic,
                   transitionBuilder:
                       (Widget child, Animation<double> animation) {
-                    return FadeTransition(
-                      opacity: animation,
-                      child: SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0, 0.10),
-                          end: Offset.zero,
-                        ).animate(animation),
-                        child: child,
-                      ),
-                    );
-                  },
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.10),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        );
+                      },
                   child: FittedBox(
                     key: ValueKey<String>(primaryValue),
                     fit: BoxFit.scaleDown,
@@ -11165,11 +12002,12 @@ class _SimulationResultModalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 540, maxHeight: 720),
       child: Container(
         decoration: BoxDecoration(
-          color: _simulationElevated,
+          color: tokens.surfaceElevated,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: accentColor.withValues(alpha: 0.38)),
           boxShadow: <BoxShadow>[
@@ -11345,6 +12183,52 @@ class _SimulationResultModalCard extends StatelessWidget {
 }
 
 
+
+class _SimulationStrategyBadge extends StatelessWidget {
+  final int score;
+  final String label;
+  final Color color;
+
+  const _SimulationStrategyBadge({
+    required this.score,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String text = score <= 0 ? label : '$score/100 · $label';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(Icons.query_stats_outlined, color: color, size: 16),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _SavedSimulationRecord {
   final String id;
   final DateTime createdAt;
@@ -11354,6 +12238,8 @@ class _SavedSimulationRecord {
   final String feeLabel;
   final String primaryLabel;
   final String primaryValue;
+  final int strategyScore;
+  final String strategyLabel;
 
   const _SavedSimulationRecord({
     required this.id,
@@ -11364,6 +12250,8 @@ class _SavedSimulationRecord {
     required this.feeLabel,
     required this.primaryLabel,
     required this.primaryValue,
+    this.strategyScore = 0,
+    this.strategyLabel = 'Sin score',
   });
 
   Map<String, Object> toJson() => <String, Object>{
@@ -11375,6 +12263,8 @@ class _SavedSimulationRecord {
     'feeLabel': feeLabel,
     'primaryLabel': primaryLabel,
     'primaryValue': primaryValue,
+    'strategyScore': strategyScore,
+    'strategyLabel': strategyLabel,
   };
 
   _SavedSimulationRecord copyAsNew() => _SavedSimulationRecord(
@@ -11386,6 +12276,8 @@ class _SavedSimulationRecord {
     feeLabel: feeLabel,
     primaryLabel: primaryLabel,
     primaryValue: primaryValue,
+    strategyScore: strategyScore,
+    strategyLabel: strategyLabel,
   );
 
   static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
@@ -11403,6 +12295,9 @@ class _SavedSimulationRecord {
       feeLabel: (json['feeLabel'] ?? '').toString(),
       primaryLabel: (json['primaryLabel'] ?? '').toString(),
       primaryValue: (json['primaryValue'] ?? '').toString(),
+      strategyScore:
+          int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
+      strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
     );
   }
 }
@@ -11420,6 +12315,7 @@ class _SavedSimulationsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final double maxHeight = MediaQuery.sizeOf(context).height * 0.82;
     return SafeArea(
       child: Align(
@@ -11429,7 +12325,7 @@ class _SavedSimulationsSheet extends StatelessWidget {
           child: Container(
             margin: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _simulationElevated,
+              color: tokens.surfaceElevated,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: const Color(0x338B5CF6)),
               boxShadow: <BoxShadow>[
@@ -11513,6 +12409,7 @@ class _SavedSimulationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return Container(
       decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
       padding: const EdgeInsets.all(12),
@@ -11558,11 +12455,17 @@ class _SavedSimulationCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    _SimulationStrategyBadge(
+                      score: record.strategyScore,
+                      label: record.strategyLabel,
+                      color: const Color(0xFFC4B5FD),
+                    ),
                   ],
                 ),
               ),
               PopupMenuButton<String>(
-                color: _simulationElevated,
+                color: tokens.surfaceElevated,
                 iconColor: Colors.white,
                 onSelected: (String value) {
                   if (value == 'duplicate') onDuplicate();
@@ -11608,7 +12511,6 @@ class _SavedSimulationCard extends StatelessWidget {
   }
 }
 
-
 class _SimulationComparatorSheet extends StatelessWidget {
   final _SavedSimulationRecord left;
   final _SavedSimulationRecord right;
@@ -11620,6 +12522,7 @@ class _SimulationComparatorSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final double maxHeight = MediaQuery.sizeOf(context).height * 0.84;
     return SafeArea(
       child: Align(
@@ -11629,7 +12532,7 @@ class _SimulationComparatorSheet extends StatelessWidget {
           child: Container(
             margin: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _simulationElevated,
+              color: tokens.surfaceElevated,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: const Color(0x338B5CF6)),
               boxShadow: <BoxShadow>[
@@ -11792,6 +12695,12 @@ class _SimulationComparatorCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+          _SimulationStrategyBadge(
+            score: record.strategyScore,
+            label: record.strategyLabel,
+            color: accentColor,
+          ),
+          const SizedBox(height: 10),
           Text(
             record.primaryLabel,
             style: const TextStyle(
@@ -11836,6 +12745,15 @@ class _SimulationComparisonMatrix extends StatelessWidget {
       _SimulationComparisonRowData('Activo', left.selectedAsset, right.selectedAsset),
       _SimulationComparisonRowData('Modo', left.modeLabel, right.modeLabel),
       _SimulationComparisonRowData('Escenario', left.scenario, right.scenario),
+      _SimulationComparisonRowData(
+        'Score',
+        left.strategyScore <= 0
+            ? left.strategyLabel
+            : '${left.strategyScore}/100 · ${left.strategyLabel}',
+        right.strategyScore <= 0
+            ? right.strategyLabel
+            : '${right.strategyScore}/100 · ${right.strategyLabel}',
+      ),
       _SimulationComparisonRowData('Comisión', left.feeLabel, right.feeLabel),
       _SimulationComparisonRowData(
         left.primaryLabel == right.primaryLabel ? left.primaryLabel : 'Resultado',
@@ -11960,10 +12878,8 @@ class _SimulationMetricGrid extends StatelessWidget {
           runSpacing: gap,
           children: metrics
               .map(
-                (_SimulationMetricData metric) => _SimulationMetricCard(
-                  metric: metric,
-                  width: width,
-                ),
+                (_SimulationMetricData metric) =>
+                    _SimulationMetricCard(metric: metric, width: width),
               )
               .toList(),
         );
@@ -11985,13 +12901,19 @@ class _SimulationMetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       width: width,
       height: 72,
       padding: EdgeInsets.all(compact ? 8 : 9),
-      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 12),
+      decoration: _simulationTokenBox(
+        context,
+        color: tokens.surfacePrimary,
+        radius: 12,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -12002,7 +12924,7 @@ class _SimulationMetricCard extends StatelessWidget {
                 Icon(
                   metric.icon,
                   size: compact ? 14 : 15,
-                  color: metric.color ?? const Color(0xFFC4B5FD),
+                  color: metric.color ?? tokens.primaryAccent,
                 ),
                 const SizedBox(width: 5),
               ],
@@ -12012,7 +12934,7 @@ class _SimulationMetricCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: const Color(0xFFAAB3C5),
+                    color: colors.onSurfaceVariant,
                     fontSize: compact ? 12 : 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -12042,13 +12964,14 @@ class _SimulationMetricCard extends StatelessWidget {
               child: FittedBox(
                 key: ValueKey<String>(metric.value),
                 fit: BoxFit.scaleDown,
-                alignment:
-                    compact ? Alignment.centerLeft : Alignment.centerRight,
+                alignment: compact
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
                 child: Text(
                   metric.value,
                   textAlign: compact ? TextAlign.left : TextAlign.right,
                   style: TextStyle(
-                    color: metric.color ?? Colors.white,
+                    color: metric.color ?? colors.onSurface,
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                     fontFeatures: const <FontFeature>[
@@ -12111,30 +13034,29 @@ class _SimulationQuickAmountButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        splashColor: const Color(0x338B5CF6),
-        highlightColor: const Color(0x1A8B5CF6),
+        splashColor: tokens.pressedOverlay,
+        highlightColor: tokens.pressedOverlay,
         onTap: onPressed,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF5B21B6) : const Color(0xFF111A2A),
+            color: selected ? tokens.selectedBackground : tokens.surfacePrimary,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: selected
-                  ? const Color(0xCC8B5CF6)
-                  : const Color(0x448B5CF6),
+              color: selected ? tokens.selectedBorder : tokens.cardBorder,
               width: selected ? 0.9 : 1,
             ),
             boxShadow: selected
                 ? <BoxShadow>[
                     BoxShadow(
-                      color: const Color(0xFF5B21B6).withValues(alpha: 0.16),
+                      color: tokens.glowColor,
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -12146,7 +13068,9 @@ class _SimulationQuickAmountButton extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.visible,
             style: TextStyle(
-              color: selected ? Colors.white : const Color(0xFFE9D5FF),
+              color: selected
+                  ? Theme.of(context).colorScheme.onSurface
+                  : tokens.primaryAccent,
               fontSize: 16,
               fontWeight: FontWeight.w600,
               fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
@@ -14110,7 +15034,7 @@ class _CoinDetailChart extends StatelessWidget {
             series: <SnapshotChartSeries>[
               SnapshotChartSeries(
                 label: 'Valor actual',
-                color: const Color(0xFF8B5CF6),
+                color: ccmx.CcmxVisualTokens.of(context).chartPrimary,
                 values: values,
               ),
             ],
@@ -14128,8 +15052,10 @@ class _CoinDetailChart extends StatelessWidget {
             icon: const Icon(Icons.receipt_long_outlined, size: 17),
             label: const Text('Ver movimientos'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF6D28D9),
-              foregroundColor: Colors.white,
+              backgroundColor: ccmx.CcmxVisualTokens.of(
+                context,
+              ).selectedBackground,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
             ),
           ),
         ),
@@ -14145,49 +15071,52 @@ class _CoinRangeSelector extends StatelessWidget {
   const _CoinRangeSelector({required this.value, required this.onChanged});
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: _CoinChartRange.values
-        .map(
-          (_CoinChartRange range) => Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(
-                right: range == _CoinChartRange.all ? 0 : 6,
-              ),
-              child: InkWell(
-                onTap: () => onChanged(range),
-                borderRadius: BorderRadius.circular(8),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: value == range
-                        ? const Color(0xFF6D28D9)
-                        : const Color(0xFF131D2F),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Row(
+      children: _CoinChartRange.values
+          .map(
+            (_CoinChartRange range) => Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  right: range == _CoinChartRange.all ? 0 : 6,
+                ),
+                child: InkWell(
+                  onTap: () => onChanged(range),
+                  borderRadius: BorderRadius.circular(8),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
                       color: value == range
-                          ? const Color(0xFF8B5CF6)
-                          : const Color(0x14FFFFFF),
+                          ? tokens.selectedBackground
+                          : tokens.surfaceElevated,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: value == range
+                            ? tokens.selectedBorder
+                            : tokens.cardBorder,
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    range.label,
-                    style: TextStyle(
-                      color: value == range
-                          ? Colors.white
-                          : const Color(0xFFB6BED0),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                    child: Text(
+                      range.label,
+                      style: TextStyle(
+                        color: value == range
+                            ? Colors.white
+                            : const Color(0xFFB6BED0),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        )
-        .toList(),
-  );
+          )
+          .toList(),
+    );
+  }
 }
 
 class AlertsTab extends StatefulWidget {
@@ -14337,7 +15266,8 @@ class _AlertsTabState extends State<AlertsTab> {
   Widget _buildAutomaticNotificationsCard(BuildContext context) {
     return _AlertsPanel(
       title: 'Alertas automáticas',
-      subtitle: 'Consulta precios en segundo plano y evalúa tus reglas activas.',
+      subtitle:
+          'Consulta precios en segundo plano y evalúa tus reglas activas.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -14405,7 +15335,10 @@ class _AlertsTabState extends State<AlertsTab> {
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
                 visualDensity: VisualDensity.compact,
                 showCheckmark: false,
               );
@@ -14695,9 +15628,7 @@ class AlertCoinRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         color: const Color(0xFF162033),
         border: Border.all(
-          color: triggered
-              ? const Color(0x44F59E0B)
-              : const Color(0x1FFFFFFF),
+          color: triggered ? const Color(0x44F59E0B) : const Color(0x1FFFFFFF),
         ),
       ),
       child: Column(
@@ -14820,9 +15751,7 @@ class RecoveryAlertCoinRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         color: const Color(0xFF162033),
         border: Border.all(
-          color: triggered
-              ? const Color(0x44F59E0B)
-              : const Color(0x1FFFFFFF),
+          color: triggered ? const Color(0x44F59E0B) : const Color(0x1FFFFFFF),
         ),
       ),
       child: Column(
@@ -14918,7 +15847,6 @@ class RecoveryAlertCoinRow extends StatelessWidget {
 }
 
 const Color _alertsSurface = Color(0xFF101827);
-const Color _alertsElevated = Color(0xFF162033);
 const Color _alertsPurple = Color(0xFF8B5CF6);
 
 final ButtonStyle _alertsPrimaryButtonStyle = FilledButton.styleFrom(
@@ -14935,14 +15863,6 @@ final ButtonStyle _alertsTonalButtonStyle = FilledButton.styleFrom(
   foregroundColor: const Color(0xFFE9D5FF),
   disabledBackgroundColor: const Color(0x121E293B),
   disabledForegroundColor: const Color(0x88AAB3C5),
-  minimumSize: const Size(0, 40),
-  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-  textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-);
-
-final ButtonStyle _alertsGhostButtonStyle = TextButton.styleFrom(
-  foregroundColor: const Color(0xFFE9D5FF),
   minimumSize: const Size(0, 40),
   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
   textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
@@ -14968,6 +15888,19 @@ BoxDecoration _alertsBox({Color color = _alertsSurface, double radius = 16}) {
   );
 }
 
+BoxDecoration _alertsTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+  );
+}
+
 class _AlertsHeader extends StatelessWidget {
   final int activeRules;
   final int watchedCount;
@@ -14981,6 +15914,8 @@ class _AlertsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
@@ -14988,11 +15923,11 @@ class _AlertsHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _alertsPurple.withValues(alpha: 0.30)),
-        gradient: const LinearGradient(
+        border: Border.all(color: tokens.selectedBorder),
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF1B1640), Color(0xFF111A2A)],
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
         ),
       ),
       child: Column(
@@ -15001,14 +15936,14 @@ class _AlertsHeader extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
                       'Alertas',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: colors.onSurface,
                         fontSize: 23,
                         fontWeight: FontWeight.w900,
                       ),
@@ -15017,7 +15952,7 @@ class _AlertsHeader extends StatelessWidget {
                     Text(
                       'Monitorea precios y recibe avisos de tus monedas',
                       style: TextStyle(
-                        color: Color(0xFFC2BCD9),
+                        color: colors.onSurfaceVariant,
                         fontSize: 13,
                         height: 1.25,
                       ),
@@ -15030,12 +15965,12 @@ class _AlertsHeader extends StatelessWidget {
                 height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
+                  color: tokens.primaryAccent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.notifications_active_outlined,
-                  color: Color(0xFFD8B4FE),
+                  color: tokens.primaryAccent,
                   size: 22,
                 ),
               ),
@@ -15047,27 +15982,27 @@ class _AlertsHeader extends StatelessWidget {
               const double gap = 8;
               final List<_AlertsHeaderMetricData> metrics =
                   <_AlertsHeaderMetricData>[
-                _AlertsHeaderMetricData(
-                  label: 'Reglas',
-                  value: activeRules.toString(),
-                  icon: Icons.check_circle_outline,
-                  color: activeRules > 0
-                      ? const Color(0xFF4ADE80)
-                      : const Color(0xFFAAB3C5),
-                ),
-                _AlertsHeaderMetricData(
-                  label: 'Monedas',
-                  value: watchedCount.toString(),
-                  icon: Icons.visibility_outlined,
-                  color: const Color(0xFFC4B5FD),
-                ),
-                _AlertsHeaderMetricData(
-                  label: 'Frecuencia',
-                  value: automaticState,
-                  icon: Icons.schedule_outlined,
-                  color: const Color(0xFFC4B5FD),
-                ),
-              ];
+                    _AlertsHeaderMetricData(
+                      label: 'Reglas',
+                      value: activeRules.toString(),
+                      icon: Icons.check_circle_outline,
+                      color: activeRules > 0
+                          ? const Color(0xFF4ADE80)
+                          : const Color(0xFFAAB3C5),
+                    ),
+                    _AlertsHeaderMetricData(
+                      label: 'Monedas',
+                      value: watchedCount.toString(),
+                      icon: Icons.visibility_outlined,
+                      color: tokens.primaryAccent,
+                    ),
+                    _AlertsHeaderMetricData(
+                      label: 'Frecuencia',
+                      value: automaticState,
+                      icon: Icons.schedule_outlined,
+                      color: tokens.primaryAccent,
+                    ),
+                  ];
               if (constraints.maxWidth >= 340) {
                 final double width = (constraints.maxWidth - gap * 2) / 3;
                 return Row(
@@ -15077,7 +16012,10 @@ class _AlertsHeader extends StatelessWidget {
                           padding: EdgeInsets.only(
                             right: metric == metrics.last ? 0 : gap,
                           ),
-                          child: _AlertsHeaderMetric(metric: metric, width: width),
+                          child: _AlertsHeaderMetric(
+                            metric: metric,
+                            width: width,
+                          ),
                         ),
                       )
                       .toList(),
@@ -15126,6 +16064,7 @@ class _AlertsHeaderMetric extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
@@ -15133,9 +16072,9 @@ class _AlertsHeaderMetric extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 58),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: const Color(0x14FFFFFF),
+        color: tokens.surfacePrimary.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: const Color(0x20FFFFFF)),
+        border: Border.all(color: tokens.cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -15185,19 +16124,20 @@ class _AlertsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: _alertsBox(),
+      decoration: _alertsTokenBox(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: colors.onSurface,
               fontSize: 19,
               fontWeight: FontWeight.w800,
             ),
@@ -15205,13 +16145,13 @@ class _AlertsPanel extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: Color(0xFFAAB3C5),
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
               fontSize: 14,
               height: 1.35,
             ),
           ),
-              const SizedBox(height: 8),
+          const SizedBox(height: 8),
           child,
         ],
       ),
@@ -15237,8 +16177,8 @@ class _AlertsMonitoringCard extends StatelessWidget {
         : 'Monitoreo pausado';
     final String subtitle = automaticEnabled
         ? (notificationsAllowed
-            ? _alertsIntervalCopy(intervalLabel)
-            : 'Activa las notificaciones para recibir avisos fuera de la app.')
+              ? _alertsIntervalCopy(intervalLabel)
+              : 'Activa las notificaciones para recibir avisos fuera de la app.')
         : 'Las reglas siguen guardadas y puedes reactivarlas cuando quieras.';
     final Color color = automaticEnabled && notificationsAllowed
         ? const Color(0xFF4ADE80)
@@ -15251,7 +16191,10 @@ class _AlertsMonitoringCard extends StatelessWidget {
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: _alertsBox(color: _alertsElevated),
+      decoration: _alertsTokenBox(
+        context,
+        color: ccmx.CcmxVisualTokens.of(context).surfaceElevated,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -15346,7 +16289,7 @@ class _AlertsPermissionCard extends StatelessWidget {
             'Actívalo para recibir avisos fuera de la aplicación.',
             style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
           ),
-              const SizedBox(height: 8),
+          const SizedBox(height: 8),
           FilledButton.icon(
             style: _alertsPrimaryButtonStyle,
             onPressed: onActivate,
@@ -15422,7 +16365,10 @@ class _AlertsRuleSummary extends StatelessWidget {
       child: Row(
         children: <Widget>[
           Expanded(
-            child: _AlertsSummaryValue(label: primaryLabel, value: primaryValue),
+            child: _AlertsSummaryValue(
+              label: primaryLabel,
+              value: primaryValue,
+            ),
           ),
           Container(width: 1, height: 38, color: const Color(0x24FFFFFF)),
           Expanded(
@@ -15700,6 +16646,28 @@ BoxDecoration _chartsBox({Color color = _chartsSurface, double radius = 16}) {
   );
 }
 
+BoxDecoration _chartsTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: tokens.shadowOpacity == 0
+        ? null
+        : <BoxShadow>[
+            BoxShadow(
+              color: tokens.shadow.withValues(alpha: tokens.shadowOpacity),
+              blurRadius: 18,
+              offset: const Offset(0, 9),
+            ),
+          ],
+  );
+}
+
 class AnalyticsControlPanel extends StatefulWidget {
   final List<PortfolioSnapshot> snapshots;
   final PortfolioTotals totals;
@@ -15752,19 +16720,19 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
   }
 
   Color _metricColor(BuildContext context, List<PortfolioSnapshot> filtered) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     switch (_metric) {
       case SnapshotMetric.portfolioValue:
-        return colors.primary;
+        return tokens.chartPrimary;
       case SnapshotMetric.invested:
-        return colors.tertiary;
+        return tokens.chartSecondary;
       case SnapshotMetric.unrealizedPnl:
         final double value = filtered.isEmpty
             ? 0
             : _metric.valueFor(filtered.last);
         return pnlColor(value);
       case SnapshotMetric.realizedPnl:
-        return colors.secondary;
+        return tokens.secondaryAccent;
       case SnapshotMetric.btcDominance:
         return const Color(0xFFF7931A);
     }
@@ -16000,6 +16968,8 @@ class _ChartsPortfolioHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color changeColor = pnlColor(periodChange ?? 0);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final String changeLabel = periodChange == null
         ? 'Sin comparación de periodo'
         : '${_chartsMoney(periodChange!)}${periodChangePercent == null ? '' : ' · ${_chartsSignedPercent(periodChangePercent!)}'}';
@@ -16009,11 +16979,11 @@ class _ChartsPortfolioHero extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _chartsPurple.withValues(alpha: 0.34)),
+        border: Border.all(color: tokens.selectedBorder),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[const Color(0xFF1B1640), const Color(0xFF111A2A)],
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
         ),
       ),
       child: LayoutBuilder(
@@ -16025,10 +16995,10 @@ class _ChartsPortfolioHero extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    const Text(
+                    Text(
                       'VALOR DE CARTERA',
                       style: TextStyle(
-                        color: Color(0xFFC9C2E6),
+                        color: colors.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.4,
@@ -16040,8 +17010,8 @@ class _ChartsPortfolioHero extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: Text(
                         _chartsMoney(currentValue),
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: colors.onSurface,
                           fontSize: 29,
                           fontWeight: FontWeight.w900,
                         ),
@@ -16095,12 +17065,12 @@ class _ChartsPortfolioHero extends StatelessWidget {
                 height: 48,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
+                  color: tokens.primaryAccent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(15),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.account_balance_wallet_outlined,
-                  color: Color(0xFFD8B4FE),
+                  color: tokens.primaryAccent,
                   size: 23,
                 ),
               ),
@@ -16120,15 +17090,13 @@ class _ChartsHeroMeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Color muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Icon(icon, size: 14, color: const Color(0xFFAAA3C7)),
+        Icon(icon, size: 14, color: muted),
         const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(color: Color(0xFFBDB7D2), fontSize: 13),
-        ),
+        Text(label, style: TextStyle(color: muted, fontSize: 13)),
       ],
     );
   }
@@ -16147,17 +17115,18 @@ class _ChartsSectionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      decoration: _chartsBox(),
+      decoration: _chartsTokenBox(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: colors.onSurface,
               fontSize: 20,
               fontWeight: FontWeight.w800,
             ),
@@ -16166,8 +17135,8 @@ class _ChartsSectionPanel extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subtitle!,
-              style: const TextStyle(
-                color: Color(0xFFAAB3C5),
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
                 fontSize: 14,
                 height: 1.35,
               ),
@@ -16194,6 +17163,7 @@ class _ChartsRangeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         const double gap = 6;
@@ -16221,13 +17191,13 @@ class _ChartsRangeSelector extends StatelessWidget {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? _chartsPurple
-                              : const Color(0xFF182234),
+                              ? tokens.selectedBackground
+                              : tokens.surfaceElevated,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: isSelected
-                                ? const Color(0xFFD8B4FE)
-                                : const Color(0x25FFFFFF),
+                                ? tokens.selectedBorder
+                                : tokens.cardBorder,
                           ),
                         ),
                         child: Text(
@@ -16263,22 +17233,24 @@ class _ChartsMetricSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF182234),
+        color: tokens.surfaceElevated,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x30FFFFFF)),
+        border: Border.all(color: tokens.cardBorder),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<SnapshotMetric>(
           value: value,
           isExpanded: true,
-          icon: const Icon(Icons.expand_more, color: Color(0xFFC4B5FD)),
-          dropdownColor: const Color(0xFF162033),
-          style: const TextStyle(
-            color: Colors.white,
+          icon: Icon(Icons.expand_more, color: tokens.primaryAccent),
+          dropdownColor: tokens.menuBackground,
+          style: TextStyle(
+            color: colors.onSurface,
             fontSize: 15,
             fontWeight: FontWeight.w700,
           ),
@@ -16316,19 +17288,25 @@ class _ChartsDataState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
-      decoration: _chartsBox(color: _chartsElevated, radius: 14),
+      decoration: _chartsTokenBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 14,
+      ),
       child: Column(
         children: <Widget>[
-          Icon(icon, color: const Color(0xFFC4B5FD), size: 30),
+          Icon(icon, color: tokens.primaryAccent, size: 30),
           const SizedBox(height: 10),
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: colors.onSurface,
               fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
@@ -16337,7 +17315,7 @@ class _ChartsDataState extends StatelessWidget {
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
           ),
           if (detail != null) ...<Widget>[
             const SizedBox(height: 10),
@@ -16448,11 +17426,16 @@ class _ChartsReadoutTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return Container(
       width: width,
       constraints: const BoxConstraints(minHeight: 76),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: _chartsBox(color: _chartsElevated, radius: 12),
+      decoration: _chartsTokenBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 12,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -17277,7 +18260,7 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
                       labelText: 'Escribe RESTABLECER',
-                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.warning_amber_rounded),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -17362,6 +18345,11 @@ class MoreTab extends StatelessWidget {
   final DateTime? cloudStateUploadedAt;
   final DateTime? cloudStateDownloadedAt;
   final String? googleAccountEmail;
+  final String? googleAccountDisplayName;
+  final DateTime? googleDriveLastConnectedAt;
+  final bool googleDriveWasConnected;
+  final GoogleDriveSessionStatus googleDriveSessionStatus;
+  final bool isGoogleDriveAuthorized;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isFirebaseAuthBusy;
   final bool isCloudUploading;
@@ -17396,6 +18384,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onUploadFinancialStateToFirebase;
   final VoidCallback onDownloadFinancialStateFromFirebase;
   final VoidCallback onConnectGoogleDrive;
+  final VoidCallback onReconnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onCreateGoogleDriveBackup;
   final VoidCallback onRestoreGoogleDriveBackup;
@@ -17444,6 +18433,11 @@ class MoreTab extends StatelessWidget {
     required this.cloudStateUploadedAt,
     required this.cloudStateDownloadedAt,
     required this.googleAccountEmail,
+    required this.googleAccountDisplayName,
+    required this.googleDriveLastConnectedAt,
+    required this.googleDriveWasConnected,
+    required this.googleDriveSessionStatus,
+    required this.isGoogleDriveAuthorized,
     required this.googleDriveBackupUpdatedAt,
     required this.isFirebaseAuthBusy,
     required this.isCloudUploading,
@@ -17478,6 +18472,7 @@ class MoreTab extends StatelessWidget {
     required this.onUploadFinancialStateToFirebase,
     required this.onDownloadFinancialStateFromFirebase,
     required this.onConnectGoogleDrive,
+    required this.onReconnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
     required this.onCreateGoogleDriveBackup,
     required this.onRestoreGoogleDriveBackup,
@@ -17504,9 +18499,49 @@ class MoreTab extends StatelessWidget {
   String get cloudStateDownloadLabel => cloudStateDownloadedAt == null
       ? 'Sin descargar'
       : longDate(cloudStateDownloadedAt!);
-  bool get googleDriveConnected => googleAccountEmail != null;
+  String get googleDriveAccountLabel =>
+      googleAccountEmail ?? googleAccountDisplayName ?? 'cuenta Google';
+  String get googleDriveLastConnectionLabel =>
+      googleDriveLastConnectedAt == null
+      ? 'sin fecha local'
+      : longDate(googleDriveLastConnectedAt!.toLocal());
+  String get googleDriveAccountStatusLabel => googleDriveLastConnectedAt == null
+      ? 'Cuenta: $googleDriveAccountLabel - Drive activo'
+      : 'Cuenta: $googleDriveAccountLabel - Ultima conexion: $googleDriveLastConnectionLabel';
+  bool get googleDriveHasKnownAccount =>
+      googleDriveWasConnected || googleAccountEmail != null;
+  bool get googleDriveVisuallyConnected =>
+      googleDriveHasKnownAccount &&
+      googleDriveSessionStatus != GoogleDriveSessionStatus.accountDisconnected;
+  bool get googleDriveVerificationPending =>
+      googleDriveSessionStatus ==
+      GoogleDriveSessionStatus.localPendingVerification;
+  bool get googleDriveVerificationFailed =>
+      googleDriveSessionStatus == GoogleDriveSessionStatus.temporaryError;
+  bool get googleDriveActionRequiresVerification =>
+      googleDriveVerificationPending || googleDriveVerificationFailed;
+  bool get googleDriveConnected =>
+      googleDriveHasKnownAccount &&
+      (googleDriveSessionStatus == GoogleDriveSessionStatus.accountConnected ||
+          googleDriveSessionStatus ==
+              GoogleDriveSessionStatus.driveAuthorized ||
+          googleDriveSessionStatus ==
+              GoogleDriveSessionStatus.driveAuthorizationRequired);
+  bool get googleDriveLocalPending =>
+      googleDriveSessionStatus ==
+      GoogleDriveSessionStatus.localPendingVerification;
+  bool get googleDriveSessionChecking =>
+      googleDriveSessionStatus == GoogleDriveSessionStatus.accountChecking;
+  bool get googleDriveAuthRequired =>
+      googleDriveSessionStatus ==
+      GoogleDriveSessionStatus.driveAuthorizationRequired;
+  bool get googleDriveTemporaryError =>
+      googleDriveSessionStatus == GoogleDriveSessionStatus.temporaryError;
   bool get googleDriveBusy =>
-      isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
+      googleDriveSessionChecking ||
+      isGoogleConnecting ||
+      isGoogleDriveCreating ||
+      isGoogleDriveRestoring;
   String get googleDriveBackupLabel => googleDriveBackupUpdatedAt == null
       ? 'Sin copia en Drive'
       : longDate(googleDriveBackupUpdatedAt!.toLocal());
@@ -17523,14 +18558,14 @@ class MoreTab extends StatelessWidget {
           _CommandCenterHeader(
             pricesUpdatedAt: pricesUpdatedAt,
             priceSource: _priceSource,
-            googleDriveConnected: googleDriveConnected,
+            googleDriveConnected: googleDriveVisuallyConnected,
             googleDriveBackupUpdatedAt: googleDriveBackupUpdatedAt,
             visualMode: visualMode,
             themeStyle: themeStyle,
           ),
           const SizedBox(height: 14),
           _CommandSection(
-            title: 'GENERAL',
+            title: 'CUENTA Y NUBE',
             children: <Widget>[
               _MoreActionTile(
                 icon: Icons.account_circle_outlined,
@@ -17549,20 +18584,44 @@ class MoreTab extends StatelessWidget {
             ],
           ),
           _CommandSection(
-            title: 'RESPALDOS',
+            title: 'DATOS Y RESPALDOS',
             children: <Widget>[
               _MoreActionTile(
                 icon: Icons.cloud_done_outlined,
-                title: 'Google Drive',
-                subtitle: isGoogleConnecting
-                    ? 'Verificando autorización de Google Drive...'
+                title: googleDriveVisuallyConnected
+                    ? 'Google Drive conectado'
+                    : 'Google Drive no conectado',
+                subtitle: googleDriveSessionChecking
+                    ? googleDriveHasKnownAccount
+                          ? 'Restaurando Google Drive... Cuenta anterior: $googleDriveAccountLabel'
+                          : 'Comprobando sesion de Google Drive...'
+                    : googleDriveLocalPending
+                    ? googleDriveAccountStatusLabel
+                    : googleDriveAuthRequired
+                    ? 'Cuenta: $googleDriveAccountLabel - Falta autorizar Drive.'
+                    : googleDriveTemporaryError
+                    ? googleDriveHasKnownAccount
+                          ? 'Cuenta: $googleDriveAccountLabel - No se pudo verificar ahora; conexion local conservada.'
+                          : 'No se pudo comprobar la sesion. Reintenta al usar Drive.'
+                    : isGoogleDriveAuthorized
+                    ? '$googleDriveAccountLabel - $googleDriveBackupLabel'
                     : googleDriveConnected
-                    ? '${googleAccountEmail ?? 'cuenta Google'} · $googleDriveBackupLabel'
+                    ? '$googleDriveAccountLabel - Falta autorizar Drive'
                     : 'Crea y restaura copias manuales.',
-                badge: isGoogleConnecting
-                    ? 'Verificando'
-                    : googleDriveConnected
+                badge: googleDriveSessionChecking
+                    ? googleDriveHasKnownAccount
+                          ? 'Restaurando'
+                          : 'Comprobando'
+                    : isGoogleDriveAuthorized
                     ? 'Conectado'
+                    : googleDriveLocalPending
+                    ? 'Conectado'
+                    : googleDriveConnected || googleDriveAuthRequired
+                    ? 'Autorizar'
+                    : googleDriveTemporaryError
+                    ? googleDriveHasKnownAccount
+                          ? 'Conectado'
+                          : 'Revisar'
                     : 'Sin conectar',
                 loading: googleDriveBusy,
                 onTap: () => _showGoogleDriveActions(context),
@@ -17663,7 +18722,7 @@ class MoreTab extends StatelessWidget {
             ],
           ),
           _CommandSection(
-            title: 'PRIVACIDAD Y RESET',
+            title: 'PRIVACIDAD',
             children: <Widget>[
               _PrivacyMonitoringCard(
                 analyticsEnabled: analyticsEnabled,
@@ -17671,6 +18730,11 @@ class MoreTab extends StatelessWidget {
                 onAnalyticsChanged: onAnalyticsConsentChanged,
                 onCrashlyticsChanged: onCrashlyticsConsentChanged,
               ),
+            ],
+          ),
+          _CommandSection(
+            title: 'ZONA DE RIESGO',
+            children: <Widget>[
               _MoreActionTile(
                 icon: Icons.restart_alt_outlined,
                 title: 'Restablecer datos financieros',
@@ -17821,28 +18885,62 @@ class MoreTab extends StatelessWidget {
       useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => _CommandActionSheet(
-        title: 'Google Drive',
+        title: googleDriveVisuallyConnected
+            ? 'Google Drive conectado'
+            : 'Google Drive',
         actions: <_SheetAction>[
           _SheetAction(
-            icon: googleDriveConnected
+            icon: isGoogleDriveAuthorized
                 ? Icons.link_off_outlined
                 : Icons.cloud_sync_outlined,
-            title: isGoogleConnecting
-                ? 'Verificando conexión'
-                : googleDriveConnected
+            title: googleDriveSessionChecking
+                ? googleDriveHasKnownAccount
+                      ? 'Restaurando sesion'
+                      : 'Comprobando sesion'
+                : isGoogleConnecting
+                ? 'Verificando conexion'
+                : isGoogleDriveAuthorized
                 ? 'Desconectar'
-                : 'Conectar Google Drive',
-            subtitle: isGoogleConnecting
-                ? 'Comprobando autorización de Google Drive sin abrir el inicio de sesión.'
+                : googleDriveLocalPending
+                ? 'Verificar conexion'
+                : googleDriveTemporaryError
+                ? 'Reconectar Google Drive'
                 : googleDriveConnected
-                ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Estado: conectado'
+                ? 'Autorizar Google Drive'
+                : 'Conectar Google Drive',
+            subtitle: googleDriveSessionChecking
+                ? googleDriveHasKnownAccount
+                      ? 'Cuenta anterior: $googleDriveAccountLabel. Ultima conexion: $googleDriveLastConnectionLabel.'
+                      : 'Comprobando Google Drive sin abrir el selector de cuenta.'
+                : googleDriveAuthRequired
+                ? 'Cuenta detectada. Drive requiere autorizacion al continuar.'
+                : googleDriveLocalPending
+                ? googleDriveAccountStatusLabel
+                : googleDriveTemporaryError
+                ? googleDriveHasKnownAccount
+                      ? 'No se pudo verificar Google Drive ahora. La sesion anterior se conserva.'
+                      : 'Error temporal al comprobar Google. No se cerro la sesion.'
+                : isGoogleConnecting
+                ? 'Comprobando autorizacion de Google Drive.'
+                : isGoogleDriveAuthorized
+                ? 'Cuenta: $googleDriveAccountLabel - Estado: conectado'
+                : googleDriveConnected
+                ? '$googleDriveAccountLabel - Falta autorizar Drive'
                 : 'Conecta Google Drive para crear y restaurar copias.',
             onTap: googleDriveBusy
                 ? null
-                : googleDriveConnected
+                : isGoogleDriveAuthorized
                 ? onDisconnectGoogleDrive
                 : onConnectGoogleDrive,
           ),
+          if (googleDriveActionRequiresVerification)
+            _SheetAction(
+              icon: Icons.refresh_outlined,
+              title: 'Reconectar Google Drive',
+              subtitle:
+                  'Abre Google solo por esta accion manual para renovar la cuenta.',
+              onTap: googleDriveBusy ? null : onReconnectGoogleDrive,
+            ),
           const _SheetAction(
             icon: Icons.privacy_tip_outlined,
             title: 'Privacidad de Drive',
@@ -17863,10 +18961,18 @@ class MoreTab extends StatelessWidget {
             title: isGoogleDriveCreating
                 ? 'Creando copia...'
                 : 'Crear copia en Google Drive',
-            subtitle: googleDriveConnected
+            subtitle: isGoogleDriveAuthorized
                 ? 'Actualiza la copia guardada en Google Drive'
+                : googleDriveLocalPending
+                ? 'Verifica la conexion antes de crear una copia'
+                : googleDriveConnected
+                ? 'Autoriza Google Drive primero'
                 : 'Conecta Google Drive primero',
-            onTap: googleDriveBusy ? null : onCreateGoogleDriveBackup,
+            onTap:
+                googleDriveBusy ||
+                    (!isGoogleDriveAuthorized && !googleDriveHasKnownAccount)
+                ? null
+                : onCreateGoogleDriveBackup,
           ),
           _SheetAction(
             icon: isGoogleDriveRestoring
@@ -17875,11 +18981,27 @@ class MoreTab extends StatelessWidget {
             title: isGoogleDriveRestoring
                 ? 'Restaurando copia...'
                 : 'Restaurar desde Google Drive',
-            subtitle: googleDriveConnected
-                ? 'Descarga la copia y pide confirmación antes de restaurar'
+            subtitle: isGoogleDriveAuthorized
+                ? 'Descarga la copia y pide confirmacion antes de restaurar'
+                : googleDriveLocalPending
+                ? 'Verifica la conexion antes de restaurar'
+                : googleDriveConnected
+                ? 'Autoriza Google Drive primero'
                 : 'Conecta Google Drive primero',
-            onTap: googleDriveBusy ? null : onRestoreGoogleDriveBackup,
+            onTap:
+                googleDriveBusy ||
+                    (!isGoogleDriveAuthorized && !googleDriveHasKnownAccount)
+                ? null
+                : onRestoreGoogleDriveBackup,
           ),
+          if (googleDriveVisuallyConnected && !isGoogleDriveAuthorized)
+            _SheetAction(
+              icon: Icons.link_off_outlined,
+              title: 'Cerrar sesion de Drive',
+              subtitle:
+                  'Olvida la vinculacion local y vuelve al estado sin conectar.',
+              onTap: googleDriveBusy ? null : onDisconnectGoogleDrive,
+            ),
         ],
       ),
     );
@@ -19024,8 +20146,8 @@ class _CommandCenterHeader extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            const Color(0xFF21163A).withValues(alpha: 0.92),
-            const Color(0xFF101827).withValues(alpha: 0.96),
+            colors.primaryContainer.withValues(alpha: 0.52),
+            colors.surface.withValues(alpha: 0.98),
           ],
         ),
         border: Border.all(color: colors.primary.withValues(alpha: 0.18)),
@@ -19049,11 +20171,12 @@ class _CommandCenterHeader extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       'Más',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        height: 1,
-                      ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            height: 1,
+                          ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -19166,8 +20289,10 @@ class _HeaderMetric extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: const Color(0xFF0B1220).withValues(alpha: 0.52),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.58),
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: 0.42),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -19182,7 +20307,7 @@ class _HeaderMetric extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: const Color(0xFFB7C0D4),
+                    color: colors.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -19195,7 +20320,7 @@ class _HeaderMetric extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: color ?? Colors.white,
+              color: color ?? colors.onSurface,
               fontSize: 14,
               fontWeight: FontWeight.w900,
               fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
@@ -19207,8 +20332,8 @@ class _HeaderMetric extends StatelessWidget {
               subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF94A3B8),
+              style: TextStyle(
+                color: colors.onSurfaceVariant.withValues(alpha: 0.82),
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -19240,6 +20365,11 @@ class _MoreActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool destructive =
+        title.toLowerCase().contains('restablecer') ||
+        title.toLowerCase().contains('borrar') ||
+        (badge?.toLowerCase().contains('peligro') ?? false);
+    final Color accent = destructive ? colors.error : colors.primary;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -19253,9 +20383,11 @@ class _MoreActionTile extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           constraints: const BoxConstraints(minHeight: 74),
           decoration: BoxDecoration(
-            color: const Color(0xFF111A2A).withValues(alpha: 0.92),
+            color: colors.surfaceContainerHighest.withValues(alpha: 0.82),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+            border: Border.all(
+              color: colors.outlineVariant.withValues(alpha: 0.42),
+            ),
           ),
           child: Row(
             children: <Widget>[
@@ -19264,17 +20396,15 @@ class _MoreActionTile extends StatelessWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
-                  color: colors.primary.withValues(alpha: 0.12),
-                  border: Border.all(
-                    color: colors.primary.withValues(alpha: 0.16),
-                  ),
+                  color: accent.withValues(alpha: 0.12),
+                  border: Border.all(color: accent.withValues(alpha: 0.16)),
                 ),
                 child: loading
                     ? const Padding(
                         padding: EdgeInsets.all(11),
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Icon(icon, color: colors.primary, size: 21),
+                    : Icon(icon, color: accent, size: 21),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -19291,7 +20421,6 @@ class _MoreActionTile extends StatelessWidget {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: Colors.white,
                               fontSize: 15,
                               height: 1.12,
                               fontWeight: FontWeight.w800,
@@ -19312,8 +20441,8 @@ class _MoreActionTile extends StatelessWidget {
                       subtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFB7C0D4),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 13,
                         height: 1.22,
                         fontWeight: FontWeight.w500,
@@ -19355,11 +20484,11 @@ class _PrivacyMonitoringCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
-      color: const Color(0xFF111A2A).withValues(alpha: 0.92),
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.82),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
+        side: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.42)),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
@@ -19399,10 +20528,6 @@ class _PrivacyMonitoringCard extends StatelessWidget {
                 'Ayuda a detectar cierres inesperados. No se envían movimientos, montos, precios ni copias de seguridad.',
               ),
               value: crashlyticsEnabled,
-              activeThumbColor: colors.primary,
-              activeTrackColor: colors.primary.withValues(alpha: 0.30),
-              inactiveThumbColor: const Color(0xFFCBD5E1),
-              inactiveTrackColor: const Color(0xFF334155),
               onChanged: onCrashlyticsChanged,
             ),
             SwitchListTile(
@@ -19412,10 +20537,6 @@ class _PrivacyMonitoringCard extends StatelessWidget {
                 'Ayuda a entender qué funciones se usan. No se envían cantidades, cartera, OCR, backup, email ni UID.',
               ),
               value: analyticsEnabled,
-              activeThumbColor: colors.primary,
-              activeTrackColor: colors.primary.withValues(alpha: 0.30),
-              inactiveThumbColor: const Color(0xFFCBD5E1),
-              inactiveTrackColor: const Color(0xFF334155),
               onChanged: onAnalyticsChanged,
             ),
           ],
@@ -19431,24 +20552,91 @@ class _CommandSection extends StatelessWidget {
 
   const _CommandSection({required this.title, required this.children});
 
+  IconData get _icon {
+    final String normalized = title.toLowerCase();
+    if (normalized.contains('cuenta')) return Icons.cloud_outlined;
+    if (normalized.contains('riesgo'))
+      return Icons.report_gmailerrorred_outlined;
+    if (normalized.contains('general'))
+      return Icons.dashboard_customize_outlined;
+    if (normalized.contains('respaldo')) return Icons.backup_outlined;
+    if (normalized.contains('instant')) return Icons.photo_library_outlined;
+    if (normalized.contains('export')) return Icons.file_download_outlined;
+    if (normalized.contains('diagn')) return Icons.health_and_safety_outlined;
+    if (normalized.contains('acerca')) return Icons.info_outline;
+    if (normalized.contains('personal')) return Icons.palette_outlined;
+    if (normalized.contains('privacidad')) return Icons.privacy_tip_outlined;
+    return Icons.tune_outlined;
+  }
+
+  String? get _description {
+    final String normalized = title.toLowerCase();
+    if (normalized.contains('cuenta')) {
+      return 'Estado de cuenta, nube manual y conexión de Google Drive.';
+    }
+    if (normalized.contains('riesgo')) {
+      return 'Acciones sensibles que pueden afectar datos locales.';
+    }
+    if (normalized.contains('respaldo')) {
+      return 'Copias manuales, restauración y estado de nube.';
+    }
+    if (normalized.contains('privacidad')) {
+      return 'Preferencias locales, monitoreo opcional y acciones sensibles.';
+    }
+    if (normalized.contains('personal')) {
+      return 'Apariencia, lectura de cartera y actualización de precios.';
+    }
+    if (normalized.contains('export')) {
+      return 'Acceso a historial, reportes y formatos existentes.';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool riskSection = title.toLowerCase().contains('riesgo');
+    final Color sectionColor = riskSection ? colors.error : colors.primary;
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(2, 0, 2, 9),
-            child: Text(
-              title,
-              style: TextStyle(
-                color: colors.onSurfaceVariant.withValues(alpha: 0.82),
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.8,
-              ),
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(_icon, size: 17, color: sectionColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant.withValues(alpha: 0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      if (_description != null) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          _description!,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                height: 1.2,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           LayoutBuilder(
@@ -19770,6 +20958,7 @@ class _CommandActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final double bottomPadding = MediaQuery.viewPaddingOf(context).bottom + 20;
     final List<_SheetAction> visibleActions = actions
         .where((_SheetAction action) => !action.title.startsWith('Sin sincron'))
@@ -19798,6 +20987,14 @@ class _CommandActionSheet extends StatelessWidget {
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
+            const SizedBox(height: 4),
+            Text(
+              'Acciones disponibles para esta sección. Las operaciones sensibles conservan su confirmación existente.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                height: 1.25,
+              ),
+            ),
             const SizedBox(height: 10),
             ConstrainedBox(
               constraints: BoxConstraints(
@@ -19809,13 +21006,46 @@ class _CommandActionSheet extends StatelessWidget {
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (BuildContext context, int index) {
                   final _SheetAction action = visibleActions[index];
+                  final bool destructive =
+                      action.title.toLowerCase().contains('restaurar') ||
+                      action.title.toLowerCase().contains('desconectar') ||
+                      action.title.toLowerCase().contains('cerrar sesión');
+                  final Color accent = destructive
+                      ? colors.error
+                      : colors.primary;
                   return Card(
                     margin: EdgeInsets.zero,
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.78,
+                    ),
+                    surfaceTintColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      side: BorderSide(
+                        color: destructive
+                            ? colors.error.withValues(alpha: 0.28)
+                            : colors.outlineVariant.withValues(alpha: 0.42),
+                      ),
+                    ),
                     child: ListTile(
-                      leading: Icon(action.icon),
+                      minLeadingWidth: 36,
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(action.icon, color: accent, size: 20),
+                      ),
                       title: Text(action.title),
                       subtitle: Text(action.subtitle),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: action.onTap == null
+                          ? null
+                          : Icon(
+                              Icons.chevron_right,
+                              color: colors.onSurfaceVariant,
+                            ),
                       enabled: action.onTap != null,
                       onTap: action.onTap == null
                           ? null
@@ -19928,282 +21158,287 @@ class SettingsTab extends StatelessWidget {
         view == SettingsView.all || view == SettingsView.prices;
     final bool showAdvanced = view == SettingsView.all;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: <Widget>[
-        if (showTheme)
-          CardPanel(
-            title: 'Tema',
-            subtitle:
-                'Paletas premium completas, sin alterar colores '
-                'semánticos financieros.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Modo visual',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SegmentedButton<AppVisualMode>(
-                    segments: AppVisualMode.values
-                        .map(
-                          (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
-                            value: mode,
-                            label: Text(mode.label),
-                          ),
-                        )
-                        .toList(),
-                    selected: <AppVisualMode>{visualMode},
-                    onSelectionChanged: (Set<AppVisualMode> value) {
-                      onVisualModeChanged(value.first);
-                    },
+    return PremiumScaffoldSurface(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: <Widget>[
+          if (showTheme)
+            CardPanel(
+              title: 'Tema',
+              subtitle:
+                  'Paletas premium completas, sin alterar colores '
+                  'semánticos financieros.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Modo visual',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  'Estilo visual',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                ...AppThemeStyle.values.map(
-                  (AppThemeStyle option) => _ThemePaletteTile(
-                    option: option,
-                    selected: themeStyle == option,
-                    onTap: () => onThemeStyleChanged(option),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SegmentedButton<AppVisualMode>(
+                      segments: AppVisualMode.values
+                          .map(
+                            (AppVisualMode mode) =>
+                                ButtonSegment<AppVisualMode>(
+                                  value: mode,
+                                  label: Text(mode.label),
+                                ),
+                          )
+                          .toList(),
+                      selected: <AppVisualMode>{visualMode},
+                      onSelectionChanged: (Set<AppVisualMode> value) {
+                        onVisualModeChanged(value.first);
+                      },
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 18),
+                  Text(
+                    'Estilo visual',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...AppThemeStyle.values.map(
+                    (AppThemeStyle option) => _ThemePaletteTile(
+                      option: option,
+                      selected: themeStyle == option,
+                      onTap: () => onThemeStyleChanged(option),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        if (showPortfolio)
-          CardPanel(
-            title: 'Resumen de cartera',
-            subtitle:
-                'Configura cuántas posiciones aparecen en resumen y '
-                'cómo se ordenan.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Posiciones visibles',
-                  style: Theme.of(context).textTheme.titleSmall,
+          if (showPortfolio)
+            CardPanel(
+              title: 'Resumen de cartera',
+              subtitle:
+                  'Configura cuántas posiciones aparecen en resumen y '
+                  'cómo se ordenan.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Posiciones visibles',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: VisiblePositions.values.map((
+                      VisiblePositions option,
+                    ) {
+                      return ChoiceChip(
+                        selected: visiblePositions == option,
+                        label: Text(option.label),
+                        onSelected: (_) => onVisiblePositionsChanged(option),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Orden', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  ...PositionSortMode.values.map(
+                    (PositionSortMode option) =>
+                        RadioListTile<PositionSortMode>(
+                          contentPadding: EdgeInsets.zero,
+                          value: option,
+                          groupValue: positionSortMode,
+                          title: Text(option.label),
+                          onChanged: (PositionSortMode? value) {
+                            if (value != null) onPositionSortModeChanged(value);
+                          },
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          if (showAdvanced)
+            CardPanel(
+              title: 'Cálculo',
+              subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonal(
+                  onPressed: onEditSellFee,
+                  child: const Text('Editar comisión'),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: VisiblePositions.values.map((
-                    VisiblePositions option,
-                  ) {
-                    return ChoiceChip(
-                      selected: visiblePositions == option,
-                      label: Text(option.label),
-                      onSelected: (_) => onVisiblePositionsChanged(option),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 16),
-                Text('Orden', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 8),
-                ...PositionSortMode.values.map(
-                  (PositionSortMode option) => RadioListTile<PositionSortMode>(
+              ),
+            ),
+          if (showPrices)
+            CardPanel(
+              title: 'Precios',
+              subtitle: 'Preferencias de actualización de precios.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SwitchListTile(
+                    dense: true,
+                    value: refreshPricesOnOpen,
+                    onChanged: onRefreshPricesOnOpenChanged,
+                    title: const Text('Actualizar al abrir app'),
                     contentPadding: EdgeInsets.zero,
-                    value: option,
-                    groupValue: positionSortMode,
-                    title: Text(option.label),
-                    onChanged: (PositionSortMode? value) {
-                      if (value != null) onPositionSortModeChanged(value);
-                    },
                   ),
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Cálculo',
-            subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonal(
-                onPressed: onEditSellFee,
-                child: const Text('Editar comisión'),
+                  SwitchListTile(
+                    dense: true,
+                    value: refreshPricesAfterMovement,
+                    onChanged: onRefreshPricesAfterMovementChanged,
+                    title: const Text(
+                      'Actualizar después de registrar movimiento',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Actualización mientras la app está abierta:',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: PriceRefreshForegroundMode.values.map((
+                      PriceRefreshForegroundMode option,
+                    ) {
+                      return ChoiceChip(
+                        selected: priceRefreshForegroundMode == option,
+                        label: Text(option.label),
+                        onSelected: (_) =>
+                            onPriceRefreshForegroundModeChanged(option),
+                      );
+                    }).toList(),
+                  ),
+                ],
               ),
             ),
-          ),
-        if (showPrices)
-          CardPanel(
-            title: 'Precios',
-            subtitle: 'Preferencias de actualización de precios.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                SwitchListTile(
-                  dense: true,
-                  value: refreshPricesOnOpen,
-                  onChanged: onRefreshPricesOnOpenChanged,
-                  title: const Text('Actualizar al abrir app'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                SwitchListTile(
-                  dense: true,
-                  value: refreshPricesAfterMovement,
-                  onChanged: onRefreshPricesAfterMovementChanged,
-                  title: const Text(
-                    'Actualizar después de registrar movimiento',
+          if (showAdvanced)
+            CardPanel(
+              title: 'Instantáneas',
+              subtitle:
+                  'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Automatización',
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Actualización mientras la app está abierta:',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: PriceRefreshForegroundMode.values.map((
-                    PriceRefreshForegroundMode option,
-                  ) {
-                    return ChoiceChip(
-                      selected: priceRefreshForegroundMode == option,
-                      label: Text(option.label),
-                      onSelected: (_) =>
-                          onPriceRefreshForegroundModeChanged(option),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Instantáneas',
-            subtitle:
-                'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Automatización',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                ...SnapshotAutomationMode.values.map(
-                  (SnapshotAutomationMode option) =>
-                      RadioListTile<SnapshotAutomationMode>(
-                        contentPadding: EdgeInsets.zero,
-                        value: option,
-                        groupValue: snapshotAutomationMode,
-                        title: Text(option.label),
-                        onChanged: (SnapshotAutomationMode? value) {
-                          if (value != null)
-                            onSnapshotAutomationModeChanged(value);
-                        },
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Retención',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: SnapshotRetention.values.map((
-                    SnapshotRetention option,
-                  ) {
-                    return ChoiceChip(
-                      selected: snapshotRetention == option,
-                      label: Text(option.label),
-                      onSelected: (_) => onSnapshotRetentionChanged(option),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Las acciones principales de instantáneas viven en '
-                  'Más → Instantáneas. '
-                  'Aquí solo se configura automatización y retención.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Notificaciones',
-            subtitle:
-                'Configura comportamiento; la gestión completa vive en Alertas.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const Text(
-                  'Alertas internas: al abrir app / actualizar precios.',
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  dense: true,
-                  value: automaticLocalAlertsEnabled,
-                  onChanged: onAutomaticLocalAlertsChanged,
-                  title: const Text('Alertas automáticas locales'),
-                  subtitle: Text(
-                    notificationsAllowed
-                        ? 'Revisión en segundo plano de Android.'
-                        : 'Permiso no autorizado en Android.',
+                  ...SnapshotAutomationMode.values.map(
+                    (SnapshotAutomationMode option) =>
+                        RadioListTile<SnapshotAutomationMode>(
+                          contentPadding: EdgeInsets.zero,
+                          value: option,
+                          groupValue: snapshotAutomationMode,
+                          title: Text(option.label),
+                          onChanged: (SnapshotAutomationMode? value) {
+                            if (value != null)
+                              onSnapshotAutomationModeChanged(value);
+                          },
+                        ),
                   ),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                const Text(
-                  'Android puede agrupar o retrasar revisiones para ahorrar batería. '
-                  'No son notificaciones push en la nube.',
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: PriceAlertService.automaticIntervalOptions.map((
-                    int minutes,
-                  ) {
-                    return ChoiceChip(
-                      selected: automaticLocalAlertsIntervalMinutes == minutes,
-                      label: Text(intervalLabel(minutes)),
-                      onSelected: (_) =>
-                          onAutomaticLocalAlertIntervalChanged(minutes),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed: onOpenAlerts,
-                  icon: const Icon(Icons.notifications_active_outlined),
-                  label: const Text('Ir a Alertas'),
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Copia de seguridad',
-            subtitle:
-                'Copia manual local para exportar o restaurar datos financieros.',
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                onPressed: onExportBackup,
-                icon: const Icon(Icons.data_object_outlined),
-                label: const Text('Crear copia manual'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Retención',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: SnapshotRetention.values.map((
+                      SnapshotRetention option,
+                    ) {
+                      return ChoiceChip(
+                        selected: snapshotRetention == option,
+                        label: Text(option.label),
+                        onSelected: (_) => onSnapshotRetentionChanged(option),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Las acciones principales de instantáneas viven en '
+                    'Más → Instantáneas. '
+                    'Aquí solo se configura automatización y retención.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
-          ),
-      ],
+          if (showAdvanced)
+            CardPanel(
+              title: 'Notificaciones',
+              subtitle:
+                  'Configura comportamiento; la gestión completa vive en Alertas.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'Alertas internas: al abrir app / actualizar precios.',
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    dense: true,
+                    value: automaticLocalAlertsEnabled,
+                    onChanged: onAutomaticLocalAlertsChanged,
+                    title: const Text('Alertas automáticas locales'),
+                    subtitle: Text(
+                      notificationsAllowed
+                          ? 'Revisión en segundo plano de Android.'
+                          : 'Permiso no autorizado en Android.',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Text(
+                    'Android puede agrupar o retrasar revisiones para ahorrar batería. '
+                    'No son notificaciones push en la nube.',
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: PriceAlertService.automaticIntervalOptions.map((
+                      int minutes,
+                    ) {
+                      return ChoiceChip(
+                        selected:
+                            automaticLocalAlertsIntervalMinutes == minutes,
+                        label: Text(intervalLabel(minutes)),
+                        onSelected: (_) =>
+                            onAutomaticLocalAlertIntervalChanged(minutes),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: onOpenAlerts,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Ir a Alertas'),
+                  ),
+                ],
+              ),
+            ),
+          if (showAdvanced)
+            CardPanel(
+              title: 'Copia de seguridad',
+              subtitle:
+                  'Copia manual local para exportar o restaurar datos financieros.',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  onPressed: onExportBackup,
+                  icon: const Icon(Icons.data_object_outlined),
+                  label: const Text('Crear copia manual'),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -20222,27 +21457,59 @@ class _ThemePaletteTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppPalette palette = option.palette;
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: selected
                 ? palette.primarySoft.withValues(alpha: 0.75)
-                : Theme.of(context).colorScheme.surfaceContainerHighest,
+                : colors.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: selected
-                  ? palette.primary
-                  : Theme.of(context).colorScheme.outlineVariant,
+              color: selected ? palette.primary : colors.outlineVariant,
               width: selected ? 2 : 1,
             ),
+            boxShadow: selected
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: palette.primary.withValues(alpha: 0.18),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
             children: <Widget>[
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 34,
+                height: 34,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? palette.primary
+                      : colors.surface.withValues(alpha: 0.76),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: selected ? palette.primary : colors.outlineVariant,
+                  ),
+                ),
+                child: Icon(
+                  selected ? Icons.check_rounded : Icons.palette_outlined,
+                  size: 19,
+                  color: selected
+                      ? _bestOnColor(palette.primary)
+                      : colors.onSurfaceVariant,
+                ),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -20458,6 +21725,7 @@ class SnapshotLineChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     if (chartType == SummaryChartType.candles) {
       return SizedBox(
         height: height,
@@ -20478,8 +21746,10 @@ class SnapshotLineChart extends StatelessWidget {
           series: series,
           includeZero: includeZero,
           chartType: chartType,
-          axisColor: Theme.of(context).colorScheme.outlineVariant,
+          axisColor: tokens.chartGrid,
           labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+          fillColor: tokens.chartFill,
+          tooltipColor: tokens.chartTooltip,
         ),
       ),
     );
@@ -20507,6 +21777,8 @@ class SnapshotLineChartPainter extends CustomPainter {
   final SummaryChartType chartType;
   final Color axisColor;
   final Color labelColor;
+  final Color fillColor;
+  final Color tooltipColor;
 
   SnapshotLineChartPainter({
     required this.snapshots,
@@ -20515,6 +21787,8 @@ class SnapshotLineChartPainter extends CustomPainter {
     required this.chartType,
     required this.axisColor,
     required this.labelColor,
+    required this.fillColor,
+    required this.tooltipColor,
   });
 
   @override
@@ -20634,10 +21908,7 @@ class SnapshotLineChartPainter extends CustomPainter {
               ..shader = LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: <Color>[
-                  item.color.withValues(alpha: 0.34),
-                  item.color.withValues(alpha: 0.03),
-                ],
+                colors: <Color>[fillColor, fillColor.withValues(alpha: 0.03)],
               ).createShader(chart),
           );
         }
@@ -20733,7 +22004,8 @@ class SnapshotLineChartPainter extends CustomPainter {
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(background, const Radius.circular(6)),
-      Paint()..color = color.withValues(alpha: 0.14),
+      Paint()
+        ..color = Color.alphaBlend(color.withValues(alpha: 0.08), tooltipColor),
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(background, const Radius.circular(6)),
@@ -20751,6 +22023,8 @@ class SnapshotLineChartPainter extends CustomPainter {
         oldDelegate.series != series ||
         oldDelegate.axisColor != axisColor ||
         oldDelegate.labelColor != labelColor ||
+        oldDelegate.fillColor != fillColor ||
+        oldDelegate.tooltipColor != tooltipColor ||
         oldDelegate.chartType != chartType ||
         oldDelegate.includeZero != includeZero;
   }
@@ -20804,19 +22078,16 @@ class PremiumScaffoldSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[
-            colors.surface,
-            Color.alphaBlend(
-              colors.primary.withValues(alpha: 0.024),
-              colors.surface,
-            ),
-            colors.surface,
+            tokens.gradientStart,
+            tokens.backgroundSecondary,
+            tokens.gradientEnd,
           ],
           stops: const <double>[0, 0.46, 1],
         ),
@@ -20899,8 +22170,8 @@ class PremiumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final BorderRadius borderRadius = BorderRadius.circular(20);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final BorderRadius borderRadius = BorderRadius.circular(tokens.cardRadius);
     final Widget content = Padding(padding: padding, child: child);
 
     return Container(
@@ -20909,17 +22180,12 @@ class PremiumCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[
-            colors.surfaceContainerHigh.withValues(alpha: 0.9),
-            colors.surfaceContainer.withValues(alpha: 0.86),
-          ],
+          colors: <Color>[tokens.surfaceElevated, tokens.cardBackground],
         ),
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.38),
-        ),
+        border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.07),
+            color: tokens.shadow.withValues(alpha: tokens.shadowOpacity),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -20947,11 +22213,12 @@ class PremiumStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final Color color = switch (tone) {
-      PremiumStatusTone.positive => const Color(0xFF22C55E),
+      PremiumStatusTone.positive => tokens.secondaryAccent,
       PremiumStatusTone.negative => colors.error,
-      PremiumStatusTone.warning => const Color(0xFFF59E0B),
-      PremiumStatusTone.accent => colors.primary,
+      PremiumStatusTone.warning => tokens.tertiaryAccent,
+      PremiumStatusTone.accent => tokens.primaryAccent,
       PremiumStatusTone.neutral => colors.onSurfaceVariant,
     };
     return Container(
@@ -20991,19 +22258,32 @@ class PremiumEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return PremiumCard(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Column(
           children: <Widget>[
-            Container(
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
               width: 58,
               height: 58,
               decoration: BoxDecoration(
-                color: colors.primary.withValues(alpha: 0.12),
+                color: tokens.primaryAccent.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: tokens.selectedBorder.withValues(alpha: 0.42),
+                ),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: tokens.glowColor,
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-              child: Icon(icon, color: colors.primary, size: 30),
+              child: Icon(icon, color: tokens.primaryAccent, size: 30),
             ),
             const SizedBox(height: 14),
             Text(
@@ -21017,9 +22297,11 @@ class PremiumEmptyState extends StatelessWidget {
             Text(
               description,
               textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
             ),
             if (actionLabel != null && onAction != null) ...<Widget>[
               const SizedBox(height: 14),
@@ -21031,6 +22313,36 @@ class PremiumEmptyState extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PopupActionLabel extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  const _PopupActionLabel({
+    required this.icon,
+    required this.label,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color resolvedColor =
+        color ?? Theme.of(context).colorScheme.onSurface;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: 18, color: resolvedColor),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: TextStyle(color: resolvedColor, fontWeight: FontWeight.w800),
+        ),
+      ],
     );
   }
 }
@@ -21780,17 +23092,17 @@ extension AppThemeStyleDetails on AppThemeStyle {
   String get description {
     switch (this) {
       case AppThemeStyle.proDark:
-        return 'Negro profundo con acentos violeta premium.';
+        return 'OLED de lujo con violeta profundo y superficies elevadas.';
       case AppThemeStyle.graphite:
-        return 'Neutros sobrios para lectura prolongada.';
+        return 'Grafito ejecutivo, mínimo y editorial.';
       case AppThemeStyle.institutionalBlue:
-        return 'Azules financieros con contraste limpio.';
+        return 'Banca profesional con azul Bloomberg sobrio.';
       case AppThemeStyle.bitcoinDark:
-        return 'Carbón y naranja BTC en paleta completa.';
+        return 'Carbón premium con cobre y naranja Bitcoin.';
       case AppThemeStyle.terminalGreen:
-        return 'Oscuro técnico con energía terminal.';
+        return 'Trading terminal, verde técnico y alto foco.';
       case AppThemeStyle.highContrast:
-        return 'Máxima legibilidad y bordes marcados.';
+        return 'Accesibilidad premium con contraste limpio.';
     }
   }
 
@@ -21798,87 +23110,87 @@ extension AppThemeStyleDetails on AppThemeStyle {
     switch (this) {
       case AppThemeStyle.proDark:
         return const AppPalette(
-          background: Color(0xFF090B12),
-          surface: Color(0xFF111520),
-          surfaceAlt: Color(0xFF1B2233),
-          primary: Color(0xFF9B8CFF),
-          primarySoft: Color(0xFF28234F),
-          border: Color(0xFF30384C),
-          positive: Color(0xFF22C55E),
-          negative: Color(0xFFEF4444),
-          warning: Color(0xFFF59E0B),
-          textMain: Color(0xFFF8FAFC),
-          textMuted: Color(0xFF94A3B8),
+          background: Color(0xFF02030A),
+          surface: Color(0xFF0A0D18),
+          surfaceAlt: Color(0xFF151A2B),
+          primary: Color(0xFFA78BFA),
+          primarySoft: Color(0xFF241B4A),
+          border: Color(0xFF2B3150),
+          positive: Color(0xFF2DD4BF),
+          negative: Color(0xFFFB7185),
+          warning: Color(0xFFFBBF24),
+          textMain: Color(0xFFFAFBFF),
+          textMuted: Color(0xFF9AA6C1),
         );
       case AppThemeStyle.graphite:
         return const AppPalette(
-          background: Color(0xFF111315),
-          surface: Color(0xFF1B1F23),
-          surfaceAlt: Color(0xFF272C31),
-          primary: Color(0xFFCBD5E1),
-          primarySoft: Color(0xFF334155),
-          border: Color(0xFF3B424A),
-          positive: Color(0xFF16A34A),
-          negative: Color(0xFFDC2626),
-          warning: Color(0xFFD97706),
-          textMain: Color(0xFFF1F5F9),
-          textMuted: Color(0xFFA1A1AA),
+          background: Color(0xFF0F1012),
+          surface: Color(0xFF181A1D),
+          surfaceAlt: Color(0xFF24272B),
+          primary: Color(0xFFE5E7EB),
+          primarySoft: Color(0xFF30343A),
+          border: Color(0xFF3A3F46),
+          positive: Color(0xFF34D399),
+          negative: Color(0xFFF87171),
+          warning: Color(0xFFF59E0B),
+          textMain: Color(0xFFF8FAFC),
+          textMuted: Color(0xFFA7ADB7),
         );
       case AppThemeStyle.institutionalBlue:
         return const AppPalette(
-          background: Color(0xFF07111F),
-          surface: Color(0xFF0E1B2E),
-          surfaceAlt: Color(0xFF162A46),
-          primary: Color(0xFF60A5FA),
-          primarySoft: Color(0xFF12345C),
-          border: Color(0xFF25496F),
-          positive: Color(0xFF10B981),
-          negative: Color(0xFFF43F5E),
-          warning: Color(0xFFFBBF24),
-          textMain: Color(0xFFF8FAFC),
-          textMuted: Color(0xFF93A8C2),
+          background: Color(0xFF03101F),
+          surface: Color(0xFF071A31),
+          surfaceAlt: Color(0xFF102B4E),
+          primary: Color(0xFF38BDF8),
+          primarySoft: Color(0xFF0D3A68),
+          border: Color(0xFF1F5A89),
+          positive: Color(0xFF22C55E),
+          negative: Color(0xFFEF4444),
+          warning: Color(0xFFEAB308),
+          textMain: Color(0xFFF8FBFF),
+          textMuted: Color(0xFF9CB7D6),
         );
       case AppThemeStyle.bitcoinDark:
         return const AppPalette(
-          background: Color(0xFF0D0A06),
-          surface: Color(0xFF17110A),
-          surfaceAlt: Color(0xFF2A1B0D),
-          primary: Color(0xFFF7931A),
-          primarySoft: Color(0xFF3A220C),
-          border: Color(0xFF5C3A16),
-          positive: Color(0xFF22C55E),
+          background: Color(0xFF080604),
+          surface: Color(0xFF14100B),
+          surfaceAlt: Color(0xFF281A0E),
+          primary: Color(0xFFF59E0B),
+          primarySoft: Color(0xFF43270B),
+          border: Color(0xFF6B4518),
+          positive: Color(0xFF84CC16),
           negative: Color(0xFFEF4444),
-          warning: Color(0xFFF59E0B),
-          textMain: Color(0xFFFFFBEB),
-          textMuted: Color(0xFFD6B98A),
+          warning: Color(0xFFF97316),
+          textMain: Color(0xFFFFF7ED),
+          textMuted: Color(0xFFD4B483),
         );
       case AppThemeStyle.terminalGreen:
         return const AppPalette(
-          background: Color(0xFF020A06),
-          surface: Color(0xFF07140D),
-          surfaceAlt: Color(0xFF0E2618),
-          primary: Color(0xFF39FF88),
-          primarySoft: Color(0xFF073D20),
-          border: Color(0xFF176B3A),
+          background: Color(0xFF010805),
+          surface: Color(0xFF06120B),
+          surfaceAlt: Color(0xFF0C2616),
+          primary: Color(0xFF4ADE80),
+          primarySoft: Color(0xFF0B3B21),
+          border: Color(0xFF14532D),
           positive: Color(0xFF22C55E),
-          negative: Color(0xFFF87171),
+          negative: Color(0xFFFB7185),
           warning: Color(0xFFFACC15),
-          textMain: Color(0xFFEFFFF5),
-          textMuted: Color(0xFF88B99C),
+          textMain: Color(0xFFF0FFF7),
+          textMuted: Color(0xFF8BC7A2),
         );
       case AppThemeStyle.highContrast:
         return const AppPalette(
           background: Color(0xFF000000),
-          surface: Color(0xFF0B0B0B),
-          surfaceAlt: Color(0xFF1F1F1F),
+          surface: Color(0xFF080808),
+          surfaceAlt: Color(0xFF171717),
           primary: Color(0xFFFFFFFF),
-          primarySoft: Color(0xFF2C2C2C),
+          primarySoft: Color(0xFF262626),
           border: Color(0xFFFFFFFF),
-          positive: Color(0xFF00E676),
-          negative: Color(0xFFFF1744),
+          positive: Color(0xFF00F57A),
+          negative: Color(0xFFFF3355),
           warning: Color(0xFFFFD600),
           textMain: Color(0xFFFFFFFF),
-          textMuted: Color(0xFFE0E0E0),
+          textMuted: Color(0xFFE6E6E6),
         );
     }
   }
