@@ -9800,9 +9800,9 @@ class _SimulationTabState extends State<SimulationTab> {
       ),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Simulación guardada.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Simulación guardada.')));
   }
 
   Future<void> _addSavedSimulation(_SavedSimulationRecord record) async {
@@ -9818,14 +9818,12 @@ class _SimulationTabState extends State<SimulationTab> {
     await _persistSavedSimulations();
   }
 
-  Future<void> _duplicateSavedSimulation(
-    _SavedSimulationRecord record,
-  ) async {
+  Future<void> _duplicateSavedSimulation(_SavedSimulationRecord record) async {
     await _addSavedSimulation(record.copyAsNew());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Simulación duplicada.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Simulación duplicada.')));
   }
 
   Future<void> _deleteSavedSimulation(String id) async {
@@ -9836,9 +9834,9 @@ class _SimulationTabState extends State<SimulationTab> {
     });
     await _persistSavedSimulations();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Simulación eliminada.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Simulación eliminada.')));
   }
 
   void _showSavedSimulations() {
@@ -10019,8 +10017,9 @@ class _SimulationTabState extends State<SimulationTab> {
               alignment: WrapAlignment.end,
               children: <Widget>[
                 OutlinedButton.icon(
-                  onPressed:
-                      _savedSimulations.isEmpty ? null : _showSavedSimulations,
+                  onPressed: _savedSimulations.isEmpty
+                      ? null
+                      : _showSavedSimulations,
                   icon: const Icon(Icons.history_outlined),
                   label: Text('Historial (${_savedSimulations.length})'),
                   style: OutlinedButton.styleFrom(
@@ -11585,14 +11584,14 @@ class _SimulationHero extends StatelessWidget {
                         switchOutCurve: Curves.easeInCubic,
                         transitionBuilder:
                             (Widget child, Animation<double> animation) {
-                          return ScaleTransition(
-                            scale: animation,
-                            child: FadeTransition(
-                              opacity: animation,
-                              child: child,
-                            ),
-                          );
-                        },
+                              return ScaleTransition(
+                                scale: animation,
+                                child: FadeTransition(
+                                  opacity: animation,
+                                  child: child,
+                                ),
+                              );
+                            },
                         child: Container(
                           key: ValueKey<String>(operationType),
                           width: 46,
@@ -11627,69 +11626,69 @@ class _SimulationHero extends StatelessWidget {
                     switchOutCurve: Curves.easeInCubic,
                     transitionBuilder:
                         (Widget child, Animation<double> animation) {
-                      return FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween<Offset>(
-                            begin: const Offset(0, 0.05),
-                            end: Offset.zero,
-                          ).animate(animation),
-                          child: child,
-                        ),
-                      );
-                    },
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.05),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
+                            ),
+                          );
+                        },
                     child: LayoutBuilder(
                       key: ValueKey<String>('metrics-$animationKey'),
                       builder:
                           (BuildContext context, BoxConstraints constraints) {
-                        const double gap = 8;
-                        final double width = constraints.maxWidth >= 340
-                            ? (constraints.maxWidth - gap * 2) / 3
-                            : (constraints.maxWidth - gap) / 2;
-                        final List<_SimulationMetricData> metrics =
-                            <_SimulationMetricData>[
-                          _SimulationMetricData(
-                            label: 'Moneda',
-                            value: selectedAsset,
-                            icon: Icons.token_outlined,
-                          ),
-                          _SimulationMetricData(
-                            label: 'Operación',
-                            value: operationType,
-                            icon: Icons.bolt_outlined,
-                            color: accentColor,
-                          ),
-                          _SimulationMetricData(
-                            label: 'Escenario',
-                            value: scenario,
-                            icon: Icons.auto_graph_outlined,
-                          ),
-                          _SimulationMetricData(
-                            label: 'Comisión',
-                            value: feeLabel,
-                            icon: Icons.percent_outlined,
-                          ),
-                          _SimulationMetricData(
-                            label: 'Guardadas',
-                            value: savedCount.toString(),
-                            icon: Icons.bookmark_added_outlined,
-                          ),
-                        ];
-                        return Wrap(
-                          spacing: gap,
-                          runSpacing: gap,
-                          children: metrics
-                              .map(
-                                (_SimulationMetricData metric) =>
-                                    _SimulationMetricCard(
-                                  metric: metric,
-                                  width: width,
-                                  compact: true,
-                                ),
-                              )
-                              .toList(),
-                        );
-                      },
+                            const double gap = 8;
+                            final double width = constraints.maxWidth >= 340
+                                ? (constraints.maxWidth - gap * 2) / 3
+                                : (constraints.maxWidth - gap) / 2;
+                            final List<_SimulationMetricData> metrics =
+                                <_SimulationMetricData>[
+                                  _SimulationMetricData(
+                                    label: 'Moneda',
+                                    value: selectedAsset,
+                                    icon: Icons.token_outlined,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Operación',
+                                    value: operationType,
+                                    icon: Icons.bolt_outlined,
+                                    color: accentColor,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Escenario',
+                                    value: scenario,
+                                    icon: Icons.auto_graph_outlined,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Comisión',
+                                    value: feeLabel,
+                                    icon: Icons.percent_outlined,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Guardadas',
+                                    value: savedCount.toString(),
+                                    icon: Icons.bookmark_added_outlined,
+                                  ),
+                                ];
+                            return Wrap(
+                              spacing: gap,
+                              runSpacing: gap,
+                              children: metrics
+                                  .map(
+                                    (_SimulationMetricData metric) =>
+                                        _SimulationMetricCard(
+                                          metric: metric,
+                                          width: width,
+                                          compact: true,
+                                        ),
+                                  )
+                                  .toList(),
+                            );
+                          },
                     ),
                   ),
                 ],
@@ -12159,8 +12158,9 @@ class _SimulationResultModalCard extends StatelessWidget {
                               icon: const Icon(Icons.check_circle_outline),
                               label: const Text('Cerrar'),
                               style: FilledButton.styleFrom(
-                                backgroundColor:
-                                    accentColor.withValues(alpha: 0.18),
+                                backgroundColor: accentColor.withValues(
+                                  alpha: 0.18,
+                                ),
                                 foregroundColor: Colors.white,
                                 textStyle: const TextStyle(
                                   fontWeight: FontWeight.w900,
@@ -12181,8 +12181,6 @@ class _SimulationResultModalCard extends StatelessWidget {
     );
   }
 }
-
-
 
 class _SimulationStrategyBadge extends StatelessWidget {
   final int score;
@@ -12227,7 +12225,6 @@ class _SimulationStrategyBadge extends StatelessWidget {
     );
   }
 }
-
 
 class _SavedSimulationRecord {
   final String id;
@@ -12473,15 +12470,15 @@ class _SavedSimulationCard extends StatelessWidget {
                 },
                 itemBuilder: (BuildContext context) =>
                     const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(
-                    value: 'duplicate',
-                    child: Text('Duplicar'),
-                  ),
-                  PopupMenuItem<String>(
-                    value: 'delete',
-                    child: Text('Eliminar'),
-                  ),
-                ],
+                      PopupMenuItem<String>(
+                        value: 'duplicate',
+                        child: Text('Duplicar'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text('Eliminar'),
+                      ),
+                    ],
               ),
             ],
           ),
@@ -12515,10 +12512,7 @@ class _SimulationComparatorSheet extends StatelessWidget {
   final _SavedSimulationRecord left;
   final _SavedSimulationRecord right;
 
-  const _SimulationComparatorSheet({
-    required this.left,
-    required this.right,
-  });
+  const _SimulationComparatorSheet({required this.left, required this.right});
 
   @override
   Widget build(BuildContext context) {
@@ -12589,51 +12583,51 @@ class _SimulationComparatorSheet extends StatelessWidget {
                     LayoutBuilder(
                       builder:
                           (BuildContext context, BoxConstraints constraints) {
-                        final bool stacked = constraints.maxWidth < 560;
-                        final List<Widget> cards = <Widget>[
-                          Expanded(
-                            child: _SimulationComparatorCard(
-                              title: 'A · Más reciente',
-                              record: left,
-                              accentColor: const Color(0xFF8B5CF6),
-                            ),
-                          ),
-                          Expanded(
-                            child: _SimulationComparatorCard(
-                              title: 'B · Anterior',
-                              record: right,
-                              accentColor: const Color(0xFF38BDF8),
-                            ),
-                          ),
-                        ];
-
-                        if (stacked) {
-                          return Column(
-                            children: <Widget>[
-                              _SimulationComparatorCard(
-                                title: 'A · Más reciente',
-                                record: left,
-                                accentColor: const Color(0xFF8B5CF6),
+                            final bool stacked = constraints.maxWidth < 560;
+                            final List<Widget> cards = <Widget>[
+                              Expanded(
+                                child: _SimulationComparatorCard(
+                                  title: 'A · Más reciente',
+                                  record: left,
+                                  accentColor: const Color(0xFF8B5CF6),
+                                ),
                               ),
-                              const SizedBox(height: 10),
-                              _SimulationComparatorCard(
-                                title: 'B · Anterior',
-                                record: right,
-                                accentColor: const Color(0xFF38BDF8),
+                              Expanded(
+                                child: _SimulationComparatorCard(
+                                  title: 'B · Anterior',
+                                  record: right,
+                                  accentColor: const Color(0xFF38BDF8),
+                                ),
                               ),
-                            ],
-                          );
-                        }
+                            ];
 
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            cards[0],
-                            const SizedBox(width: 10),
-                            cards[1],
-                          ],
-                        );
-                      },
+                            if (stacked) {
+                              return Column(
+                                children: <Widget>[
+                                  _SimulationComparatorCard(
+                                    title: 'A · Más reciente',
+                                    record: left,
+                                    accentColor: const Color(0xFF8B5CF6),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _SimulationComparatorCard(
+                                    title: 'B · Anterior',
+                                    record: right,
+                                    accentColor: const Color(0xFF38BDF8),
+                                  ),
+                                ],
+                              );
+                            }
+
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                cards[0],
+                                const SizedBox(width: 10),
+                                cards[1],
+                              ],
+                            );
+                          },
                     ),
                     const SizedBox(height: 12),
                     _SimulationComparisonMatrix(left: left, right: right),
@@ -12733,16 +12727,17 @@ class _SimulationComparisonMatrix extends StatelessWidget {
   final _SavedSimulationRecord left;
   final _SavedSimulationRecord right;
 
-  const _SimulationComparisonMatrix({
-    required this.left,
-    required this.right,
-  });
+  const _SimulationComparisonMatrix({required this.left, required this.right});
 
   @override
   Widget build(BuildContext context) {
-    final List<_SimulationComparisonRowData> rows =
-        <_SimulationComparisonRowData>[
-      _SimulationComparisonRowData('Activo', left.selectedAsset, right.selectedAsset),
+    final List<_SimulationComparisonRowData>
+    rows = <_SimulationComparisonRowData>[
+      _SimulationComparisonRowData(
+        'Activo',
+        left.selectedAsset,
+        right.selectedAsset,
+      ),
       _SimulationComparisonRowData('Modo', left.modeLabel, right.modeLabel),
       _SimulationComparisonRowData('Escenario', left.scenario, right.scenario),
       _SimulationComparisonRowData(
@@ -12756,7 +12751,9 @@ class _SimulationComparisonMatrix extends StatelessWidget {
       ),
       _SimulationComparisonRowData('Comisión', left.feeLabel, right.feeLabel),
       _SimulationComparisonRowData(
-        left.primaryLabel == right.primaryLabel ? left.primaryLabel : 'Resultado',
+        left.primaryLabel == right.primaryLabel
+            ? left.primaryLabel
+            : 'Resultado',
         left.primaryValue,
         right.primaryValue,
       ),
@@ -12844,7 +12841,6 @@ class _SimulationComparisonRow extends StatelessWidget {
     );
   }
 }
-
 
 class _SimulationMetricData {
   final String label;
