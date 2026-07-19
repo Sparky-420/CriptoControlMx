@@ -6986,6 +6986,8 @@ class _SummarySnapshotPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final PortfolioSnapshot? current = snapshot;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return _SummaryPanel(
       icon: Icons.camera_alt_outlined,
       title: 'Última instantánea',
@@ -6996,22 +6998,19 @@ class _SummarySnapshotPanel extends StatelessWidget {
         visualDensity: VisualDensity.compact,
         constraints: const BoxConstraints.tightFor(width: 30, height: 30),
         padding: EdgeInsets.zero,
-        icon: const Icon(Icons.show_chart, size: 17, color: Color(0xFFC4B5FD)),
+        icon: Icon(Icons.show_chart, size: 17, color: tokens.primaryAccent),
       ),
       child: current == null
-          ? const Text(
+          ? Text(
               'Aún no hay instantáneas guardadas.',
-              style: TextStyle(color: Color(0xFFB6BED0), fontSize: 13),
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
                   longDate(current.createdAt),
-                  style: const TextStyle(
-                    color: Color(0xFFD0D7E5),
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: colors.onSurface, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
                 Row(
@@ -7054,37 +7053,41 @@ class _SummaryCompactSection extends StatelessWidget {
   final String subtitle;
   const _SummaryCompactSection({required this.title, required this.subtitle});
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      const Icon(
-        Icons.account_balance_wallet_outlined,
-        size: 17,
-        color: _summaryPurple,
-      ),
-      const SizedBox(width: 7),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
-            ),
-          ],
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Row(
+      children: <Widget>[
+        Icon(
+          Icons.account_balance_wallet_outlined,
+          size: 17,
+          color: tokens.primaryAccent,
         ),
-      ),
-    ],
-  );
+        const SizedBox(width: 7),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                title,
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _SummaryCompactCoinTile extends StatelessWidget {
@@ -11531,7 +11534,7 @@ class _SimulationHero extends StatelessWidget {
                                     ),
                                   ),
                                   child: Text(
-                                    'FASE 4.1',
+                                    'SIMULAR',
                                     style: TextStyle(
                                       color: tokens.primaryAccent,
                                       fontSize: 11,
@@ -11543,7 +11546,7 @@ class _SimulationHero extends StatelessWidget {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'Overlay activo',
+                                    'Calculadora activa',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -16899,6 +16902,8 @@ class _ChartsPageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(2, 4, 2, 16),
       child: Row(
@@ -16913,7 +16918,7 @@ class _ChartsPageHeader extends StatelessWidget {
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontSize: 25,
                     fontWeight: FontWeight.w800,
-                    color: Colors.white,
+                    color: colors.onSurface,
                   ),
                 ),
                 const SizedBox(height: 5),
@@ -16922,7 +16927,7 @@ class _ChartsPageHeader extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontSize: 14,
                     height: 1.35,
-                    color: const Color(0xFFAAB3C5),
+                    color: colors.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -16934,11 +16939,11 @@ class _ChartsPageHeader extends StatelessWidget {
             height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: _chartsPurple.withValues(alpha: 0.16),
+              color: tokens.primaryAccent.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _chartsPurple.withValues(alpha: 0.32)),
+              border: Border.all(color: tokens.selectedBorder),
             ),
-            child: const Icon(Icons.insights_rounded, color: Color(0xFFC4B5FD)),
+            child: Icon(Icons.insights_rounded, color: tokens.primaryAccent),
           ),
         ],
       ),
@@ -21483,12 +21488,13 @@ class _ThemePaletteTile extends StatelessWidget {
                 : null,
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 width: 34,
                 height: 34,
-                margin: const EdgeInsets.only(right: 12),
+                margin: const EdgeInsets.only(right: 12, top: 2),
                 decoration: BoxDecoration(
                   color: selected
                       ? palette.primary
@@ -21516,32 +21522,34 @@ class _ThemePaletteTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(option.description),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 5,
+                      children:
+                          <Color>[
+                                palette.background,
+                                palette.surfaceAlt,
+                                palette.primary,
+                                palette.positive,
+                                palette.negative,
+                                palette.warning,
+                              ]
+                              .map(
+                                (Color color) => Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: palette.border),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                    ),
                   ],
                 ),
-              ),
-              Row(
-                children:
-                    <Color>[
-                          palette.background,
-                          palette.surfaceAlt,
-                          palette.primary,
-                          palette.positive,
-                          palette.negative,
-                          palette.warning,
-                        ]
-                        .map(
-                          (Color color) => Container(
-                            width: 18,
-                            height: 18,
-                            margin: const EdgeInsets.only(left: 4),
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: palette.border),
-                            ),
-                          ),
-                        )
-                        .toList(),
               ),
             ],
           ),

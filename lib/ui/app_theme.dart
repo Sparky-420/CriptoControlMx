@@ -80,12 +80,32 @@ extension CcmxThemeStyleDetails on CcmxThemeStyle {
   CcmxThemePalette paletteFor(Brightness brightness) {
     if (brightness == Brightness.light) {
       return switch (this) {
-        CcmxThemeStyle.proDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF5B4FCF), const Color(0xFFE7E3FF)),
-        CcmxThemeStyle.graphite => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF334155), const Color(0xFFE2E8F0)),
-        CcmxThemeStyle.institutionalBlue => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF075985), const Color(0xFFE0F2FE)),
-        CcmxThemeStyle.bitcoinDark => CcmxThemePalette.seriousLight.withAccent(const Color(0xFFB45309), const Color(0xFFFFEDD5)),
-        CcmxThemeStyle.terminalGreen => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF047857), const Color(0xFFD1FAE5)),
-        CcmxThemeStyle.highContrast => CcmxThemePalette.seriousLight.withAccent(const Color(0xFF000000), const Color(0xFFE5E7EB)),
+        CcmxThemeStyle.proDark => CcmxThemePalette.seriousLight.withAccent(
+          const Color(0xFF5B4FCF),
+          const Color(0xFFE7E3FF),
+        ),
+        CcmxThemeStyle.graphite => CcmxThemePalette.seriousLight.withAccent(
+          const Color(0xFF334155),
+          const Color(0xFFE2E8F0),
+        ),
+        CcmxThemeStyle.institutionalBlue =>
+          CcmxThemePalette.seriousLight.withAccent(
+            const Color(0xFF075985),
+            const Color(0xFFE0F2FE),
+          ),
+        CcmxThemeStyle.bitcoinDark => CcmxThemePalette.seriousLight.withAccent(
+          const Color(0xFFB45309),
+          const Color(0xFFFFEDD5),
+        ),
+        CcmxThemeStyle.terminalGreen =>
+          CcmxThemePalette.seriousLight.withAccent(
+            const Color(0xFF047857),
+            const Color(0xFFD1FAE5),
+          ),
+        CcmxThemeStyle.highContrast => CcmxThemePalette.seriousLight.withAccent(
+          const Color(0xFF000000),
+          const Color(0xFFE5E7EB),
+        ),
         CcmxThemeStyle.seriousLight => CcmxThemePalette.seriousLight,
       };
     }
@@ -137,7 +157,20 @@ class CcmxThemePalette {
     required this.textMuted,
   });
 
-  CcmxThemePalette withAccent(Color primary, Color primarySoft) => CcmxThemePalette(background: background, surface: surface, surfaceAlt: surfaceAlt, primary: primary, primarySoft: primarySoft, border: border, positive: positive, negative: negative, warning: warning, textMain: textMain, textMuted: textMuted);
+  CcmxThemePalette withAccent(Color primary, Color primarySoft) =>
+      CcmxThemePalette(
+        background: background,
+        surface: surface,
+        surfaceAlt: surfaceAlt,
+        primary: primary,
+        primarySoft: primarySoft,
+        border: border,
+        positive: positive,
+        negative: negative,
+        warning: warning,
+        textMain: textMain,
+        textMuted: textMuted,
+      );
 
   static const CcmxThemePalette proDark = CcmxThemePalette(
     background: Color(0xFF070910),
@@ -443,7 +476,9 @@ class CcmxAppTheme {
             size: selected ? 27 : 25,
           );
         }),
-        labelTextStyle: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+        labelTextStyle: WidgetStateProperty.resolveWith((
+          Set<WidgetState> states,
+        ) {
           final bool selected = states.contains(WidgetState.selected);
           return TextStyle(
             color: selected ? palette.primary : palette.textMuted,
@@ -477,9 +512,7 @@ class CcmxAppTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(CcmxThemeTokens.inputRadius),
-          borderSide: BorderSide(
-            color: palette.border.withValues(alpha: 0.58),
-          ),
+          borderSide: BorderSide(color: palette.border.withValues(alpha: 0.58)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(CcmxThemeTokens.inputRadius),
@@ -499,9 +532,9 @@ class CcmxAppTheme {
         ),
       ),
       textTheme: ThemeData(brightness: brightness).textTheme.apply(
-            bodyColor: palette.textMain,
-            displayColor: palette.textMain,
-          ),
+        bodyColor: palette.textMain,
+        displayColor: palette.textMain,
+      ),
     );
   }
 }
