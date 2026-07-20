@@ -7380,84 +7380,88 @@ class _SummaryCompactNotice extends StatelessWidget {
   final String title;
   final String subtitle;
   final String? badge;
-  final Color color;
+  final Color? color;
   const _SummaryCompactNotice({
     required this.icon,
     required this.title,
     required this.subtitle,
     this.badge,
-    this.color = _summaryPurple,
+    this.color,
   });
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(11),
-    decoration: _summaryTokenBox(context, radius: 12),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: <Widget>[
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, size: 16, color: color),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                title,
-                maxLines: 2,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  height: 1.1,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                maxLines: 2,
-                style: const TextStyle(
-                  color: Color(0xFFAAB3C5),
-                  fontSize: 13,
-                  height: 1.1,
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (badge != null)
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final Color resolvedColor = color ?? tokens.primaryAccent;
+    return Container(
+      padding: const EdgeInsets.all(11),
+      decoration: _summaryTokenBox(context, radius: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
           Container(
-            margin: const EdgeInsets.only(left: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(7),
+              color: resolvedColor.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
             ),
-            constraints: const BoxConstraints(maxWidth: 104),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                badge!,
-                maxLines: 1,
-                softWrap: false,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+            child: Icon(icon, size: 16, color: resolvedColor),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (badge != null)
+            Container(
+              margin: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: resolvedColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              constraints: const BoxConstraints(maxWidth: 104),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  badge!,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: resolvedColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _SummaryPanel extends StatelessWidget {
@@ -11869,46 +11873,72 @@ class _SimulationResultPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(Icons.insights_outlined, color: resolvedAccent, size: 19),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: colors.onSurface,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final List<Widget> actions = <Widget>[
+                TextButton.icon(
+                  onPressed: onSave,
+                  icon: const Icon(Icons.bookmark_add_outlined, size: 16),
+                  label: const Text('Guardar'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: resolvedAccent,
+                    visualDensity: VisualDensity.compact,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
-              ),
-              Wrap(
-                spacing: 4,
-                children: <Widget>[
-                  TextButton.icon(
-                    onPressed: onSave,
-                    icon: const Icon(Icons.bookmark_add_outlined, size: 16),
-                    label: const Text('Guardar'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: resolvedAccent,
-                      visualDensity: VisualDensity.compact,
-                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
+                TextButton.icon(
+                  onPressed: () => _showResultModal(context, resolvedAccent),
+                  icon: const Icon(Icons.open_in_full, size: 16),
+                  label: const Text('Ver'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: resolvedAccent,
+                    visualDensity: VisualDensity.compact,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  TextButton.icon(
-                    onPressed: () => _showResultModal(context, resolvedAccent),
-                    icon: const Icon(Icons.open_in_full, size: 16),
-                    label: const Text('Ver'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: resolvedAccent,
-                      visualDensity: VisualDensity.compact,
-                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ];
+              final Widget titleRow = Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.insights_outlined,
+                    color: resolvedAccent,
+                    size: 19,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                 ],
-              ),
-            ],
+              );
+
+              if (constraints.maxWidth < 380) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    titleRow,
+                    const SizedBox(height: 6),
+                    Wrap(spacing: 4, children: actions),
+                  ],
+                );
+              }
+
+              return Row(
+                children: <Widget>[
+                  Expanded(child: titleRow),
+                  const SizedBox(width: 8),
+                  Wrap(spacing: 4, children: actions),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 3),
           Text(
