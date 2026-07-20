@@ -7101,6 +7101,8 @@ class _SummaryCompactCoinTile extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool recovered = stats.isAtOrAboveNetBreakEven(sellFeePercent);
     final bool hasPrice = stats.currentPrice > 0;
     final String distance = stats.quantity <= 0 || recovered
@@ -7122,8 +7124,8 @@ class _SummaryCompactCoinTile extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       stats.coin,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: colors.onSurface,
                         fontSize: 19,
                         fontWeight: FontWeight.w800,
                       ),
@@ -7132,8 +7134,8 @@ class _SummaryCompactCoinTile extends StatelessWidget {
                       crypto(stats.quantity),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFAAB3C5),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 14,
                       ),
                     ),
@@ -7151,8 +7153,8 @@ class _SummaryCompactCoinTile extends StatelessWidget {
                       alignment: Alignment.centerRight,
                       child: Text(
                         _summaryMoney(stats.currentValue),
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: colors.onSurface,
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                         ),
@@ -7228,7 +7230,7 @@ class _SummaryCompactCoinTile extends StatelessWidget {
                 icon: const Icon(Icons.arrow_forward, size: 15),
                 label: const Text('Detalles'),
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFC4B5FD),
+                  foregroundColor: tokens.primaryAccent,
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 7),
                   textStyle: const TextStyle(
@@ -9992,6 +9994,7 @@ class _SimulationTabState extends State<SimulationTab> {
       rotationOriginStats,
       rotationTargetStats,
     );
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
 
     return PremiumScaffoldSurface(
       child: ListView(
@@ -10009,7 +10012,7 @@ class _SimulationTabState extends State<SimulationTab> {
                 _mode == SimulationMode.operation &&
                     _operationMode == OperationSimulationMode.sell
                 ? const Color(0xFFF87171)
-                : const Color(0xFF8B5CF6),
+                : tokens.primaryAccent,
           ),
           const SizedBox(height: 8),
           Align(
@@ -10026,8 +10029,8 @@ class _SimulationTabState extends State<SimulationTab> {
                   icon: const Icon(Icons.history_outlined),
                   label: Text('Historial (${_savedSimulations.length})'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0x338B5CF6)),
+                    foregroundColor: tokens.primaryAccent,
+                    side: BorderSide(color: tokens.selectedBorder),
                     textStyle: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -10038,8 +10041,8 @@ class _SimulationTabState extends State<SimulationTab> {
                   icon: const Icon(Icons.compare_arrows_outlined),
                   label: const Text('Comparar'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0x338B5CF6)),
+                    foregroundColor: tokens.primaryAccent,
+                    side: BorderSide(color: tokens.selectedBorder),
                     textStyle: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -10230,7 +10233,7 @@ class _SimulationTabState extends State<SimulationTab> {
         subtitle: result.valid
             ? 'Proyección de compra, no movimiento real.'
             : result.invalidReason,
-        accentColor: const Color(0xFF8B5CF6),
+        accentColor: ccmx.CcmxVisualTokens.of(context).primaryAccent,
         valid: result.valid,
         primaryLabel: 'Nuevo promedio',
         primaryValue: result.valid
@@ -10584,7 +10587,7 @@ class _SimulationTabState extends State<SimulationTab> {
               runSpacing: 8,
               children: <Widget>[
                 FilledButton.tonal(
-                  style: _simulationTonalButtonStyle,
+                  style: _simulationTonalButtonStyle(context),
                   onPressed: () {
                     setState(() {
                       _rotationOriginCoin = 'LINK';
@@ -10602,7 +10605,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   child: const Text('LINK → BTC'),
                 ),
                 FilledButton.tonal(
-                  style: _simulationTonalButtonStyle,
+                  style: _simulationTonalButtonStyle(context),
                   onPressed: () {
                     setState(() {
                       _rotationOriginCoin = 'UNI';
@@ -10767,7 +10770,7 @@ class _SimulationTabState extends State<SimulationTab> {
         subtitle: result.valid
             ? 'Ruta: $_rotationOriginCoin → $_rotationTargetCoin'
             : result.invalidReason,
-        accentColor: const Color(0xFF8B5CF6),
+        accentColor: ccmx.CcmxVisualTokens.of(context).primaryAccent,
         valid: result.valid,
         primaryLabel: '$_rotationTargetCoin comprado',
         primaryValue: result.valid
@@ -11363,7 +11366,6 @@ class _SimulationTabState extends State<SimulationTab> {
   static const List<double> _quickPercentValues = <double>[25, 50, 75, 100];
 }
 
-const Color _simulationSurface = Color(0xFF101827);
 const TextStyle _simulationInputTextStyle = TextStyle(
   color: Colors.white,
   fontSize: 15,
@@ -11383,23 +11385,32 @@ String _simulationCrypto(double value) {
   return text.replaceFirst(RegExp(r'\.?0+$'), '');
 }
 
-final ButtonStyle _simulationTonalButtonStyle = FilledButton.styleFrom(
-  backgroundColor: const Color(0x1A8B5CF6),
-  foregroundColor: const Color(0xFFE9D5FF),
-  minimumSize: const Size(0, 40),
-  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-  textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-);
+ButtonStyle _simulationTonalButtonStyle(BuildContext context) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return FilledButton.styleFrom(
+    backgroundColor: tokens.selectedBackground,
+    foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    side: BorderSide(color: tokens.selectedBorder),
+  );
+}
 
-BoxDecoration _simulationBox({
-  Color color = _simulationSurface,
+BoxDecoration _simulationBox(
+  BuildContext context, {
+  Color? color,
   double radius = 16,
 }) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
   return BoxDecoration(
-    color: color,
+    color: color ?? tokens.cardBackground,
     borderRadius: BorderRadius.circular(radius),
-    border: Border.all(color: const Color(0x20FFFFFF)),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: <BoxShadow>[
+      BoxShadow(color: tokens.glowColor, blurRadius: 18, spreadRadius: -10),
+    ],
   );
 }
 
@@ -12100,7 +12111,10 @@ class _SimulationResultModalCard extends StatelessWidget {
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: _simulationBox(
-                          color: const Color(0xFF111A2A),
+                          context,
+                          color: ccmx.CcmxVisualTokens.of(
+                            context,
+                          ).surfaceElevated,
                           radius: 16,
                         ),
                         child: Column(
@@ -12316,6 +12330,7 @@ class _SavedSimulationsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final double maxHeight = MediaQuery.sizeOf(context).height * 0.82;
     return SafeArea(
       child: Align(
@@ -12327,7 +12342,7 @@ class _SavedSimulationsSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: tokens.surfaceElevated,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: const Color(0x338B5CF6)),
+              border: Border.all(color: tokens.selectedBorder),
               boxShadow: <BoxShadow>[
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.35),
@@ -12345,16 +12360,16 @@ class _SavedSimulationsSheet extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
                     child: Row(
                       children: <Widget>[
-                        const Icon(
+                        Icon(
                           Icons.history_outlined,
-                          color: Color(0xFFC4B5FD),
+                          color: tokens.primaryAccent,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Historial de simulaciones (${records.length})',
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: colors.onSurface,
                               fontSize: 19,
                               fontWeight: FontWeight.w900,
                             ),
@@ -12364,12 +12379,12 @@ class _SavedSimulationsSheet extends StatelessWidget {
                           tooltip: 'Cerrar',
                           onPressed: () => Navigator.of(context).pop(),
                           icon: const Icon(Icons.close),
-                          color: Colors.white,
+                          color: colors.onSurface,
                         ),
                       ],
                     ),
                   ),
-                  const Divider(height: 1, color: Color(0x22FFFFFF)),
+                  Divider(height: 1, color: tokens.divider),
                   Flexible(
                     child: ListView.separated(
                       shrinkWrap: true,
@@ -12410,8 +12425,13 @@ class _SavedSimulationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
-      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
+      decoration: _simulationBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 16,
+      ),
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -12424,12 +12444,12 @@ class _SavedSimulationCard extends StatelessWidget {
                 height: 38,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: const Color(0x1A8B5CF6),
+                  color: tokens.selectedBackground,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.bookmark_added_outlined,
-                  color: Color(0xFFC4B5FD),
+                  color: tokens.primaryAccent,
                   size: 21,
                 ),
               ),
@@ -12440,8 +12460,8 @@ class _SavedSimulationCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       record.selectedAsset,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: colors.onSurface,
                         fontSize: 17,
                         fontWeight: FontWeight.w900,
                       ),
@@ -12449,8 +12469,8 @@ class _SavedSimulationCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       '${record.modeLabel} · ${record.scenario}',
-                      style: const TextStyle(
-                        color: Color(0xFFB7C0D4),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
@@ -12459,14 +12479,14 @@ class _SavedSimulationCard extends StatelessWidget {
                     _SimulationStrategyBadge(
                       score: record.strategyScore,
                       label: record.strategyLabel,
-                      color: const Color(0xFFC4B5FD),
+                      color: tokens.primaryAccent,
                     ),
                   ],
                 ),
               ),
               PopupMenuButton<String>(
                 color: tokens.surfaceElevated,
-                iconColor: Colors.white,
+                iconColor: colors.onSurface,
                 onSelected: (String value) {
                   if (value == 'duplicate') onDuplicate();
                   if (value == 'delete') onDelete();
@@ -12520,6 +12540,7 @@ class _SimulationComparatorSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final double maxHeight = MediaQuery.sizeOf(context).height * 0.84;
     return SafeArea(
       child: Align(
@@ -12531,7 +12552,7 @@ class _SimulationComparatorSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: tokens.surfaceElevated,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: const Color(0x338B5CF6)),
+              border: Border.all(color: tokens.selectedBorder),
               boxShadow: <BoxShadow>[
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.35),
@@ -12550,16 +12571,16 @@ class _SimulationComparatorSheet extends StatelessWidget {
                   children: <Widget>[
                     Row(
                       children: <Widget>[
-                        const Icon(
+                        Icon(
                           Icons.compare_arrows_outlined,
-                          color: Color(0xFFC4B5FD),
+                          color: tokens.primaryAccent,
                         ),
                         const SizedBox(width: 8),
-                        const Expanded(
+                        Expanded(
                           child: Text(
                             'Comparador de simulaciones',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: colors.onSurface,
                               fontSize: 19,
                               fontWeight: FontWeight.w900,
                             ),
@@ -12569,15 +12590,15 @@ class _SimulationComparatorSheet extends StatelessWidget {
                           tooltip: 'Cerrar',
                           onPressed: () => Navigator.of(context).pop(),
                           icon: const Icon(Icons.close),
-                          color: Colors.white,
+                          color: colors.onSurface,
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    const Text(
+                    Text(
                       'Compara las dos simulaciones guardadas más recientes.',
                       style: TextStyle(
-                        color: Color(0xFFB7C0D4),
+                        color: colors.onSurfaceVariant,
                         fontSize: 13,
                         height: 1.3,
                       ),
@@ -12592,14 +12613,14 @@ class _SimulationComparatorSheet extends StatelessWidget {
                                 child: _SimulationComparatorCard(
                                   title: 'A · Más reciente',
                                   record: left,
-                                  accentColor: const Color(0xFF8B5CF6),
+                                  accentColor: tokens.primaryAccent,
                                 ),
                               ),
                               Expanded(
                                 child: _SimulationComparatorCard(
                                   title: 'B · Anterior',
                                   record: right,
-                                  accentColor: const Color(0xFF38BDF8),
+                                  accentColor: tokens.chartSecondary,
                                 ),
                               ),
                             ];
@@ -12610,13 +12631,13 @@ class _SimulationComparatorSheet extends StatelessWidget {
                                   _SimulationComparatorCard(
                                     title: 'A · Más reciente',
                                     record: left,
-                                    accentColor: const Color(0xFF8B5CF6),
+                                    accentColor: tokens.primaryAccent,
                                   ),
                                   const SizedBox(height: 10),
                                   _SimulationComparatorCard(
                                     title: 'B · Anterior',
                                     record: right,
-                                    accentColor: const Color(0xFF38BDF8),
+                                    accentColor: tokens.chartSecondary,
                                   ),
                                 ],
                               );
@@ -12658,8 +12679,14 @@ class _SimulationComparatorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
-      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
+      decoration: _simulationBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 16,
+      ),
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -12676,8 +12703,8 @@ class _SimulationComparatorCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             record.selectedAsset,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: colors.onSurface,
               fontSize: 18,
               fontWeight: FontWeight.w900,
             ),
@@ -12685,8 +12712,8 @@ class _SimulationComparatorCard extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             record.modeLabel,
-            style: const TextStyle(
-              color: Color(0xFFB7C0D4),
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
               fontSize: 13,
               fontWeight: FontWeight.w700,
             ),
@@ -12700,8 +12727,8 @@ class _SimulationComparatorCard extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             record.primaryLabel,
-            style: const TextStyle(
-              color: Color(0xFFB7C0D4),
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -12712,8 +12739,8 @@ class _SimulationComparatorCard extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Text(
               record.primaryValue,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colors.onSurface,
                 fontSize: 24,
                 fontWeight: FontWeight.w900,
                 fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
@@ -12734,6 +12761,7 @@ class _SimulationComparisonMatrix extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final List<_SimulationComparisonRowData>
     rows = <_SimulationComparisonRowData>[
       _SimulationComparisonRowData(
@@ -12768,13 +12796,17 @@ class _SimulationComparisonMatrix extends StatelessWidget {
     ];
 
     return Container(
-      decoration: _simulationBox(color: const Color(0xFF111A2A), radius: 16),
+      decoration: _simulationBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 16,
+      ),
       child: Column(
         children: <Widget>[
           for (int index = 0; index < rows.length; index++) ...<Widget>[
             _SimulationComparisonRow(data: rows[index]),
             if (index != rows.length - 1)
-              const Divider(height: 1, color: Color(0x18FFFFFF)),
+              Divider(height: 1, color: tokens.divider),
           ],
         ],
       ),
@@ -12801,6 +12833,8 @@ class _SimulationComparisonRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool differs = data.leftValue != data.rightValue;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -12811,8 +12845,8 @@ class _SimulationComparisonRow extends StatelessWidget {
             width: 86,
             child: Text(
               data.label,
-              style: const TextStyle(
-                color: Color(0xFFB7C0D4),
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
               ),
@@ -12822,7 +12856,7 @@ class _SimulationComparisonRow extends StatelessWidget {
             child: Text(
               data.leftValue,
               style: TextStyle(
-                color: differs ? const Color(0xFFC4B5FD) : Colors.white,
+                color: differs ? tokens.primaryAccent : colors.onSurface,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
               ),
@@ -12833,7 +12867,7 @@ class _SimulationComparisonRow extends StatelessWidget {
             child: Text(
               data.rightValue,
               style: TextStyle(
-                color: differs ? const Color(0xFF7DD3FC) : Colors.white,
+                color: differs ? tokens.chartSecondary : colors.onSurface,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
               ),
@@ -12997,7 +13031,13 @@ class _SimulationInvalidState extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      decoration: _simulationBox(color: const Color(0xFF211A25), radius: 13),
+      decoration: _simulationBox(
+        context,
+        color: Theme.of(
+          context,
+        ).colorScheme.tertiaryContainer.withValues(alpha: 0.28),
+        radius: 13,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -13422,99 +13462,106 @@ class _CoinsPremiumHeader extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(16),
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: <Color>[Color(0xFF17152C), Color(0xFF101827)],
-      ),
-      border: Border.all(color: const Color(0x337C3AED)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Monedas',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  SizedBox(height: 3),
-                  Text(
-                    'Precios y lectura general de tus posiciones',
-                    maxLines: 2,
-                    style: TextStyle(
-                      color: Color(0xFFB6BED0),
-                      fontSize: 14,
-                      height: 1.2,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0x227C3AED),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.currency_bitcoin,
-                size: 20,
-                color: Color(0xFFC4B5FD),
-              ),
-            ),
-          ],
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
         ),
-        const SizedBox(height: 13),
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        border: Border.all(color: tokens.selectedBorder),
+        boxShadow: <BoxShadow>[
+          BoxShadow(color: tokens.glowColor, blurRadius: 18),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Expanded(
-                child: _CoinsHeaderMetric(
-                  icon: Icons.account_balance_wallet_outlined,
-                  label: 'Activas',
-                  value: '$activeCount/$monitoredCount',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Monedas',
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Precios y lectura general de tus posiciones',
+                      maxLines: 2,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 14,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: _CoinsHeaderMetric(
-                  icon: Icons.price_check_outlined,
-                  label: 'Con precio',
-                  value: '$pricedCount/$monitoredCount',
+              const SizedBox(width: 10),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: tokens.selectedBackground,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              ),
-              const SizedBox(width: 7),
-              const Expanded(
-                child: _CoinsHeaderMetric(
-                  icon: Icons.cloud_outlined,
-                  label: 'Fuente',
-                  value: 'CoinGecko',
-                  valueFontSize: 16,
+                child: Icon(
+                  Icons.currency_bitcoin,
+                  size: 20,
+                  color: tokens.primaryAccent,
                 ),
               ),
             ],
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 13),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Expanded(
+                  child: _CoinsHeaderMetric(
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: 'Activas',
+                    value: '$activeCount/$monitoredCount',
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: _CoinsHeaderMetric(
+                    icon: Icons.price_check_outlined,
+                    label: 'Con precio',
+                    value: '$pricedCount/$monitoredCount',
+                  ),
+                ),
+                const SizedBox(width: 7),
+                const Expanded(
+                  child: _CoinsHeaderMetric(
+                    icon: Icons.cloud_outlined,
+                    label: 'Fuente',
+                    value: 'CoinGecko',
+                    valueFontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinsHeaderMetric extends StatelessWidget {
@@ -13531,77 +13578,84 @@ class _CoinsHeaderMetric extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 96),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-    decoration: BoxDecoration(
-      color: const Color(0x99101827),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0x14FFFFFF)),
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(icon, size: 13, color: const Color(0xFFA78BFA)),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 2,
-                softWrap: true,
-                style: const TextStyle(
-                  color: Color(0xFFAAB3C5),
-                  fontSize: 13,
-                  height: 1.05,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 96),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: BoxDecoration(
+        color: tokens.surfacePrimary.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 13, color: tokens.primaryAccent),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  softWrap: true,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 13,
+                    height: 1.05,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: valueFontSize,
-              fontWeight: FontWeight.w800,
+            ],
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinsSectionHeader extends StatelessWidget {
   const _CoinsSectionHeader();
 
   @override
-  Widget build(BuildContext context) => const Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      Text(
-        'Tus monedas',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Tus monedas',
+          style: TextStyle(
+            color: colors.onSurface,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
         ),
-      ),
-      SizedBox(height: 2),
-      Text(
-        'Precios, posiciones y resultados',
-        style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
-      ),
-    ],
-  );
+        const SizedBox(height: 2),
+        Text(
+          'Precios, posiciones y resultados',
+          style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+        ),
+      ],
+    );
+  }
 }
 
 class _CoinsTrackingHeader extends StatelessWidget {
@@ -13610,75 +13664,86 @@ class _CoinsTrackingHeader extends StatelessWidget {
   const _CoinsTrackingHeader({required this.count});
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      const Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'En seguimiento',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'En seguimiento',
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-            SizedBox(height: 2),
-            Text(
-              'Precios disponibles sin posición abierta',
-              style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0x197C3AED),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          '$count',
-          style: const TextStyle(
-            color: Color(0xFFC4B5FD),
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
+              const SizedBox(height: 2),
+              Text(
+                'Precios disponibles sin posición abierta',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+              ),
+            ],
           ),
         ),
-      ),
-    ],
-  );
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: tokens.selectedBackground,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '$count',
+            style: TextStyle(
+              color: tokens.primaryAccent,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _CoinsEmptyActiveState extends StatelessWidget {
   const _CoinsEmptyActiveState();
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: const Color(0xFF0F1726),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0x14FFFFFF)),
-    ),
-    child: const Row(
-      children: <Widget>[
-        Icon(Icons.account_balance_wallet_outlined, color: Color(0xFFA78BFA)),
-        SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            'No hay posiciones abiertas. Tus monedas monitoreadas aparecen abajo.',
-            style: TextStyle(
-              color: Color(0xFFB6BED0),
-              fontSize: 14,
-              height: 1.2,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.account_balance_wallet_outlined,
+            color: tokens.primaryAccent,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'No hay posiciones abiertas. Tus monedas monitoreadas aparecen abajo.',
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 14,
+                height: 1.2,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _TrackedCoinTile extends StatelessWidget {
@@ -13696,6 +13761,8 @@ class _TrackedCoinTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool isManual = priceMode == PriceService.manualMode;
     final Color modeColor = isManual
         ? const Color(0xFFF59E0B)
@@ -13704,9 +13771,9 @@ class _TrackedCoinTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(11, 10, 8, 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1421),
+        color: tokens.surfaceElevated,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x14FFFFFF)),
+        border: Border.all(color: tokens.cardBorder),
       ),
       child: Column(
         children: <Widget>[
@@ -13720,8 +13787,8 @@ class _TrackedCoinTile extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       stat.coin,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: colors.onSurface,
                         fontSize: 19,
                         fontWeight: FontWeight.w900,
                       ),
@@ -13730,8 +13797,8 @@ class _TrackedCoinTile extends StatelessWidget {
                       name,
                       maxLines: 1,
                       softWrap: false,
-                      style: const TextStyle(
-                        color: Color(0xFFB6BED0),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                       ),
@@ -13747,10 +13814,10 @@ class _TrackedCoinTile extends StatelessWidget {
                   width: 40,
                   height: 40,
                 ),
-                icon: const Icon(
+                icon: Icon(
                   Icons.edit_outlined,
                   size: 17,
-                  color: Color(0xFFC4B5FD),
+                  color: tokens.primaryAccent,
                 ),
               ),
             ],
@@ -13761,9 +13828,12 @@ class _TrackedCoinTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text(
+                Text(
                   'Precio actual',
-                  style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 FittedBox(
@@ -13773,8 +13843,8 @@ class _TrackedCoinTile extends StatelessWidget {
                     _coinsPrice(stat.currentPrice),
                     maxLines: 1,
                     softWrap: false,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: colors.onSurface,
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                     ),
@@ -13791,13 +13861,13 @@ class _TrackedCoinTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0x1238BDF8),
+                  color: tokens.chartSecondary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(7),
                 ),
-                child: const Text(
+                child: Text(
                   'Sin posición',
                   style: TextStyle(
-                    color: Color(0xFF7DD3FC),
+                    color: tokens.chartSecondary,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -13808,7 +13878,7 @@ class _TrackedCoinTile extends StatelessWidget {
               TextButton(
                 onPressed: onDetails,
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFC4B5FD),
+                  foregroundColor: tokens.primaryAccent,
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 7),
                   textStyle: const TextStyle(
@@ -13846,6 +13916,8 @@ class PremiumCoinCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
     final bool hasPrice = stat.currentPrice > 0;
@@ -13867,13 +13939,9 @@ class PremiumCoinCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 11, 12, 9),
       decoration: BoxDecoration(
-        color: hasPosition ? const Color(0xFF0F1726) : const Color(0xFF0D1421),
+        color: hasPosition ? tokens.surfacePrimary : tokens.surfaceElevated,
         borderRadius: BorderRadius.circular(13),
-        border: Border.all(
-          color: hasPosition
-              ? const Color(0x247C3AED)
-              : const Color(0x14FFFFFF),
-        ),
+        border: Border.all(color: tokens.cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -13889,8 +13957,8 @@ class PremiumCoinCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       stat.coin,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: colors.onSurface,
                         fontSize: 22,
                         fontWeight: FontWeight.w900,
                         height: 1,
@@ -13901,8 +13969,8 @@ class PremiumCoinCard extends StatelessWidget {
                       assetName,
                       maxLines: 1,
                       softWrap: false,
-                      style: const TextStyle(
-                        color: Color(0xFFB6BED0),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 15,
                       ),
                     ),
@@ -13914,8 +13982,8 @@ class PremiumCoinCard extends StatelessWidget {
                         '${crypto(stat.quantity)} en cartera',
                         maxLines: 1,
                         softWrap: false,
-                        style: const TextStyle(
-                          color: Color(0xFFB6BED0),
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
                           fontSize: 15,
                         ),
                       ),
@@ -13935,8 +14003,8 @@ class PremiumCoinCard extends StatelessWidget {
                   height: 40,
                 ),
                 style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFF182236),
-                  foregroundColor: const Color(0xFFC4B5FD),
+                  backgroundColor: tokens.selectedBackground,
+                  foregroundColor: tokens.primaryAccent,
                 ),
                 icon: const Icon(Icons.edit_outlined, size: 18),
               ),
@@ -13972,7 +14040,7 @@ class PremiumCoinCard extends StatelessWidget {
                     child: _CoinFinancialMetric(
                       label: 'Valor actual',
                       value: _coinsMoney(stat.currentValue),
-                      color: const Color(0xFFC4B5FD),
+                      color: tokens.primaryAccent,
                       valueFontSize: 20,
                     ),
                   ),
@@ -14047,7 +14115,7 @@ class PremiumCoinCard extends StatelessWidget {
                 icon: const Icon(Icons.arrow_forward, size: 15),
                 label: const Text('Detalles'),
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFC4B5FD),
+                  foregroundColor: tokens.primaryAccent,
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 7),
                   textStyle: const TextStyle(
@@ -14109,40 +14177,44 @@ class _CoinFinancialMetric extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 60),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-    decoration: BoxDecoration(
-      color: const Color(0xFF121C2D),
-      borderRadius: BorderRadius.circular(9),
-      border: Border.all(color: const Color(0x12FFFFFF)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          label,
-          maxLines: 1,
-          style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
-        ),
-        const SizedBox(height: 5),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 60),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
             maxLines: 1,
-            softWrap: false,
-            style: TextStyle(
-              color: color ?? Colors.white,
-              fontSize: valueFontSize,
-              fontWeight: FontWeight.w800,
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(height: 5),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                color: color ?? colors.onSurface,
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinResultMetric extends StatelessWidget {
@@ -14152,40 +14224,43 @@ class _CoinResultMetric extends StatelessWidget {
   const _CoinResultMetric({required this.value, required this.color});
 
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 46),
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(9),
-      border: Border.all(color: color.withValues(alpha: 0.14)),
-    ),
-    child: Row(
-      children: <Widget>[
-        const Text(
-          'Resultado',
-          style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              value,
-              maxLines: 1,
-              softWrap: false,
-              style: TextStyle(
-                color: color,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 46),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Text(
+            'Resultado',
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinPositionChip extends StatelessWidget {
@@ -14307,7 +14382,7 @@ class _CoinDetailPageState extends State<_CoinDetailPage> {
         cryptoAssetMetadata[widget.stat.coin]?.name ?? widget.stat.coin;
     final bool isManual = widget.priceMode == PriceService.manualMode;
     return Scaffold(
-      backgroundColor: const Color(0xFF070B14),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: <Widget>[
@@ -14384,43 +14459,49 @@ class _CoinDetailTopBar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-    child: Row(
-      children: <Widget>[
-        IconButton(
-          onPressed: onBack,
-          tooltip: 'Volver',
-          icon: const Icon(Icons.arrow_back),
-        ),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                name,
-                maxLines: 1,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              Text(
-                coin,
-                style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
-              ),
-            ],
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      child: Row(
+        children: <Widget>[
+          IconButton(
+            onPressed: onBack,
+            tooltip: 'Volver',
+            icon: const Icon(Icons.arrow_back),
           ),
-        ),
-        IconButton(
-          onPressed: onQuickDetails,
-          tooltip: 'Auditoría rápida',
-          icon: const Icon(Icons.fact_check_outlined, size: 20),
-        ),
-      ],
-    ),
-  );
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  name,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: colors.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  coin,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onQuickDetails,
+            tooltip: 'Auditoría rápida',
+            icon: const Icon(Icons.fact_check_outlined, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinDetailIdentity extends StatelessWidget {
@@ -14440,6 +14521,8 @@ class _CoinDetailIdentity extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final Color modeColor = isManual
         ? const Color(0xFFF59E0B)
         : const Color(0xFF22C55E);
@@ -14449,13 +14532,13 @@ class _CoinDetailIdentity extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF17152C), Color(0xFF0F1726)],
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x337C3AED)),
+        border: Border.all(color: tokens.selectedBorder),
       ),
       child: Row(
         children: <Widget>[
@@ -14468,8 +14551,8 @@ class _CoinDetailIdentity extends StatelessWidget {
                 Text(
                   '${stat.coin} · $name',
                   maxLines: 2,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: colors.onSurface,
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
                     height: 1.1,
@@ -14481,8 +14564,8 @@ class _CoinDetailIdentity extends StatelessWidget {
                       ? '${crypto(stat.quantity)} en cartera'
                       : 'Sin posición activa',
                   maxLines: 2,
-                  style: const TextStyle(
-                    color: Color(0xFFB6BED0),
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
                     fontSize: 14,
                   ),
                 ),
@@ -14511,8 +14594,8 @@ class _CoinDetailIdentity extends StatelessWidget {
             onPressed: onEditPrice,
             tooltip: 'Editar precio',
             style: IconButton.styleFrom(
-              backgroundColor: const Color(0xFF1B2440),
-              foregroundColor: const Color(0xFFC4B5FD),
+              backgroundColor: tokens.selectedBackground,
+              foregroundColor: tokens.primaryAccent,
             ),
             icon: const Icon(Icons.edit_outlined, size: 19),
           ),
@@ -14529,42 +14612,46 @@ class _CoinDetailViewSelector extends StatelessWidget {
   const _CoinDetailViewSelector({required this.value, required this.onChanged});
 
   @override
-  Widget build(BuildContext context) => SegmentedButton<_CoinDetailView>(
-    segments: const <ButtonSegment<_CoinDetailView>>[
-      ButtonSegment<_CoinDetailView>(
-        value: _CoinDetailView.summary,
-        icon: Icon(Icons.dashboard_outlined, size: 17),
-        label: Text('Resumen'),
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return SegmentedButton<_CoinDetailView>(
+      segments: const <ButtonSegment<_CoinDetailView>>[
+        ButtonSegment<_CoinDetailView>(
+          value: _CoinDetailView.summary,
+          icon: Icon(Icons.dashboard_outlined, size: 17),
+          label: Text('Resumen'),
+        ),
+        ButtonSegment<_CoinDetailView>(
+          value: _CoinDetailView.chart,
+          icon: Icon(Icons.show_chart, size: 17),
+          label: Text('Gráfica'),
+        ),
+      ],
+      selected: <_CoinDetailView>{value},
+      onSelectionChanged: (Set<_CoinDetailView> selection) {
+        onChanged(selection.first);
+      },
+      showSelectedIcon: false,
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? tokens.selectedBackground
+              : tokens.surfaceElevated,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? colors.onSurface
+              : colors.onSurfaceVariant,
+        ),
+        side: WidgetStateProperty.all(BorderSide(color: tokens.selectedBorder)),
+        textStyle: WidgetStateProperty.all(
+          const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
       ),
-      ButtonSegment<_CoinDetailView>(
-        value: _CoinDetailView.chart,
-        icon: Icon(Icons.show_chart, size: 17),
-        label: Text('Gráfica'),
-      ),
-    ],
-    selected: <_CoinDetailView>{value},
-    onSelectionChanged: (Set<_CoinDetailView> selection) {
-      onChanged(selection.first);
-    },
-    showSelectedIcon: false,
-    style: ButtonStyle(
-      visualDensity: VisualDensity.compact,
-      backgroundColor: WidgetStateProperty.resolveWith<Color?>(
-        (Set<WidgetState> states) => states.contains(WidgetState.selected)
-            ? const Color(0xFF6D28D9)
-            : const Color(0xFF111A2B),
-      ),
-      foregroundColor: WidgetStateProperty.resolveWith<Color?>(
-        (Set<WidgetState> states) => states.contains(WidgetState.selected)
-            ? Colors.white
-            : const Color(0xFFB6BED0),
-      ),
-      side: WidgetStateProperty.all(const BorderSide(color: Color(0x557C3AED))),
-      textStyle: WidgetStateProperty.all(
-        const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-      ),
-    ),
-  );
+    );
+  }
 }
 
 class _CoinDetailSummary extends StatelessWidget {
@@ -14595,22 +14682,24 @@ class _CoinDetailSummary extends StatelessWidget {
       );
     }
     final Color resultColor = pnlColor(stat.unrealizedPL);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Column(
       children: <Widget>[
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
-            color: const Color(0xFF0F1726),
+            color: tokens.surfaceElevated,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0x247C3AED)),
+            border: Border.all(color: tokens.selectedBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text(
+              Text(
                 'Valor actual',
-                style: TextStyle(color: Color(0xFFB6BED0), fontSize: 15),
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 15),
               ),
               const SizedBox(height: 4),
               FittedBox(
@@ -14618,8 +14707,8 @@ class _CoinDetailSummary extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   _coinsMoney(stat.currentValue),
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: colors.onSurface,
                     fontSize: 30,
                     fontWeight: FontWeight.w900,
                   ),
@@ -14710,8 +14799,8 @@ class _CoinDetailSummary extends StatelessWidget {
                 icon: const Icon(Icons.receipt_long_outlined, size: 17),
                 label: const Text('Movimientos'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF6D28D9),
-                  foregroundColor: Colors.white,
+                  backgroundColor: tokens.selectedBackground,
+                  foregroundColor: colors.onSurface,
                 ),
               ),
             ),
@@ -14749,22 +14838,24 @@ class _CoinNoPositionSummary extends StatelessWidget {
     final Color modeColor = isManual
         ? const Color(0xFFF59E0B)
         : const Color(0xFF22C55E);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Column(
       children: <Widget>[
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF0F1726),
+            color: tokens.surfaceElevated,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0x337C3AED)),
+            border: Border.all(color: tokens.selectedBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text(
+              Text(
                 'Precio actual',
-                style: TextStyle(color: Color(0xFFB6BED0), fontSize: 15),
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 15),
               ),
               const SizedBox(height: 4),
               FittedBox(
@@ -14774,8 +14865,8 @@ class _CoinNoPositionSummary extends StatelessWidget {
                   _coinsPrice(stat.currentPrice),
                   maxLines: 1,
                   softWrap: false,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: colors.onSurface,
                     fontSize: 38,
                     fontWeight: FontWeight.w900,
                   ),
@@ -14793,13 +14884,13 @@ class _CoinNoPositionSummary extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0x1438BDF8),
+                      color: tokens.chartSecondary.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(7),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Sin posición abierta',
                       style: TextStyle(
-                        color: Color(0xFF7DD3FC),
+                        color: tokens.chartSecondary,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
@@ -14816,10 +14907,10 @@ class _CoinNoPositionSummary extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text(
+              Text(
                 'Esta moneda tiene precio disponible, pero no existe una posición abierta en la cartera.',
                 style: TextStyle(
-                  color: Color(0xFFB6BED0),
+                  color: colors.onSurfaceVariant,
                   fontSize: 14,
                   height: 1.25,
                 ),
@@ -14851,8 +14942,8 @@ class _CoinNoPositionSummary extends StatelessWidget {
                 icon: const Icon(Icons.add_chart_outlined, size: 17),
                 label: const Text('Movimientos'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF6D28D9),
-                  foregroundColor: Colors.white,
+                  backgroundColor: tokens.selectedBackground,
+                  foregroundColor: colors.onSurface,
                 ),
               ),
             ),
@@ -14870,43 +14961,47 @@ class _CoinDetailMetric extends StatelessWidget {
   const _CoinDetailMetric({required this.label, required this.value});
 
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 68),
-    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-    decoration: BoxDecoration(
-      color: const Color(0xFF111A2B),
-      borderRadius: BorderRadius.circular(11),
-      border: Border.all(color: const Color(0x14FFFFFF)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          label,
-          maxLines: 2,
-          style: const TextStyle(
-            color: Color(0xFFAAB3C5),
-            fontSize: 13,
-            height: 1.1,
-          ),
-        ),
-        const SizedBox(height: 5),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 68),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 2,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 13,
+              height: 1.1,
             ),
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 5),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinDetailPanel extends StatelessWidget {
@@ -14916,30 +15011,34 @@ class _CoinDetailPanel extends StatelessWidget {
   const _CoinDetailPanel({required this.title, required this.child});
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(13),
-    decoration: BoxDecoration(
-      color: const Color(0xFF0F1726),
-      borderRadius: BorderRadius.circular(13),
-      border: Border.all(color: const Color(0x18FFFFFF)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-        ),
-        const SizedBox(height: 10),
-        child,
-      ],
-    ),
-  );
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinDetailRow extends StatelessWidget {
@@ -14950,37 +15049,40 @@ class _CoinDetailRow extends StatelessWidget {
   const _CoinDetailRow(this.label, this.value, {this.valueColor});
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 9),
-    child: Row(
-      children: <Widget>[
-        Expanded(
-          flex: 5,
-          child: Text(
-            label,
-            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 6,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            flex: 5,
             child: Text(
-              value,
-              maxLines: 1,
-              style: TextStyle(
-                color: valueColor ?? Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
+              label,
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 6,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: TextStyle(
+                  color: valueColor ?? colors.onSurface,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _CoinDetailChart extends StatelessWidget {
@@ -15275,8 +15377,6 @@ class _AlertsTabState extends State<AlertsTab> {
             onChanged: widget.onAutomaticLocalAlertsChanged,
             dense: true,
             visualDensity: VisualDensity.compact,
-            activeThumbColor: const Color(0xFF8B5CF6),
-            activeTrackColor: const Color(0x668B5CF6),
             title: const Text(
               'Monitoreo automático',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
@@ -15290,23 +15390,29 @@ class _AlertsTabState extends State<AlertsTab> {
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Android puede agrupar o retrasar revisiones para ahorrar batería.',
-            style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Frecuencia de revisión',
             style: TextStyle(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.onSurface,
               fontSize: 16,
               fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Cada cuánto se actualizan y evalúan las alertas automáticas.',
-            style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -15315,22 +15421,34 @@ class _AlertsTabState extends State<AlertsTab> {
             children: PriceAlertService.automaticIntervalOptions.map((
               int minutes,
             ) {
+              final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(
+                context,
+              );
+              final ColorScheme colors = Theme.of(context).colorScheme;
+              final bool selected =
+                  widget.automaticLocalAlertsIntervalMinutes == minutes;
               return ChoiceChip(
-                selected: widget.automaticLocalAlertsIntervalMinutes == minutes,
+                selected: selected,
                 label: Text(intervalLabel(minutes)),
-                avatar: widget.automaticLocalAlertsIntervalMinutes == minutes
-                    ? const Icon(Icons.schedule, size: 15)
+                avatar: selected
+                    ? Icon(
+                        Icons.schedule,
+                        size: 15,
+                        color: tokens.primaryAccent,
+                      )
                     : null,
                 onSelected: (_) =>
                     widget.onAutomaticLocalAlertIntervalChanged(minutes),
-                selectedColor: const Color(0x338B5CF6),
-                backgroundColor: const Color(0xFF101827),
-                side: const BorderSide(color: Color(0x24FFFFFF)),
+                selectedColor: tokens.selectedBackground,
+                backgroundColor: tokens.surfaceElevated,
+                side: BorderSide(
+                  color: selected ? tokens.selectedBorder : tokens.cardBorder,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                labelStyle: const TextStyle(
-                  color: Colors.white,
+                labelStyle: TextStyle(
+                  color: selected ? colors.onSurface : colors.onSurfaceVariant,
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
                 ),
@@ -15367,8 +15485,6 @@ class _AlertsTabState extends State<AlertsTab> {
                 onChanged: widget.onPriceAlertsChanged,
                 dense: true,
                 visualDensity: VisualDensity.compact,
-                activeThumbColor: const Color(0xFF8B5CF6),
-                activeTrackColor: const Color(0x668B5CF6),
                 title: const Text(
                   'Alertas de mercado',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
@@ -15403,7 +15519,7 @@ class _AlertsTabState extends State<AlertsTab> {
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonalIcon(
-                    style: _alertsTonalButtonStyle,
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.isRefreshingPrices
                         ? null
                         : widget.onRefreshPrices,
@@ -15419,12 +15535,12 @@ class _AlertsTabState extends State<AlertsTab> {
                     ),
                   ),
                   FilledButton.tonal(
-                    style: _alertsTonalButtonStyle,
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onEditPriceAlertThreshold,
                     child: const Text('Editar umbral'),
                   ),
                   FilledButton.tonal(
-                    style: _alertsTonalButtonStyle,
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onResetPriceAlertReferences,
                     child: const Text('Reiniciar precios base'),
                   ),
@@ -15487,8 +15603,6 @@ class _AlertsTabState extends State<AlertsTab> {
                 onChanged: widget.onRecoveryAlertsChanged,
                 dense: true,
                 visualDensity: VisualDensity.compact,
-                activeThumbColor: const Color(0xFF8B5CF6),
-                activeTrackColor: const Color(0x668B5CF6),
                 title: const Text(
                   'Alertas de recuperación',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
@@ -15518,12 +15632,12 @@ class _AlertsTabState extends State<AlertsTab> {
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonal(
-                    style: _alertsTonalButtonStyle,
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onEditRecoveryAlertThreshold,
                     child: const Text('Editar umbral'),
                   ),
                   FilledButton.tonal(
-                    style: _alertsTonalButtonStyle,
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onResetRecoveryAlertReferences,
                     child: const Text('Reiniciar base de recuperación'),
                   ),
@@ -15545,8 +15659,6 @@ class _AlertsTabState extends State<AlertsTab> {
                 },
                 dense: true,
                 visualDensity: VisualDensity.compact,
-                activeThumbColor: const Color(0xFF8B5CF6),
-                activeTrackColor: const Color(0x668B5CF6),
                 title: const Text('Mostrar monedas sin posición'),
                 contentPadding: EdgeInsets.zero,
               ),
@@ -15845,28 +15957,35 @@ class RecoveryAlertCoinRow extends StatelessWidget {
   }
 }
 
-const Color _alertsSurface = Color(0xFF101827);
-const Color _alertsPurple = Color(0xFF8B5CF6);
+ButtonStyle _alertsPrimaryButtonStyle(BuildContext context) {
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  return FilledButton.styleFrom(
+    backgroundColor: colors.primary,
+    foregroundColor: colors.onPrimary,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  );
+}
 
-final ButtonStyle _alertsPrimaryButtonStyle = FilledButton.styleFrom(
-  backgroundColor: _alertsPurple,
-  foregroundColor: Colors.white,
-  minimumSize: const Size(0, 40),
-  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-  textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-);
-
-final ButtonStyle _alertsTonalButtonStyle = FilledButton.styleFrom(
-  backgroundColor: const Color(0x1A8B5CF6),
-  foregroundColor: const Color(0xFFE9D5FF),
-  disabledBackgroundColor: const Color(0x121E293B),
-  disabledForegroundColor: const Color(0x88AAB3C5),
-  minimumSize: const Size(0, 40),
-  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-  textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-);
+ButtonStyle _alertsTonalButtonStyle(BuildContext context) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  return FilledButton.styleFrom(
+    backgroundColor: tokens.selectedBackground,
+    foregroundColor: colors.onPrimaryContainer,
+    disabledBackgroundColor: colors.surfaceContainerHighest.withValues(
+      alpha: 0.55,
+    ),
+    disabledForegroundColor: colors.onSurfaceVariant.withValues(alpha: 0.55),
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    side: BorderSide(color: tokens.selectedBorder),
+  );
+}
 
 String _alertsMoney(double value) => _summaryMoney(value, decimals: 2);
 
@@ -15879,11 +15998,19 @@ String _alertsIntervalCopy(String label) {
   return 'Revisión automática cada $readable.';
 }
 
-BoxDecoration _alertsBox({Color color = _alertsSurface, double radius = 16}) {
+BoxDecoration _alertsBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
   return BoxDecoration(
-    color: color,
+    color: color ?? tokens.cardBackground,
     borderRadius: BorderRadius.circular(radius),
-    border: Border.all(color: const Color(0x20FFFFFF)),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: <BoxShadow>[
+      BoxShadow(color: tokens.glowColor, blurRadius: 18, spreadRadius: -10),
+    ],
   );
 }
 
@@ -16265,7 +16392,12 @@ class _AlertsPermissionCard extends StatelessWidget {
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: _alertsBox(color: const Color(0xFF211A25)),
+      decoration: _alertsBox(
+        context,
+        color: Theme.of(
+          context,
+        ).colorScheme.tertiaryContainer.withValues(alpha: 0.28),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -16290,7 +16422,7 @@ class _AlertsPermissionCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           FilledButton.icon(
-            style: _alertsPrimaryButtonStyle,
+            style: _alertsPrimaryButtonStyle(context),
             onPressed: onActivate,
             icon: const Icon(Icons.notifications_active_outlined, size: 18),
             label: const Text('Activar alertas automáticas'),
@@ -16360,7 +16492,11 @@ class _AlertsRuleSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: _alertsBox(color: const Color(0xFF101827), radius: 13),
+      decoration: _alertsBox(
+        context,
+        color: ccmx.CcmxVisualTokens.of(context).surfaceElevated,
+        radius: 13,
+      ),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -16441,7 +16577,11 @@ class _AlertsMetricCell extends StatelessWidget {
       width: width,
       constraints: const BoxConstraints(minHeight: 56),
       padding: const EdgeInsets.all(8),
-      decoration: _alertsBox(color: const Color(0xFF101827), radius: 11),
+      decoration: _alertsBox(
+        context,
+        color: ccmx.CcmxVisualTokens.of(context).surfaceElevated,
+        radius: 11,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -16615,11 +16755,6 @@ class SnapshotRangeOption {
   const SnapshotRangeOption(this.label, this.days);
 }
 
-const Color _chartsSurface = Color(0xFF101827);
-const Color _chartsElevated = Color(0xFF162033);
-const Color _chartsPurple = Color(0xFF8B5CF6);
-const Color _chartsBorder = Color(0x2EFFFFFF);
-
 String _chartsMoney(double value, {int decimals = 2}) =>
     _summaryMoney(value, decimals: decimals);
 
@@ -16637,11 +16772,19 @@ String _chartsAxisMoney(double value) {
   return '${value < 0 ? '-' : ''}\$${absolute.toStringAsFixed(0)}';
 }
 
-BoxDecoration _chartsBox({Color color = _chartsSurface, double radius = 16}) {
+BoxDecoration _chartsBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
   return BoxDecoration(
-    color: color,
+    color: color ?? tokens.cardBackground,
     borderRadius: BorderRadius.circular(radius),
-    border: Border.all(color: _chartsBorder),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: <BoxShadow>[
+      BoxShadow(color: tokens.glowColor, blurRadius: 18, spreadRadius: -10),
+    ],
   );
 }
 
@@ -17586,6 +17729,7 @@ class _PortfolioInteractiveChartState
                           index: selectedIndex,
                           pointCount: widget.snapshots.length,
                           chartType: widget.chartType,
+                          color: ccmx.CcmxVisualTokens.of(context).chartPrimary,
                         ),
                       ),
                     ),
@@ -17618,11 +17762,13 @@ class _ChartsSelectionPainter extends CustomPainter {
   final int index;
   final int pointCount;
   final SummaryChartType chartType;
+  final Color color;
 
   const _ChartsSelectionPainter({
     required this.index,
     required this.pointCount,
     required this.chartType,
+    required this.color,
   });
 
   @override
@@ -17631,7 +17777,7 @@ class _ChartsSelectionPainter extends CustomPainter {
         ? size.width / 2
         : 54 + (size.width - 74) * index / (pointCount - 1);
     final Paint paint = Paint()
-      ..color = _chartsPurple.withValues(alpha: 0.7)
+      ..color = color.withValues(alpha: 0.7)
       ..strokeWidth = 1.2;
     if (chartType == SummaryChartType.columns) {
       final double slotWidth = (size.width - 74) / pointCount;
@@ -17643,7 +17789,7 @@ class _ChartsSelectionPainter extends CustomPainter {
       );
       canvas.drawRRect(
         RRect.fromRectAndRadius(highlight, const Radius.circular(4)),
-        Paint()..color = _chartsPurple.withValues(alpha: 0.10),
+        Paint()..color = color.withValues(alpha: 0.10),
       );
     }
     const double dash = 5;
@@ -17656,7 +17802,8 @@ class _ChartsSelectionPainter extends CustomPainter {
   bool shouldRepaint(covariant _ChartsSelectionPainter oldDelegate) {
     return oldDelegate.index != index ||
         oldDelegate.pointCount != pointCount ||
-        oldDelegate.chartType != chartType;
+        oldDelegate.chartType != chartType ||
+        oldDelegate.color != color;
   }
 }
 
@@ -17677,6 +17824,8 @@ class _ChartsPointTooltip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final double? variation = previousValue == null
         ? null
         : value - previousValue!;
@@ -17690,15 +17839,15 @@ class _ChartsPointTooltip extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF0B1220).withValues(alpha: 0.96),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _chartsPurple.withValues(alpha: 0.6)),
+          border: Border.all(color: tokens.chartPrimary.withValues(alpha: 0.6)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
               longDate(snapshot.createdAt),
-              style: const TextStyle(
-                color: Color(0xFFAAB3C5),
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -17706,8 +17855,8 @@ class _ChartsPointTooltip extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               seriesLabel,
-              style: const TextStyle(
-                color: Color(0xFFC4B5FD),
+              style: TextStyle(
+                color: tokens.chartPrimary,
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
               ),
@@ -17948,12 +18097,18 @@ class _ChartsCurrentMetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color valueColor = metric.color ?? Colors.white;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color valueColor = metric.color ?? colors.onSurface;
     return Container(
       width: width,
       constraints: const BoxConstraints(minHeight: 88),
       padding: const EdgeInsets.all(12),
-      decoration: _chartsBox(color: _chartsElevated, radius: 12),
+      decoration: _chartsBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 12,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -17961,14 +18116,14 @@ class _ChartsCurrentMetricTile extends StatelessWidget {
           Icon(
             metric.icon,
             size: 18,
-            color: metric.color ?? const Color(0xFFC4B5FD),
+            color: metric.color ?? tokens.chartPrimary,
           ),
           const SizedBox(height: 7),
           Text(
             metric.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
           ),
           const SizedBox(height: 3),
           FittedBox(

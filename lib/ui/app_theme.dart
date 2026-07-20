@@ -531,6 +531,62 @@ class CcmxAppTheme {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
       ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) => states.contains(WidgetState.selected)
+                ? palette.primarySoft
+                : palette.surfaceAlt,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) => states.contains(WidgetState.selected)
+                ? palette.textMain
+                : palette.textMuted,
+          ),
+          iconColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) => states.contains(WidgetState.selected)
+                ? palette.primary
+                : palette.textMuted,
+          ),
+          side: WidgetStateProperty.resolveWith<BorderSide?>(
+            (Set<WidgetState> states) => BorderSide(
+              color: states.contains(WidgetState.selected)
+                  ? palette.primary.withValues(alpha: 0.70)
+                  : palette.border.withValues(alpha: 0.58),
+            ),
+          ),
+          overlayColor: WidgetStateProperty.all(
+            palette.primary.withValues(alpha: 0.10),
+          ),
+          textStyle: WidgetStateProperty.all(
+            const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? palette.primary
+              : palette.textMuted,
+        ),
+        trackColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? palette.primarySoft
+              : palette.surfaceAlt,
+        ),
+        trackOutlineColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? palette.primary.withValues(alpha: 0.62)
+              : palette.border.withValues(alpha: 0.72),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: palette.textMain,
+          side: BorderSide(color: palette.border.withValues(alpha: 0.74)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
       textTheme: ThemeData(brightness: brightness).textTheme.apply(
         bodyColor: palette.textMain,
         displayColor: palette.textMain,
