@@ -323,6 +323,170 @@ CERRADA:
 - Commit/push sin secretos.
 ```
 ---
+FASE 3R — Reconstrucción UI premium
+Estado: NUEVA / PLANIFICADA ⏳  
+Prioridad: ALTA  
+Motivo: la app ya tiene base funcional sólida; la siguiente mejora estratégica es elevar la percepción visual, la lectura financiera y la ergonomía sin tocar comportamiento.
+
+Principio rector
+No basta con cambiar colores o ajustar el tema global. La FASE 3R reconstruye la capa visual completa mediante design system, componentes reutilizables, espaciados, tarjetas, gráficas, navegación, formularios, estados de carga/vacío/error y responsive design.
+
+La app debe evolucionar hacia una estética fintech seria:
+```text
+- Oscuro premium.
+- Morado sobrio como acento.
+- Negro/grafito profundo.
+- Jerarquía financiera clara.
+- Tarjetas menos saturadas.
+- Datos importantes como protagonistas.
+- Menos texto visible cuando no aporta decisión.
+- Densidad compacta y cómoda con una mano.
+- Layout responsive para móvil y pantallas más amplias.
+```
+
+Reglas absolutas de NO TOCAR
+```text
+- Lógica financiera.
+- P&L.
+- Break-even.
+- Comisiones.
+- Historial.
+- Movimientos.
+- Persistencia.
+- JSON.
+- Import/export.
+- OCR funcional.
+- Drive funcional.
+- Snapshots.
+- Alertas.
+- Servicios.
+- Modelos.
+- Callbacks.
+```
+
+Alcance técnico
+```text
+- Crear y consolidar una capa visual nueva en lib/ui/.
+- Migrar pantallas por microfases.
+- Mantener datos, callbacks, navegación y contratos existentes.
+- Validar cada fase con analyze/build cuando el entorno lo permita.
+- No mezclar refactors funcionales con cambios visuales.
+```
+
+FASE 3R.0 — Auditoría visual y contrato de seguridad
+```text
+- Mapear pantallas, widgets, cards, listas, gráficas, formularios y estados.
+- Identificar zonas de alto riesgo funcional.
+- Definir alcance visual permitido por pantalla.
+- Documentar explícitamente funciones y modelos intocables.
+```
+
+FASE 3R.1 — Design system premium pasivo
+```text
+- Crear tokens visuales: colores, radios, sombras, espaciados y breakpoints.
+- Crear componentes base pasivos en lib/ui/.
+- No conectar todavía pantallas principales salvo necesidad de compilación.
+- Componentes: scaffolds, headers, hero panels, metric cards, action tiles, estados, formularios y chart panels.
+```
+
+FASE 3R.2 — Shell visual y navegación base
+```text
+- Normalizar fondo, safe areas, padding de página y navegación inferior.
+- Refinar jerarquía visual sin cambiar rutas, labels ni callbacks.
+- Preparar una estructura común para pantallas futuras.
+```
+
+FASE 3R.3 — Resumen ejecutivo premium
+```text
+- Convertir Resumen en dashboard ejecutivo.
+- Valor de cartera como protagonista.
+- P&L realizado/no realizado con lectura inmediata.
+- Snapshot más discreto.
+- Posiciones resumidas con menos saturación.
+```
+
+FASE 3R.4 — Monedas premium compactas
+```text
+- Compactar cards de moneda.
+- Mejorar lectura de precio, valor, P&L, cantidad y break-even.
+- Mantener logo, botones, estados y orden funcional.
+- No cambiar selección ni filtros.
+```
+
+FASE 3R.5 — Movimientos e historial premium
+```text
+- Mejorar filtros, chips y listado de movimientos.
+- Reducir ruido en cada row/card.
+- Hacer importes, tipo de movimiento y moneda más escaneables.
+- Mantener historial y callbacks intactos.
+```
+
+FASE 3R.6 — Alertas premium compactas
+```text
+- Refinar cards de alertas y estados activos/inactivos.
+- Mejorar lectura de precio objetivo, recuperación y estado.
+- Mantener notificaciones, WorkManager y servicios intactos.
+```
+
+FASE 3R.7 — Gráficas premium
+```text
+- Reconstruir chart panels, leyendas y tooltips visuales.
+- Mejorar contraste, espaciado y lectura de series.
+- No tocar cálculos, snapshots guardados ni fuentes de datos.
+```
+
+FASE 3R.8 — Simulación táctica premium
+```text
+- Rediseñar visualmente entradas, resultados y escenarios.
+- Destacar impacto estimado, recuperación y métricas clave.
+- No tocar cálculos de simulación ni fórmulas.
+```
+
+FASE 3R.9 — OCR visual editable premium
+```text
+- Hacer más claro el flujo de captura, revisión y edición.
+- Separar hallazgos detectados, advertencias y campos editables.
+- No tocar parsing, guardado OCR ni creación funcional de movimientos.
+```
+
+FASE 3R.10 — Más / Centro de control premium
+```text
+- Ordenar acciones de respaldo, Drive, exportación, snapshots y ajustes.
+- Dar jerarquía a acciones críticas y estados de sincronización.
+- No tocar Drive funcional, backups, import/export ni persistencia.
+```
+
+FASE 3R.11 — Formularios, dialogs y bottom sheets
+```text
+- Normalizar campos, secciones, botones, validaciones visibles y modales.
+- Mejorar foco, ayudas, errores y densidad visual.
+- No cambiar controladores, validators funcionales ni callbacks.
+```
+
+FASE 3R.12 — Estados de carga, vacío y error
+```text
+- Unificar loading, empty states, errores y permisos.
+- Reducir texto redundante.
+- Asegurar acciones claras de recuperación.
+- No cambiar flujos ni condiciones funcionales.
+```
+
+FASE 3R.13 — Responsive, accesibilidad y polish
+```text
+- Ajustar layouts para pantallas compactas, grandes y orientación variable.
+- Revisar overflow, contraste, tamaños táctiles y jerarquía tipográfica.
+- Mantener navegación y datos visibles.
+```
+
+FASE 3R.14 — QA visual y cierre de reconstrucción
+```text
+- Revisión pantalla por pantalla.
+- Validación de no regresión visual/funcional.
+- Analyze/build si el entorno lo permite.
+- Checklist final de NO TOCAR respetado.
+```
+
+---
 Ajuste al resumen ejecutivo
 ```text
 FASE 0      CERRADA
@@ -342,6 +506,7 @@ FASE 2.7    SIGUIENTE ESTRATÉGICA / RELEASE FIRMADO
 FASE 2.8    PENDIENTE / PLAY BETA
 FASE 2.9    PENDIENTE / PRODUCCIÓN
 FASE 3.0+   FUTURO
+FASE 3R     NUEVA / RECONSTRUCCIÓN UI PREMIUM PLANIFICADA
 ```
 ---
 Orden recomendado desde aquí

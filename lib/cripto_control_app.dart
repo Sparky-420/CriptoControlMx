@@ -54,6 +54,8 @@ const Set<String> _safeCrashCodes = <String>{
 };
 const String _analyticsConsentKey = 'analytics_consent_v1';
 const String _crashlyticsConsentKey = 'crashlytics_consent_v1';
+const String _summaryViewModeKey = 'summary_view_mode';
+const String _summaryChartTypeKey = 'summary_chart_type';
 const Set<String> _safeAnalyticsEvents = <String>{
   'app_opened',
   'tab_view',
@@ -72,6 +74,17 @@ const Set<String> _safeAnalyticsEvents = <String>{
   'financial_reset_opened',
   'financial_reset_completed',
 };
+
+enum GoogleDriveSessionStatus {
+  accountChecking,
+  accountConnected,
+  accountDisconnected,
+  localPendingVerification,
+  driveAuthorized,
+  driveAuthorizationRequired,
+  temporaryError,
+}
+
 const Map<String, Set<Object>> _safeAnalyticsParameterValues =
     <String, Set<Object>>{
       'source': <Object>{'local', 'drive', 'firebase', 'ocr', 'manual'},
@@ -397,6 +410,22 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'google_drive_backup_updated_at_ms_v1';
   static const String _googleDriveBackupAccountEmailKey =
       'google_drive_backup_account_email_v1';
+  static const String _googleDriveSessionEmailKey =
+      'google_drive_session_email_v1';
+  static const String _googleDriveSessionDisplayNameKey =
+      'google_drive_session_display_name_v1';
+  static const String _googleDriveSessionConnectedAtKey =
+      'google_drive_session_connected_at_ms_v1';
+  static const String _googleDriveSessionWasConnectedKey =
+      'google_drive_session_was_connected_v1';
+  static const String _googleDriveAuthorizationKnownKey =
+      'google_drive_authorization_known_v1';
+  static const String _googleWebClientId =
+      '767407830346-bf771ge1ba2roalchb21a4j3fl8v8258.apps.googleusercontent.com';
+  static const Set<String> _googleAndroidClientIds = <String>{
+    '767407830346-bjlqgsn828sjq677b4t65mmrdgooc35o.apps.googleusercontent.com',
+    '767407830346-fhs53hlvnonjb7befttucbq5shqs0a6v.apps.googleusercontent.com',
+  };
   static const String _firebaseDeviceIdKey = 'firebase_device_id_v1';
   static const String _firebaseCloudStateUploadedAtKey =
       'firebase_cloud_state_uploaded_at_ms_v1';
@@ -433,11 +462,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   final Map<String, int> _manualPriceUpdatedAtMs = <String, int>{};
 
   int _currentIndex = 0;
+  final PageController _mainPageController = PageController();
   double _sellFeePercent = FinancialEngine.defaultExitFeePercent;
   AppVisualMode _visualMode = AppVisualMode.system;
   AppThemeStyle _themeStyle = AppThemeStyle.proDark;
   VisiblePositions _visiblePositions = VisiblePositions.three;
   PositionSortMode _positionSortMode = PositionSortMode.largestValue;
+  SummaryViewMode _summaryViewMode = SummaryViewMode.executive;
+  SummaryChartType _summaryChartType = SummaryChartType.line;
   SnapshotAutomationMode _snapshotAutomationMode =
       SnapshotAutomationMode.manual;
   SnapshotRetention _snapshotRetention = SnapshotRetention.last30;
@@ -463,7 +495,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Map<String, double> _recoveryAlertReferences = <String, double>{};
   bool _bootstrapped = false;
   Future<void>? _googleSignInInitFuture;
+  Future<void>? _googleDriveSessionRestoreFuture;
+  StreamSubscription<GoogleSignInAuthenticationEvent>?
+  _googleAuthenticationEventsSubscription;
   GoogleSignInAccount? _googleAccount;
+  String? _googleDriveSessionEmail;
+  String? _googleDriveSessionDisplayName;
+  DateTime? _googleDriveSessionConnectedAt;
+  bool _googleDriveWasConnected = false;
+  bool _googleDriveAuthorizationKnown = false;
+  GoogleDriveSessionStatus _googleDriveSessionStatus =
+      GoogleDriveSessionStatus.accountDisconnected;
+  int _googleDriveAuthGeneration = 0;
   User? _firebaseUser;
   bool _isFirebaseAuthBusy = false;
   bool _isCloudProfilePreparing = false;
@@ -476,14 +519,27 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   bool _isGoogleConnecting = false;
   bool _isGoogleDriveCreating = false;
   bool _isGoogleDriveRestoring = false;
+  bool _isGoogleDriveDisconnectingExplicitly = false;
+  bool _driveAuthUserInitiated = false;
+  final bool _driveGoogleStartupLock = true;
   String? _googleDriveBackupFileId;
   DateTime? _googleDriveBackupUpdatedAt;
   String? _googleDriveBackupAccountEmail;
   bool _analyticsConsent = false;
   bool _crashlyticsConsent = false;
 
+  bool get _isGoogleDriveSessionChecking =>
+      _googleDriveSessionStatus == GoogleDriveSessionStatus.accountChecking;
+
+  bool get _isGoogleDriveAuthorized =>
+      _googleAccount != null &&
+      _googleDriveSessionStatus == GoogleDriveSessionStatus.driveAuthorized;
+
   bool get _isGoogleDriveBusy =>
-      _isGoogleConnecting || _isGoogleDriveCreating || _isGoogleDriveRestoring;
+      _isGoogleDriveSessionChecking ||
+      _isGoogleConnecting ||
+      _isGoogleDriveCreating ||
+      _isGoogleDriveRestoring;
 
   @override
   void initState() {
@@ -495,6 +551,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _analyticsConsent = widget.initialAnalyticsEnabled;
     _crashlyticsConsent = widget.initialCrashlyticsEnabled;
     _loadFirebaseAuthUser();
+    unawaited(_loadLocalGoogleDriveSessionState());
     unawaited(_loadCloudStateUploadMetadata());
     if (_firebaseUser != null) {
       unawaited(_ensureCloudProfile(showError: false));
@@ -511,6 +568,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   @override
   void dispose() {
     _cancelPriceRefreshTimer();
+    _googleAuthenticationEventsSubscription?.cancel();
+    _mainPageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -524,13 +583,478 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
   }
 
+  void _goToMainTab(int index) {
+    if (index == _currentIndex) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _currentIndex = index);
+    if (!_mainPageController.hasClients) return;
+    unawaited(
+      _mainPageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      ),
+    );
+  }
+
+  void _handleMainPageChanged(int index) {
+    if (index == _currentIndex) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _currentIndex = index);
+  }
+
+  bool _canTouchGoogleFromCurrentContext(String method) {
+    if (_driveAuthUserInitiated) return true;
+    if (_driveGoogleStartupLock) {
+      debugPrint('DRIVE_AUTH blocked:google_call_during_startup $method');
+      debugPrint(StackTrace.current.toString());
+      return false;
+    }
+    debugPrint('DRIVE_AUTH blocked:google_call_without_user_action $method');
+    debugPrint(StackTrace.current.toString());
+    return false;
+  }
+
+  void _ensureGoogleAuthenticationListenerRegistered() {
+    if (!_canTouchGoogleFromCurrentContext('authenticationEvents.listen')) {
+      throw StateError('Google Sign-In listener blocked during startup');
+    }
+    if (_googleAuthenticationEventsSubscription != null) return;
+    _googleAuthenticationEventsSubscription =
+        GoogleSignIn.instance.authenticationEvents.listen(
+          _handleGoogleAuthenticationEvent,
+        )..onError(_handleGoogleAuthenticationError);
+    debugPrint('DRIVE_AUTH listener:registered');
+  }
+
   Future<void> _ensureGoogleSignInInitialized() async {
-    _googleSignInInitFuture ??= GoogleSignIn.instance.initialize();
+    if (!_canTouchGoogleFromCurrentContext('initialize')) {
+      throw StateError('Google Sign-In initialize blocked during startup');
+    }
+    debugPrint('DRIVE_AUTH google_init:manual_only');
+    _ensureGoogleAuthenticationListenerRegistered();
+    _googleSignInInitFuture ??= _initializeGoogleSignInOnce();
     try {
       await _googleSignInInitFuture;
     } catch (_) {
       _googleSignInInitFuture = null;
       rethrow;
+    }
+  }
+
+  Future<void> _ensureGoogleDriveAuthInitializedFromUserAction(
+    String action,
+  ) async {
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:google_call_during_startup $action');
+      debugPrint(StackTrace.current.toString());
+      throw StateError('Google Drive auth requires explicit user action');
+    }
+    await _ensureGoogleSignInInitialized();
+  }
+
+  Future<void> _initializeGoogleSignInOnce() async {
+    const bool manualServerClientId = true;
+    final bool webClientIdPresent = _googleWebClientId.isNotEmpty;
+    final bool androidClientIdUsedAsServer = _googleAndroidClientIds.contains(
+      _googleWebClientId,
+    );
+    debugPrint('DRIVE_AUTH config:using_google_services_json');
+    debugPrint(
+      'DRIVE_AUTH config:manual_server_client_id=$manualServerClientId',
+    );
+    debugPrint('DRIVE_AUTH config:web_client_id_present=$webClientIdPresent');
+    debugPrint(
+      'DRIVE_AUTH config:android_client_id_used_as_server=$androidClientIdUsedAsServer',
+    );
+    debugPrint('DRIVE_AUTH initialize:start');
+    await GoogleSignIn.instance.initialize(serverClientId: _googleWebClientId);
+    debugPrint('DRIVE_AUTH initialize:success');
+  }
+
+  String _redactedDriveEmail(String? email) {
+    final String value = email?.trim() ?? '';
+    if (value.isEmpty) return 'none';
+    final int atIndex = value.indexOf('@');
+    if (atIndex <= 0 || atIndex == value.length - 1) return 'redacted';
+    return '${value[0]}***${value.substring(atIndex)}';
+  }
+
+  Future<T?> _runDriveInteractiveCall<T>(
+    String method,
+    Future<T> Function() action,
+  ) async {
+    debugPrint(
+      'DRIVE_AUTH INTERACTIVE_CALL $method userInitiated=$_driveAuthUserInitiated',
+    );
+    debugPrint(StackTrace.current.toString());
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:interactive_call_without_user_action');
+      return null;
+    }
+    return action();
+  }
+
+  Future<void> _runUserInitiatedDriveAuth(
+    String actionName,
+    Future<void> Function() action,
+  ) async {
+    if (_driveAuthUserInitiated) return;
+    _driveAuthUserInitiated = true;
+    debugPrint('DRIVE_AUTH user_action:$actionName');
+    try {
+      await action();
+    } finally {
+      _driveAuthUserInitiated = false;
+    }
+  }
+
+  String _googleDriveUserActionForConnect() {
+    if (_googleDriveSessionStatus ==
+        GoogleDriveSessionStatus.localPendingVerification) {
+      return 'verify_connection';
+    }
+    if (_googleDriveSessionStatus == GoogleDriveSessionStatus.temporaryError) {
+      return 'reconnect';
+    }
+    if (_googleAccount != null ||
+        _googleDriveSessionStatus ==
+            GoogleDriveSessionStatus.driveAuthorizationRequired) {
+      return 'authorize';
+    }
+    return 'connect';
+  }
+
+  void _handleGoogleAuthenticationEvent(GoogleSignInAuthenticationEvent event) {
+    if (!mounted) return;
+    switch (event) {
+      case GoogleSignInAuthenticationEventSignIn():
+        debugPrint('DRIVE_AUTH event:authenticated email=${event.user.email}');
+        final int generation = ++_googleDriveAuthGeneration;
+        setState(() {
+          _googleAccount = event.user;
+          _googleDriveSessionEmail = event.user.email;
+          _googleDriveSessionDisplayName = event.user.displayName;
+          _googleDriveSessionConnectedAt = DateTime.now();
+          _googleDriveWasConnected = true;
+          _googleDriveSessionStatus = GoogleDriveSessionStatus.accountConnected;
+        });
+        debugPrint('DRIVE_AUTH ui:connected');
+        unawaited(_saveGoogleDriveSessionMetadata(event.user));
+        unawaited(_refreshGoogleDriveAuthorization(event.user, generation));
+      case GoogleSignInAuthenticationEventSignOut():
+        debugPrint('DRIVE_AUTH event:unauthenticated');
+        _googleDriveAuthGeneration++;
+        if (_isGoogleDriveDisconnectingExplicitly) {
+          unawaited(_clearGoogleDriveSessionMetadata());
+        }
+        setState(() {
+          _googleAccount = null;
+          if (_isGoogleDriveDisconnectingExplicitly) {
+            _googleDriveSessionEmail = null;
+            _googleDriveSessionDisplayName = null;
+            _googleDriveSessionConnectedAt = null;
+            _googleDriveWasConnected = false;
+            _googleDriveAuthorizationKnown = false;
+            _googleDriveSessionStatus =
+                GoogleDriveSessionStatus.accountDisconnected;
+            debugPrint('DRIVE_AUTH ui:disconnected');
+          } else {
+            final bool hasKnownDriveSession =
+                _googleDriveWasConnected || _googleDriveSessionEmail != null;
+            _googleDriveSessionStatus = hasKnownDriveSession
+                ? GoogleDriveSessionStatus.temporaryError
+                : GoogleDriveSessionStatus.accountDisconnected;
+            debugPrint(
+              hasKnownDriveSession
+                  ? 'DRIVE_AUTH ui:temporary_error'
+                  : 'DRIVE_AUTH ui:disconnected',
+            );
+          }
+        });
+    }
+  }
+
+  void _handleGoogleAuthenticationError(Object error) {
+    debugPrint('DRIVE_AUTH error:${error.runtimeType}');
+    debugPrint('DRIVE_AUTH restore:error_preserving_local_state');
+    if (!mounted) return;
+    _googleDriveAuthGeneration++;
+    setState(() {
+      final bool hasKnownDriveSession =
+          _googleDriveWasConnected || _googleDriveSessionEmail != null;
+      _googleDriveSessionStatus =
+          _googleAccount != null && !hasKnownDriveSession
+          ? GoogleDriveSessionStatus.accountConnected
+          : GoogleDriveSessionStatus.temporaryError;
+    });
+    debugPrint('DRIVE_AUTH ui:temporary_error');
+  }
+
+  Future<void> _refreshGoogleDriveAuthorization(
+    GoogleSignInAccount account,
+    int generation,
+  ) async {
+    if (!_canTouchGoogleFromCurrentContext('authorizationForScopes')) return;
+    try {
+      final GoogleSignInClientAuthorization? authorization = await account
+          .authorizationClient
+          .authorizationForScopes(_googleDriveScopes);
+      if (!mounted ||
+          generation != _googleDriveAuthGeneration ||
+          _googleAccount?.email != account.email) {
+        return;
+      }
+      setState(() {
+        _googleDriveSessionStatus = authorization == null
+            ? GoogleDriveSessionStatus.driveAuthorizationRequired
+            : GoogleDriveSessionStatus.driveAuthorized;
+        _googleDriveAuthorizationKnown = authorization != null;
+      });
+      debugPrint(
+        authorization == null
+            ? 'DRIVE_AUTH scopes:required'
+            : 'DRIVE_AUTH scopes:authorized',
+      );
+      debugPrint(
+        authorization == null
+            ? 'DRIVE_AUTH ui:authorization_required'
+            : 'DRIVE_AUTH ui:connected',
+      );
+      unawaited(_saveGoogleDriveAuthorizationKnown(authorization != null));
+    } catch (error) {
+      debugPrint('DRIVE_AUTH error:${error.runtimeType}');
+      debugPrint('DRIVE_AUTH restore:error_preserving_local_state');
+      if (!mounted ||
+          generation != _googleDriveAuthGeneration ||
+          _googleAccount?.email != account.email) {
+        return;
+      }
+      setState(() {
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.temporaryError;
+      });
+      debugPrint('DRIVE_AUTH ui:temporary_error');
+    }
+  }
+
+  Future<void> _saveGoogleDriveSessionMetadata(
+    GoogleSignInAccount account, {
+    bool authorizationKnown = false,
+  }) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final int connectedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await prefs.setString(_googleDriveSessionEmailKey, account.email);
+    final String? displayName = account.displayName?.trim();
+    if (displayName == null || displayName.isEmpty) {
+      await prefs.remove(_googleDriveSessionDisplayNameKey);
+    } else {
+      await prefs.setString(_googleDriveSessionDisplayNameKey, displayName);
+    }
+    await prefs.setInt(_googleDriveSessionConnectedAtKey, connectedAtMs);
+    await prefs.setBool(_googleDriveSessionWasConnectedKey, true);
+    await prefs.setBool(_googleDriveAuthorizationKnownKey, authorizationKnown);
+  }
+
+  Future<void> _saveGoogleDriveAuthorizationKnown(bool value) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_googleDriveAuthorizationKnownKey, value);
+  }
+
+  Future<void> _clearGoogleDriveSessionMetadata() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_googleDriveSessionEmailKey);
+    await prefs.remove(_googleDriveSessionDisplayNameKey);
+    await prefs.remove(_googleDriveSessionConnectedAtKey);
+    await prefs.remove(_googleDriveSessionWasConnectedKey);
+    await prefs.remove(_googleDriveAuthorizationKnownKey);
+  }
+
+  Future<void> _loadLocalGoogleDriveSessionState() async {
+    debugPrint('DRIVE_AUTH startup:local_only');
+    debugPrint('DRIVE_AUTH startup:no_google_sign_in_calls');
+    debugPrint('DRIVE_AUTH startup:no_interactive_login');
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? expectedEmail = prefs.getString(
+        _googleDriveSessionEmailKey,
+      );
+      final String? expectedName = prefs.getString(
+        _googleDriveSessionDisplayNameKey,
+      );
+      final int? connectedAtMs = prefs.getInt(
+        _googleDriveSessionConnectedAtKey,
+      );
+      final bool lastKnownConnected =
+          prefs.getBool(_googleDriveSessionWasConnectedKey) ??
+          (expectedEmail != null);
+      final bool authorizationKnown =
+          prefs.getBool(_googleDriveAuthorizationKnownKey) ?? false;
+      debugPrint('DRIVE_AUTH prefs:last_known_connected=$lastKnownConnected');
+      debugPrint(
+        'DRIVE_AUTH prefs:last_known_email=${_redactedDriveEmail(expectedEmail)}',
+      );
+      if (!mounted) return;
+      setState(() {
+        _googleAccount = null;
+        _googleDriveSessionEmail = expectedEmail;
+        _googleDriveSessionDisplayName = expectedName;
+        _googleDriveSessionConnectedAt = connectedAtMs == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(connectedAtMs);
+        _googleDriveWasConnected = lastKnownConnected;
+        _googleDriveAuthorizationKnown = authorizationKnown;
+        _googleDriveSessionStatus = lastKnownConnected
+            ? GoogleDriveSessionStatus.localPendingVerification
+            : GoogleDriveSessionStatus.accountDisconnected;
+      });
+      debugPrint(
+        lastKnownConnected
+            ? 'DRIVE_AUTH ui:connected_local'
+            : 'DRIVE_AUTH ui:never_connected',
+      );
+    } catch (error) {
+      debugPrint('DRIVE_AUTH prefs:error_local_only ${error.runtimeType}');
+      if (!mounted) return;
+      setState(() {
+        _googleAccount = null;
+        _googleDriveSessionStatus =
+            GoogleDriveSessionStatus.accountDisconnected;
+      });
+      debugPrint('DRIVE_AUTH ui:never_connected');
+    }
+  }
+
+  Future<void> _restoreGoogleDriveSession() {
+    if (!_canTouchGoogleFromCurrentContext('restoreGoogleDriveSession')) {
+      return Future<void>.value();
+    }
+    final Future<void>? pending = _googleDriveSessionRestoreFuture;
+    if (pending != null) return pending;
+    final Future<void> restore = _restoreGoogleDriveSessionOnce();
+    _googleDriveSessionRestoreFuture = restore;
+    return restore.whenComplete(() {
+      if (identical(_googleDriveSessionRestoreFuture, restore)) {
+        _googleDriveSessionRestoreFuture = null;
+      }
+    });
+  }
+
+  Future<void> _restoreGoogleDriveSessionOnce() async {
+    final int generation = ++_googleDriveAuthGeneration;
+    String? expectedEmail = _googleDriveSessionEmail;
+    bool lastKnownConnected = _googleDriveWasConnected;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      expectedEmail = prefs.getString(_googleDriveSessionEmailKey);
+      final String? expectedName = prefs.getString(
+        _googleDriveSessionDisplayNameKey,
+      );
+      final int? connectedAtMs = prefs.getInt(
+        _googleDriveSessionConnectedAtKey,
+      );
+      lastKnownConnected =
+          prefs.getBool(_googleDriveSessionWasConnectedKey) ??
+          (expectedEmail != null);
+      final bool authorizationKnown =
+          prefs.getBool(_googleDriveAuthorizationKnownKey) ?? false;
+      debugPrint('DRIVE_AUTH prefs:last_known_connected=$lastKnownConnected');
+      debugPrint(
+        'DRIVE_AUTH prefs:last_known_email=${_redactedDriveEmail(expectedEmail)}',
+      );
+      if (mounted && expectedEmail != null) {
+        setState(() {
+          _googleDriveSessionEmail = expectedEmail;
+          _googleDriveSessionDisplayName = expectedName;
+          _googleDriveSessionConnectedAt = connectedAtMs == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(connectedAtMs);
+          _googleDriveWasConnected = lastKnownConnected;
+          _googleDriveAuthorizationKnown = authorizationKnown;
+        });
+      }
+    } catch (_) {}
+    debugPrint('DRIVE_AUTH silent_check:no_interactive_login');
+    if (mounted) {
+      setState(
+        () => _googleDriveSessionStatus =
+            GoogleDriveSessionStatus.accountChecking,
+      );
+      if (lastKnownConnected) {
+        debugPrint('DRIVE_AUTH manual_verify:show_restoring_state');
+        debugPrint('DRIVE_AUTH ui:restoring');
+      }
+    }
+    try {
+      await _ensureGoogleDriveAuthInitializedFromUserAction(
+        'verify_connection',
+      );
+      if (!_canTouchGoogleFromCurrentContext(
+        'attemptLightweightAuthentication',
+      )) {
+        return;
+      }
+      debugPrint('DRIVE_AUTH silent_check:start');
+      final Future<GoogleSignInAccount?>? lightweightAttempt = GoogleSignIn
+          .instance
+          .attemptLightweightAuthentication();
+      final GoogleSignInAccount? account = lightweightAttempt == null
+          ? null
+          : await lightweightAttempt;
+      if (!mounted || generation != _googleDriveAuthGeneration) return;
+      if (account == null) {
+        debugPrint(
+          'DRIVE_AUTH silent_check:unauthenticated_preserving_local_state',
+        );
+        setState(() {
+          _googleAccount = null;
+          _googleDriveSessionStatus = lastKnownConnected
+              ? GoogleDriveSessionStatus.temporaryError
+              : GoogleDriveSessionStatus.accountDisconnected;
+        });
+        debugPrint(
+          lastKnownConnected
+              ? 'DRIVE_AUTH ui:temporary_error'
+              : 'DRIVE_AUTH ui:disconnected',
+        );
+        return;
+      }
+      debugPrint('DRIVE_AUTH silent_check:authenticated');
+      debugPrint('DRIVE_AUTH event:authenticated email=${account.email}');
+      setState(() {
+        _googleAccount = account;
+        _googleDriveSessionEmail = account.email;
+        _googleDriveSessionDisplayName = account.displayName;
+        _googleDriveSessionConnectedAt = DateTime.now();
+        _googleDriveWasConnected = true;
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.accountConnected;
+      });
+      debugPrint('DRIVE_AUTH ui:connected');
+      unawaited(_saveGoogleDriveSessionMetadata(account));
+      await _refreshGoogleDriveAuthorization(account, generation);
+    } catch (error, stackTrace) {
+      debugPrint('DRIVE_AUTH error:${error.runtimeType}');
+      debugPrint('DRIVE_AUTH silent_check:error_preserving_local_state');
+      unawaited(
+        recordSafeError(
+          area: 'drive',
+          code: 'drive_error',
+          stackTrace: stackTrace,
+        ),
+      );
+      if (!mounted || generation != _googleDriveAuthGeneration) return;
+      setState(() {
+        _googleDriveSessionStatus =
+            lastKnownConnected ||
+                expectedEmail != null ||
+                _googleAccount != null
+            ? GoogleDriveSessionStatus.temporaryError
+            : GoogleDriveSessionStatus.accountDisconnected;
+      });
+      debugPrint(
+        lastKnownConnected || expectedEmail != null || _googleAccount != null
+            ? 'DRIVE_AUTH ui:temporary_error'
+            : 'DRIVE_AUTH ui:disconnected',
+      );
     }
   }
 
@@ -1183,12 +1707,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     setState(() => _isFirebaseAuthBusy = true);
     try {
-      await _ensureGoogleSignInInitialized();
+      await _ensureGoogleDriveAuthInitializedFromUserAction('firebase_sign_in');
       if (!mounted || !pageContext.mounted) return;
       if (!GoogleSignIn.instance.supportsAuthenticate()) {
         throw UnsupportedError('Google Sign-In no disponible');
       }
 
+      debugPrint(
+        'DRIVE_AUTH INTERACTIVE_CALL firebase_authenticate userInitiated=$_driveAuthUserInitiated',
+      );
+      debugPrint(StackTrace.current.toString());
       final GoogleSignInAccount account = await GoogleSignIn.instance
           .authenticate();
       if (!mounted || !pageContext.mounted) return;
@@ -1275,38 +1803,110 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _connectGoogleDrive(BuildContext pageContext) async {
     if (_isGoogleDriveBusy) return;
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:interactive_flow_without_user_action');
+      debugPrint(StackTrace.current.toString());
+      return;
+    }
+    final bool verifyOnly =
+        _googleDriveSessionStatus ==
+        GoogleDriveSessionStatus.localPendingVerification;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
     var errorMessage = 'No se pudo conectar Google Drive.';
 
-    setState(() => _isGoogleConnecting = true);
+    setState(() {
+      _isGoogleConnecting = true;
+      _googleDriveSessionStatus = GoogleDriveSessionStatus.accountChecking;
+    });
     try {
-      await _ensureGoogleSignInInitialized();
-      if (!GoogleSignIn.instance.supportsAuthenticate()) {
-        throw UnsupportedError('Google Sign-In no disponible');
+      if (verifyOnly) {
+        debugPrint(
+          'DRIVE_AUTH local:authorization_known=$_googleDriveAuthorizationKnown',
+        );
+        await _restoreGoogleDriveSession();
+        if (!mounted || !pageContext.mounted) return;
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Verificacion de Drive finalizada.')),
+        );
+        return;
+      }
+      await _ensureGoogleDriveAuthInitializedFromUserAction('connect');
+      GoogleSignInAccount? account = _googleAccount;
+      if (account == null) {
+        if (!GoogleSignIn.instance.supportsAuthenticate()) {
+          throw UnsupportedError('Google Sign-In no disponible');
+        }
+        account = await _runDriveInteractiveCall<GoogleSignInAccount>(
+          'authenticate',
+          () =>
+              GoogleSignIn.instance.authenticate(scopeHint: _googleDriveScopes),
+        );
+        if (account == null) {
+          throw StateError('Google authentication blocked');
+        }
+        if (!mounted || !pageContext.mounted) return;
+        final GoogleSignInAccount authenticatedAccount = account;
+        debugPrint(
+          'DRIVE_AUTH event:authenticated email=${authenticatedAccount.email}',
+        );
+        final int generation = ++_googleDriveAuthGeneration;
+        setState(() {
+          _googleAccount = authenticatedAccount;
+          _googleDriveSessionEmail = authenticatedAccount.email;
+          _googleDriveSessionDisplayName = authenticatedAccount.displayName;
+          _googleDriveSessionConnectedAt = DateTime.now();
+          _googleDriveWasConnected = true;
+          _googleDriveSessionStatus = GoogleDriveSessionStatus.accountConnected;
+        });
+        debugPrint('DRIVE_AUTH ui:connected');
+        unawaited(_saveGoogleDriveSessionMetadata(authenticatedAccount));
+        if (generation != _googleDriveAuthGeneration) return;
       }
 
-      final GoogleSignInAccount account = await GoogleSignIn.instance
-          .authenticate(scopeHint: _googleDriveScopes);
-      if (!mounted || !pageContext.mounted) return;
+      final GoogleSignInAccount activeAccount = account;
       errorMessage = 'No se pudo autorizar Google Drive.';
       final GoogleSignInClientAuthorization? currentAuthorization =
-          await account.authorizationClient.authorizationForScopes(
+          await activeAccount.authorizationClient.authorizationForScopes(
             _googleDriveScopes,
           );
       if (!mounted || !pageContext.mounted) return;
-      await (currentAuthorization == null
-          ? account.authorizationClient.authorizeScopes(_googleDriveScopes)
-          : Future<GoogleSignInClientAuthorization>.value(
-              currentAuthorization,
-            ));
-      final Map<String, String>? authHeaders = await account.authorizationClient
+      final GoogleSignInClientAuthorization? grantedAuthorization =
+          currentAuthorization ??
+          await _runDriveInteractiveCall<GoogleSignInClientAuthorization>(
+            'authorizeScopes',
+            () => activeAccount.authorizationClient.authorizeScopes(
+              _googleDriveScopes,
+            ),
+          );
+      if (grantedAuthorization == null) {
+        throw StateError('Google Drive authorization blocked');
+      }
+      final Map<String, String>? authHeaders = await activeAccount
+          .authorizationClient
           .authorizationHeaders(_googleDriveScopes);
       if (authHeaders == null) {
         throw StateError('Google Drive authorization headers unavailable');
       }
 
       if (!mounted || !pageContext.mounted) return;
-      setState(() => _googleAccount = account);
+      _googleDriveAuthGeneration++;
+      unawaited(
+        _saveGoogleDriveSessionMetadata(
+          activeAccount,
+          authorizationKnown: true,
+        ),
+      );
+      setState(() {
+        _googleAccount = activeAccount;
+        _googleDriveSessionEmail = activeAccount.email;
+        _googleDriveSessionDisplayName = activeAccount.displayName;
+        _googleDriveSessionConnectedAt = DateTime.now();
+        _googleDriveWasConnected = true;
+        _googleDriveAuthorizationKnown = true;
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.driveAuthorized;
+      });
+      debugPrint('DRIVE_AUTH scopes:authorized');
+      debugPrint('DRIVE_AUTH ui:connected');
       messenger.showSnackBar(
         const SnackBar(content: Text('Google Drive conectado.')),
       );
@@ -1323,6 +1923,23 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         ),
       );
       if (!mounted || !pageContext.mounted) return;
+      setState(() {
+        _googleDriveSessionStatus = canceled
+            ? _googleAccount == null
+                  ? _googleDriveWasConnected
+                        ? GoogleDriveSessionStatus.temporaryError
+                        : GoogleDriveSessionStatus.accountDisconnected
+                  : GoogleDriveSessionStatus.driveAuthorizationRequired
+            : GoogleDriveSessionStatus.temporaryError;
+      });
+      if (_googleAccount == null && !_googleDriveWasConnected) {
+        debugPrint('DRIVE_AUTH ui:disconnected');
+      } else if (_googleAccount == null) {
+        debugPrint('DRIVE_AUTH ui:temporary_error');
+      } else {
+        debugPrint('DRIVE_AUTH scopes:required');
+        debugPrint('DRIVE_AUTH ui:authorization_required');
+      }
       if (canceled) {
         messenger.showSnackBar(
           const SnackBar(content: Text('No se conectó Google Drive.')),
@@ -1343,6 +1960,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         ),
       );
       if (!mounted || !pageContext.mounted) return;
+      setState(() {
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.temporaryError;
+      });
+      debugPrint('DRIVE_AUTH restore:error_preserving_local_state');
+      debugPrint('DRIVE_AUTH ui:temporary_error');
       messenger.showSnackBar(SnackBar(content: Text(errorMessage)));
     } finally {
       if (mounted) setState(() => _isGoogleConnecting = false);
@@ -1359,16 +1981,42 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     BuildContext pageContext,
     Future<T> Function(drive.DriveApi api, GoogleSignInAccount account) action,
   ) async {
-    final GoogleSignInAccount? account = _googleAccount;
+    if (!_canTouchGoogleFromCurrentContext('withGoogleDriveApi')) {
+      throw StateError('Google Drive blocked outside user action');
+    }
+    GoogleSignInAccount? account = _googleAccount;
+    if (account == null) {
+      await _restoreGoogleDriveSession();
+      account = _googleAccount;
+    }
     if (account == null) {
       throw StateError('Google Drive no conectado');
     }
-    await _ensureGoogleSignInInitialized();
-    final GoogleSignInClientAuthorization authorization =
-        await account.authorizationClient.authorizationForScopes(
-          _googleDriveScopes,
-        ) ??
-        await account.authorizationClient.authorizeScopes(_googleDriveScopes);
+    await _ensureGoogleDriveAuthInitializedFromUserAction('drive_api');
+    final GoogleSignInClientAuthorization? authorization = await account
+        .authorizationClient
+        .authorizationForScopes(_googleDriveScopes);
+    if (authorization == null) {
+      if (mounted) {
+        setState(() {
+          _googleDriveSessionStatus =
+              GoogleDriveSessionStatus.driveAuthorizationRequired;
+          _googleDriveAuthorizationKnown = false;
+        });
+      }
+      debugPrint('DRIVE_AUTH scopes:required');
+      debugPrint('DRIVE_AUTH ui:authorization_required');
+      unawaited(_saveGoogleDriveAuthorizationKnown(false));
+      throw StateError('Google Drive authorization required');
+    }
+    if (mounted) {
+      setState(() {
+        _googleDriveSessionStatus = GoogleDriveSessionStatus.driveAuthorized;
+        _googleDriveAuthorizationKnown = true;
+      });
+    }
+    debugPrint('DRIVE_AUTH scopes:authorized');
+    unawaited(_saveGoogleDriveAuthorizationKnown(true));
     final client = authorization.authClient(scopes: _googleDriveScopes);
     try {
       return await action(drive.DriveApi(client), account);
@@ -1484,7 +2132,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
       if (mounted && pageContext.mounted) {
         if (code == 'auth_required') {
-          setState(() => _googleAccount = null);
+          setState(
+            () => _googleDriveSessionStatus =
+                GoogleDriveSessionStatus.driveAuthorizationRequired,
+          );
         }
         messenger.showSnackBar(
           SnackBar(
@@ -1651,7 +2302,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       );
       if (mounted && pageContext.mounted) {
         if (code == 'auth_required') {
-          setState(() => _googleAccount = null);
+          setState(
+            () => _googleDriveSessionStatus =
+                GoogleDriveSessionStatus.driveAuthorizationRequired,
+          );
         }
         messenger.showSnackBar(
           SnackBar(
@@ -1670,15 +2324,27 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<void> _disconnectGoogleDrive(BuildContext pageContext) async {
     if (_isGoogleDriveBusy) return;
+    if (!_driveAuthUserInitiated) {
+      debugPrint('DRIVE_AUTH blocked:interactive_flow_without_user_action');
+      debugPrint(StackTrace.current.toString());
+      return;
+    }
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(pageContext);
 
     setState(() => _isGoogleConnecting = true);
     try {
-      await _ensureGoogleSignInInitialized();
+      await _ensureGoogleDriveAuthInitializedFromUserAction('sign_out');
+      _isGoogleDriveDisconnectingExplicitly = true;
       try {
-        await GoogleSignIn.instance.disconnect();
+        await _runDriveInteractiveCall<void>(
+          'disconnect',
+          () => GoogleSignIn.instance.disconnect(),
+        );
       } catch (_) {
-        await GoogleSignIn.instance.signOut();
+        await _runDriveInteractiveCall<void>(
+          'signOut',
+          () => GoogleSignIn.instance.signOut(),
+        );
       }
     } catch (_) {
       // Local UI state is cleared even if the provider cannot be reached.
@@ -1686,9 +2352,19 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (mounted) {
         setState(() {
           _googleAccount = null;
+          _googleDriveSessionEmail = null;
+          _googleDriveSessionDisplayName = null;
+          _googleDriveSessionConnectedAt = null;
+          _googleDriveWasConnected = false;
+          _googleDriveAuthorizationKnown = false;
+          _googleDriveSessionStatus =
+              GoogleDriveSessionStatus.accountDisconnected;
           _isGoogleConnecting = false;
         });
       }
+      _isGoogleDriveDisconnectingExplicitly = false;
+      unawaited(_clearGoogleDriveSessionMetadata());
+      debugPrint('DRIVE_AUTH ui:disconnected');
       messenger.showSnackBar(
         const SnackBar(content: Text('Google Drive desconectado.')),
       );
@@ -1780,6 +2456,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _positionSortMode = positionSortModeFromName(
         prefs.getString(_positionSortKey),
       );
+      _summaryViewMode = summaryViewModeFromName(
+        prefs.getString(_summaryViewModeKey),
+      );
+      final SummaryChartType loadedSummaryChartType = summaryChartTypeFromName(
+        prefs.getString(_summaryChartTypeKey),
+      );
+      _summaryChartType = loadedSummaryChartType == SummaryChartType.candles
+          ? SummaryChartType.line
+          : loadedSummaryChartType;
       _snapshotAutomationMode = snapshotAutomationModeFromName(
         prefs.getString(_snapshotModeKey),
       );
@@ -1802,6 +2487,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       _googleDriveBackupAccountEmail = prefs.getString(
         _googleDriveBackupAccountEmailKey,
       );
+      _googleDriveSessionEmail = prefs.getString(_googleDriveSessionEmailKey);
+      _googleDriveSessionDisplayName = prefs.getString(
+        _googleDriveSessionDisplayNameKey,
+      );
+      final int? driveSessionConnectedAt = prefs.getInt(
+        _googleDriveSessionConnectedAtKey,
+      );
+      _googleDriveSessionConnectedAt = driveSessionConnectedAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(driveSessionConnectedAt);
+      _googleDriveWasConnected =
+          prefs.getBool(_googleDriveSessionWasConnectedKey) ??
+          (_googleDriveSessionEmail != null);
+      _googleDriveAuthorizationKnown =
+          prefs.getBool(_googleDriveAuthorizationKnownKey) ?? false;
       await _loadPriceAlertSettings(prefs);
 
       if (mounted) setState(() => _bootstrapped = true);
@@ -2026,6 +2726,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await showDialog<void>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
+        actionsAlignment: MainAxisAlignment.end,
         title: const Text('Umbral de recuperación'),
         content: SafeArea(
           top: false,
@@ -2044,7 +2745,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               decoration: const InputDecoration(
                 labelText: 'Puntos porcentuales',
                 helperText: 'Predeterminado: 2.0',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.trending_up_outlined),
               ),
             ),
           ),
@@ -2081,6 +2782,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await showDialog<void>(
       context: pageContext,
       builder: (BuildContext dialogContext) => AlertDialog(
+        actionsAlignment: MainAxisAlignment.end,
         title: const Text('Umbral'),
         content: SafeArea(
           top: false,
@@ -2099,7 +2801,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               decoration: const InputDecoration(
                 labelText: 'Umbral %',
                 helperText: 'Predeterminado: 2.0',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.percent_outlined),
               ),
             ),
           ),
@@ -2472,6 +3174,23 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _saveData();
   }
 
+  void _changeSummaryViewMode(SummaryViewMode value) {
+    if (_summaryViewMode == value) return;
+    setState(() => _summaryViewMode = value);
+    unawaited(_saveSummaryVisualPreference(_summaryViewModeKey, value.name));
+  }
+
+  void _changeSummaryChartType(SummaryChartType value) {
+    if (_summaryChartType == value) return;
+    setState(() => _summaryChartType = value);
+    unawaited(_saveSummaryVisualPreference(_summaryChartTypeKey, value.name));
+  }
+
+  Future<void> _saveSummaryVisualPreference(String key, String value) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+  }
+
   void _changeSnapshotAutomationMode(SnapshotAutomationMode value) {
     setState(() => _snapshotAutomationMode = value);
     _saveData();
@@ -2504,8 +3223,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     setState(() {
       _requestedSimulationMode = mode;
       _simulationOpenNonce++;
-      _currentIndex = 0;
     });
+    _goToMainTab(0);
   }
 
   Future<void> _showSellFeeDialog(BuildContext pageContext) async {
@@ -2534,7 +3253,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               decoration: const InputDecoration(
                 labelText: 'Porcentaje',
                 helperText: 'Ejemplo: 1.5',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.percent_outlined),
               ),
             ),
           ),
@@ -2590,7 +3309,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   ),
                   decoration: const InputDecoration(
                     labelText: 'Precio MXN',
-                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money_rounded),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -2768,7 +3487,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       initialValue: selectedType,
                       decoration: const InputDecoration(
                         labelText: 'Tipo',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.swap_vert_rounded),
                       ),
                       items: MovementType.values
                           .map(
@@ -2790,7 +3509,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       initialValue: selectedCoin,
                       decoration: const InputDecoration(
                         labelText: 'Moneda',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.currency_bitcoin),
                       ),
                       items: _coins
                           .map(
@@ -2867,7 +3586,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Cantidad cripto',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.token_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2878,7 +3597,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Precio unitario MXN',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.attach_money_rounded),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2889,7 +3608,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Comisión MXN',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.receipt_long_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2897,7 +3616,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       controller: sourceController,
                       decoration: const InputDecoration(
                         labelText: 'Plataforma',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.account_balance_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2916,7 +3635,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                                     selectedType == MovementType.transferOut)
                             ? 'Ej.: Bitso, MetaMask, Binance, Coinbase u otra'
                             : null,
-                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(
+                          Icons.account_balance_wallet_outlined,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2924,7 +3645,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       controller: networkController,
                       decoration: const InputDecoration(
                         labelText: 'Red',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.hub_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -2932,7 +3653,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       controller: noteController,
                       decoration: const InputDecoration(
                         labelText: 'Nota',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.notes_outlined),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -3102,12 +3823,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       useSafeArea: true,
       builder: (BuildContext sheetContext) => DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.84,
+        initialChildSize: 0.78,
         minChildSize: 0.45,
         maxChildSize: 0.96,
         builder: (BuildContext context, ScrollController controller) => ListView(
           controller: controller,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
           children: <Widget>[
             SheetHeader(
               title: 'Detalles de ${stats.coin}',
@@ -3115,44 +3836,50 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             ),
             const SizedBox(height: 12),
             CardPanel(
-              title: 'Lectura simple',
-              subtitle: 'Datos principales sin saturar la pantalla.',
+              title: 'Resumen',
+              subtitle: 'Lectura compacta de posición.',
               child: Column(
                 children: <Widget>[
-                  InfoLine('Cantidad', crypto(stats.quantity)),
-                  InfoLine('Invertido actual', money(stats.costBase)),
-                  InfoLine(
+                  _SummaryDetailLine('Cantidad', crypto(stats.quantity)),
+                  _SummaryDetailLine('Invertido', _coinsMoney(stats.costBase)),
+                  _SummaryDetailLine(
                     'Valor de cartera',
-                    money(stats.currentValue),
+                    _coinsMoney(stats.currentValue),
                     emphasized: true,
                   ),
-                  InfoLine(
+                  _SummaryDetailLine(
                     'P&L no realizado',
-                    money(stats.unrealizedPL),
+                    _coinsMoney(stats.unrealizedPL),
                     valueColor: pnlColor(stats.unrealizedPL),
                     emphasized: true,
                   ),
-                  InfoLine(
-                    'Precio para recuperar',
-                    money(stats.netBreakEvenPrice(_sellFeePercent)),
+                  _SummaryDetailLine(
+                    'Precio recuperación',
+                    _coinsMoney(stats.netBreakEvenPrice(_sellFeePercent)),
                   ),
                 ],
               ),
             ),
             CardPanel(
               title: 'Auditoría',
-              subtitle: 'Desglose para revisar de dónde salen los números.',
+              subtitle: 'Desglose de movimientos.',
               child: Column(
                 children: <Widget>[
-                  InfoLine('Compras acumuladas', money(audit.buys)),
-                  InfoLine('Ventas acumuladas', money(audit.sells)),
-                  InfoLine('Entradas acumuladas', money(audit.transferIns)),
-                  InfoLine('Salidas acumuladas', money(audit.transferOuts)),
-                  InfoLine('Comisiones acumuladas', money(audit.fees)),
-                  InfoLine('Promedio histórico actual', money(stats.avgPrice)),
-                  InfoLine(
+                  _SummaryDetailLine('Compras', _coinsMoney(audit.buys)),
+                  _SummaryDetailLine('Ventas', _coinsMoney(audit.sells)),
+                  _SummaryDetailLine(
+                    'Entradas',
+                    _coinsMoney(audit.transferIns),
+                  ),
+                  _SummaryDetailLine(
+                    'Salidas',
+                    _coinsMoney(audit.transferOuts),
+                  ),
+                  _SummaryDetailLine('Comisiones', _coinsMoney(audit.fees)),
+                  _SummaryDetailLine('Promedio', _coinsMoney(stats.avgPrice)),
+                  _SummaryDetailLine(
                     'P&L realizado',
-                    money(stats.realizedPL),
+                    _coinsMoney(stats.realizedPL),
                     valueColor: pnlColor(stats.realizedPL),
                   ),
                 ],
@@ -3170,7 +3897,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   ),
                   SizedBox(height: 6),
                   Text(
-                    'Precio para recuperar = promedio / (1 - comisión de salida)',
+                    'Precio recuperación = promedio / (1 - comisión de salida)',
                   ),
                 ],
               ),
@@ -4184,7 +4911,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               maxLines: 14,
               decoration: const InputDecoration(
                 hintText: 'Pega aquí el contenido de tu copia',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.data_object_outlined),
               ),
             ),
           ),
@@ -4453,9 +5180,41 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   void _snack(BuildContext context, String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String normalized = message.toLowerCase();
+    final bool isError =
+        normalized.contains('no se pudo') ||
+        normalized.contains('pon ') ||
+        normalized.contains('inválid') ||
+        normalized.contains('inval') ||
+        normalized.contains('error');
+    final bool isWarning =
+        normalized.contains('revisa') ||
+        normalized.contains('debe') ||
+        normalized.contains('riesgo');
+    final Color tone = isError
+        ? colors.error
+        : isWarning
+        ? const Color(0xFFF59E0B)
+        : colors.primary;
+    final IconData icon = isError
+        ? Icons.error_outline_rounded
+        : isWarning
+        ? Icons.warning_amber_rounded
+        : Icons.check_circle_outline_rounded;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: colors.surfaceContainerHighest,
+        content: Row(
+          children: <Widget>[
+            Icon(icon, color: tone, size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -4469,6 +5228,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         debugShowCheckedModeBanner: false,
         title: 'CriptoControlMx',
         themeMode: _visualMode.themeMode,
+        themeAnimationDuration: const Duration(milliseconds: 260),
+        themeAnimationCurve: Curves.easeOutCubic,
         theme: ccmx.CcmxAppTheme.build(
           style: themeStyle,
           brightness: Brightness.light,
@@ -4504,6 +5265,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       debugShowCheckedModeBanner: false,
       title: 'CriptoControlMx',
       themeMode: _visualMode.themeMode,
+      themeAnimationDuration: const Duration(milliseconds: 260),
+      themeAnimationCurve: Curves.easeOutCubic,
       theme: ccmx.CcmxAppTheme.build(
         style: themeStyle,
         brightness: Brightness.light,
@@ -4539,13 +5302,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
           void openAlertsTab() {
             Navigator.of(pageContext).maybePop();
-            setState(() => _currentIndex = 3);
+            _goToMainTab(3);
           }
 
           Widget buildChartsTab({VoidCallback? refresh}) => ChartsTab(
             stats: stats,
             totals: totals,
             snapshots: _snapshots,
+            chartType: _summaryChartType,
+            onChartTypeChanged: (SummaryChartType value) {
+              _changeSummaryChartType(value);
+              refresh?.call();
+            },
             onSaveSnapshot: () {
               _saveSnapshot(pageContext).then((_) => refresh?.call());
             },
@@ -4670,6 +5438,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               visiblePositions: _visiblePositions,
               positionSortMode: _positionSortMode,
               latestSnapshot: _snapshots.isEmpty ? null : _snapshots.first,
+              snapshots: _snapshots,
+              viewMode: _summaryViewMode,
+              chartType: _summaryChartType,
+              onViewModeChanged: _changeSummaryViewMode,
+              onChartTypeChanged: _changeSummaryChartType,
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
               onAddMovement: () => _showAddMovementSheet(pageContext),
               onImportBackup: () => _importBackup(pageContext),
@@ -4684,6 +5457,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             CoinsTab(
               coins: _coins,
               stats: stats,
+              snapshots: _snapshots,
               sellFeePercent: _sellFeePercent,
               priceModes: _priceModes,
               manualPriceUpdatedAtMs: _manualPriceUpdatedAtMs,
@@ -4691,6 +5465,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               onEditPrice: (String coin) =>
                   _showEditPriceDialog(pageContext, coin),
               onDetails: (CoinStats s) => _showCoinDetails(pageContext, s),
+              onViewMovements: () => openMovementHistory(),
             ),
             AlertsTab(
               coins: _coins,
@@ -4776,7 +5551,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               hasLocalFirebaseDeviceId: _firebaseDeviceId != null,
               cloudStateUploadedAt: _cloudStateUploadedAt,
               cloudStateDownloadedAt: _cloudStateDownloadedAt,
-              googleAccountEmail: _googleAccount?.email,
+              googleAccountEmail:
+                  _googleAccount?.email ?? _googleDriveSessionEmail,
+              googleAccountDisplayName:
+                  _googleAccount?.displayName ?? _googleDriveSessionDisplayName,
+              googleDriveLastConnectedAt: _googleDriveSessionConnectedAt,
+              googleDriveWasConnected: _googleDriveWasConnected,
+              googleDriveSessionStatus: _googleDriveSessionStatus,
+              isGoogleDriveAuthorized: _isGoogleDriveAuthorized,
               googleDriveBackupUpdatedAt: _googleDriveBackupUpdatedAt,
               isFirebaseAuthBusy: _isFirebaseAuthBusy,
               isCloudUploading: _isCloudUploading,
@@ -4831,21 +5613,54 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               },
               onImportBackup: () => _importBackup(pageContext),
               onImportBackupFile: () => _importBackupFile(pageContext),
-              onSignInFirebaseWithGoogle: () =>
-                  _signInFirebaseWithGoogle(pageContext),
+              onSignInFirebaseWithGoogle: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'firebase_sign_in',
+                  () => _signInFirebaseWithGoogle(pageContext),
+                ),
+              ),
               onSignOutFirebase: () => _signOutFirebase(pageContext),
               onPrepareCloudProfile: () => _retryCloudProfile(pageContext),
               onUploadFinancialStateToFirebase: () =>
                   _uploadFinancialStateToFirebase(pageContext),
               onDownloadFinancialStateFromFirebase: () =>
                   _downloadFinancialStateFromFirebase(pageContext),
-              onConnectGoogleDrive: () => _connectGoogleDrive(pageContext),
-              onDisconnectGoogleDrive: () =>
-                  _disconnectGoogleDrive(pageContext),
-              onCreateGoogleDriveBackup: () =>
-                  _createGoogleDriveBackup(pageContext),
-              onRestoreGoogleDriveBackup: () =>
-                  _restoreGoogleDriveBackup(pageContext),
+              onConnectGoogleDrive: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  _googleDriveUserActionForConnect(),
+                  () => _connectGoogleDrive(pageContext),
+                ),
+              ),
+              onReconnectGoogleDrive: () => unawaited(
+                _runUserInitiatedDriveAuth('reconnect', () async {
+                  if (mounted) {
+                    setState(() {
+                      _googleAccount = null;
+                      _googleDriveSessionStatus =
+                          GoogleDriveSessionStatus.temporaryError;
+                    });
+                  }
+                  await _connectGoogleDrive(pageContext);
+                }),
+              ),
+              onDisconnectGoogleDrive: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'sign_out',
+                  () => _disconnectGoogleDrive(pageContext),
+                ),
+              ),
+              onCreateGoogleDriveBackup: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'backup_now',
+                  () => _createGoogleDriveBackup(pageContext),
+                ),
+              ),
+              onRestoreGoogleDriveBackup: () => unawaited(
+                _runUserInitiatedDriveAuth(
+                  'restore_from_drive',
+                  () => _restoreGoogleDriveBackup(pageContext),
+                ),
+              ),
               onSaveSnapshot: () => _saveSnapshot(pageContext),
               onViewSnapshots: () => _showSnapshots(pageContext),
               onSnapshotAutomationModeChanged: _changeSnapshotAutomationMode,
@@ -4872,12 +5687,18 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 if (_currentIndex != 0) const SizedBox(width: 8),
               ],
             ),
-            body: IndexedStack(index: _currentIndex, children: pages),
+            body: PageView(
+              controller: _mainPageController,
+              onPageChanged: _handleMainPageChanged,
+              children: pages
+                  .map((Widget page) => _KeepAliveMainTab(child: page))
+                  .toList(),
+            ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _currentIndex,
               onDestinationSelected: (int index) {
                 unawaited(_logSafeAnalyticsEvent(name: 'tab_view'));
-                setState(() => _currentIndex = index);
+                _goToMainTab(index);
               },
               destinations: const <NavigationDestination>[
                 NavigationDestination(icon: Icon(Icons.tune), label: 'Simular'),
@@ -4906,6 +5727,27 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 }
 
+class _KeepAliveMainTab extends StatefulWidget {
+  final Widget child;
+
+  const _KeepAliveMainTab({required this.child});
+
+  @override
+  State<_KeepAliveMainTab> createState() => _KeepAliveMainTabState();
+}
+
+class _KeepAliveMainTabState extends State<_KeepAliveMainTab>
+    with AutomaticKeepAliveClientMixin<_KeepAliveMainTab> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 class SummaryTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
@@ -4914,6 +5756,11 @@ class SummaryTab extends StatelessWidget {
   final VisiblePositions visiblePositions;
   final PositionSortMode positionSortMode;
   final PortfolioSnapshot? latestSnapshot;
+  final List<PortfolioSnapshot> snapshots;
+  final SummaryViewMode viewMode;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryViewMode> onViewModeChanged;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
   final void Function(CoinStats stats) onDetails;
   final VoidCallback onAddMovement;
   final VoidCallback onImportBackup;
@@ -4931,6 +5778,11 @@ class SummaryTab extends StatelessWidget {
     required this.visiblePositions,
     required this.positionSortMode,
     required this.latestSnapshot,
+    required this.snapshots,
+    required this.viewMode,
+    required this.chartType,
+    required this.onViewModeChanged,
+    required this.onChartTypeChanged,
     required this.onDetails,
     required this.onAddMovement,
     required this.onImportBackup,
@@ -4949,24 +5801,27 @@ class SummaryTab extends StatelessWidget {
   }) {
     if (active.isEmpty) {
       return <Widget>[
-        EmptyState(
+        _SummaryCompactNotice(
           icon: Icons.account_balance_wallet_outlined,
           title: hasMovements
               ? 'No tienes posiciones abiertas'
               : 'No hay cartera todavía',
           subtitle: hasMovements
-              ? 'Tus movimientos existen, pero no hay saldos activos por mostrar.'
-              : 'Agrega tu primer movimiento para abrir el seguimiento.',
+              ? 'Tus movimientos existen, pero no hay saldos activos.'
+              : 'Agrega tu primer movimiento para iniciar el seguimiento.',
         ),
       ];
     }
 
     final List<Widget> children = visibleActive
         .map<Widget>(
-          (CoinStats s) => CleanCoinCard(
-            stats: s,
-            sellFeePercent: sellFeePercent,
-            onDetails: () => onDetails(s),
+          (CoinStats s) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _SummaryCompactCoinTile(
+              stats: s,
+              sellFeePercent: sellFeePercent,
+              onDetails: () => onDetails(s),
+            ),
           ),
         )
         .toList();
@@ -4974,11 +5829,10 @@ class SummaryTab extends StatelessWidget {
     final int hiddenCount = active.length - visibleActive.length;
     if (hiddenCount > 0) {
       children.add(
-        PremiumInfoPanel(
+        _SummaryCompactNotice(
           icon: Icons.visibility_off_outlined,
           title: '$hiddenCount posiciones ocultas',
-          subtitle: 'Cambia el límite en Más > Portafolio.',
-          badge: positionSortMode.label,
+          subtitle: 'Límite actual · ${positionSortMode.label}',
         ),
       );
     }
@@ -5008,150 +5862,1791 @@ class SummaryTab extends StatelessWidget {
         .where((CoinStats s) => s.isAtOrAboveNetBreakEven(sellFeePercent))
         .length;
 
-    return PremiumScaffoldSurface(
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[Color(0xFF070B14), Color(0xFF090D18)],
+        ),
+      ),
       child: RefreshIndicator(
         onRefresh: onRefreshPrices,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 26),
           children: <Widget>[
-            PremiumDashboardHero(
-              title: 'Resumen ejecutivo',
-              subtitle: leader == null
-                  ? 'Panorama limpio para activar decisiones de cartera.'
-                  : '${leader.coin} lidera la cartera por valor actual.',
-              icon: Icons.space_dashboard_outlined,
-              metrics: <PremiumMetricData>[
-                PremiumMetricData(
-                  label: 'Valor de cartera',
-                  value: moneyShort(totals.currentValue),
-                  icon: Icons.account_balance_wallet_outlined,
-                ),
-                PremiumMetricData(
-                  label: 'P&L no realizado',
-                  value: moneyShort(totals.unrealizedPL),
-                  color: pnlColor(totals.unrealizedPL),
-                  icon: totals.unrealizedPL >= 0
-                      ? Icons.trending_up
-                      : Icons.trending_down,
-                ),
-                PremiumMetricData(
-                  label: 'P&L realizado',
-                  value: moneyShort(totals.realizedPL),
-                  color: pnlColor(totals.realizedPL),
-                  icon: Icons.payments_outlined,
-                ),
-                PremiumMetricData(
-                  label: 'Mayor posición',
-                  value: leader?.coin ?? '—',
-                  icon: Icons.military_tech_outlined,
-                ),
-              ],
-            ),
-            if (!hasMovements)
-              CardPanel(
-                title: 'Bienvenido a CriptoControlMx',
-                subtitle:
-                    'Empieza con tu primer movimiento o restaura una copia de seguridad. Luego actualiza precios y crea instantáneas para seguir tu cartera.',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        const Icon(Icons.tips_and_updates_outlined),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            '1. Registra una compra, venta, entrada o salida.\n2. Actualiza precios para valorar tu cartera.\n3. Guarda instantáneas para construir historial y gráficas.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        FilledButton.icon(
-                          onPressed: onAddMovement,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Agregar movimiento'),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: onImportBackup,
-                          icon: const Icon(Icons.upload_file_outlined),
-                          label: const Text('Restaurar copia'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 18),
-            LatestSnapshotCard(
-              snapshot: latestSnapshot,
-              onSaveSnapshot: onSaveSnapshot,
-              onViewSnapshots: onViewSnapshots,
-              onViewEvolution: onViewSnapshotEvolution,
+            _SummaryViewModeSwitcher(
+              value: viewMode,
+              onChanged: onViewModeChanged,
             ),
             const SizedBox(height: 10),
-            _CommandSection(
-              title: 'Panorama',
-              children: <Widget>[
-                PremiumMetricCard(
-                  label: 'Invertido',
-                  value: money(totals.costBase),
-                  icon: Icons.savings_outlined,
-                ),
-                PremiumMetricCard(
-                  label: 'Posiciones arriba del equilibrio',
-                  value: '$recovered / ${active.length}',
-                  icon: Icons.verified_outlined,
-                  color: Colors.green,
-                ),
-              ],
-            ),
-            _CommandSection(
-              title: 'Foco inmediato',
-              children: <Widget>[
-                PremiumInfoPanel(
-                  icon: Icons.leaderboard_outlined,
-                  title: 'Mayor posición',
-                  subtitle: leader == null
-                      ? 'Sin posiciones abiertas'
-                      : '${leader.coin} · ${money(leader.currentValue)}',
-                  badge: leader == null ? 'Sin posición' : 'Dominante',
-                ),
-                PremiumInfoPanel(
-                  icon: Icons.warning_amber_rounded,
-                  title: 'Resultado a vigilar',
-                  subtitle: weakest == null
-                      ? 'Sin pérdidas abiertas'
-                      : '${weakest.coin} · ${money(weakest.unrealizedPL)}',
-                  badge: weakest == null
-                      ? 'Normal'
-                      : _positionStatusLabel(weakest, sellFeePercent),
-                  badgeColor: weakest == null
-                      ? Colors.green
-                      : pnlColor(weakest.unrealizedPL),
-                ),
-              ],
-            ),
-            _CommandSection(
-              title:
-                  'Posiciones visibles · ${visiblePositions.label} · ${positionSortMode.label}',
-              children: _buildVisiblePositionChildren(
+            if (viewMode == SummaryViewMode.executive) ...<Widget>[
+              _SummaryMockupHero(totals: totals),
+              const SizedBox(height: 10),
+              _SummaryMiniMetricGrid(totals: totals, leader: leader),
+              const SizedBox(height: 12),
+              _SummaryDistributionPanel(
+                positions: active,
+                totalValue: totals.currentValue,
+              ),
+              const SizedBox(height: 10),
+              _SummaryCompactFocusTile(
+                weakest: weakest,
+                recovered: recovered,
+                positionCount: active.length,
+                sellFeePercent: sellFeePercent,
+              ),
+              const SizedBox(height: 16),
+              _SummaryCompactSection(
+                title: 'Posiciones visibles',
+                subtitle:
+                    '${visibleActive.length} · ${visiblePositions.label} · ${positionSortMode.label}',
+              ),
+              const SizedBox(height: 8),
+              ..._buildVisiblePositionChildren(
                 active: active,
                 visibleActive: visibleActive,
                 sellFeePercent: sellFeePercent,
                 positionSortMode: positionSortMode,
                 onDetails: onDetails,
               ),
+              const SizedBox(height: 10),
+              _SummarySnapshotPanel(
+                snapshot: latestSnapshot,
+                onViewEvolution: onViewSnapshotEvolution,
+              ),
+            ] else
+              _SummaryQuickView(
+                totals: totals,
+                positions: visibleActive,
+                latestSnapshot: latestSnapshot,
+                snapshots: snapshots,
+                chartType: chartType,
+                onChartTypeChanged: onChartTypeChanged,
+                onDetails: onDetails,
+                onViewEvolution: onViewSnapshotEvolution,
+              ),
+            if (!hasMovements) ...<Widget>[
+              const SizedBox(height: 10),
+              _SummaryWelcomePanel(
+                onAddMovement: onAddMovement,
+                onImportBackup: onImportBackup,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+const Color _summaryPurple = Color(0xFF8B5CF6);
+String _summaryMoney(double value, {int decimals = 0}) {
+  final List<String> parts = value.abs().toStringAsFixed(decimals).split('.');
+  final String digits = parts.first;
+  final StringBuffer grouped = StringBuffer();
+  for (int index = 0; index < digits.length; index++) {
+    if (index > 0 && (digits.length - index) % 3 == 0) grouped.write(',');
+    grouped.write(digits[index]);
+  }
+  final String fraction = decimals > 0 ? '.${parts.last}' : '';
+  return '${value < 0 ? '-' : ''}\$${grouped.toString()}$fraction MXN';
+}
+
+BoxDecoration _summaryTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 13,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: tokens.shadowOpacity == 0
+        ? null
+        : <BoxShadow>[
+            BoxShadow(
+              color: tokens.shadow.withValues(alpha: tokens.shadowOpacity),
+              blurRadius: 18,
+              offset: const Offset(0, 9),
+            ),
+          ],
+  );
+}
+
+List<Color> _summaryDistributionPalette(BuildContext context) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return <Color>[
+    tokens.chartPrimary,
+    tokens.chartSecondary,
+    tokens.chartMarker,
+    tokens.primaryAccent.withValues(alpha: 0.72),
+    tokens.tertiaryAccent.withValues(alpha: 0.86),
+  ];
+}
+
+class _SummaryViewModeSwitcher extends StatelessWidget {
+  final SummaryViewMode value;
+  final ValueChanged<SummaryViewMode> onChanged;
+
+  const _SummaryViewModeSwitcher({
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.all(4),
+      decoration: _summaryTokenBox(
+        context,
+        color: tokens.surfacePrimary,
+        radius: 13,
+      ),
+      child: Row(
+        children: SummaryViewMode.values.map((SummaryViewMode mode) {
+          final bool selected = mode == value;
+          return Expanded(
+            child: InkWell(
+              onTap: () => onChanged(mode),
+              borderRadius: BorderRadius.circular(9),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? tokens.selectedBackground
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: selected
+                      ? <BoxShadow>[
+                          BoxShadow(color: tokens.glowColor, blurRadius: 12),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(
+                      mode.icon,
+                      size: 16,
+                      color: selected
+                          ? tokens.primaryAccent
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      mode.label,
+                      style: TextStyle(
+                        color: selected
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _SummaryQuickView extends StatelessWidget {
+  final PortfolioTotals totals;
+  final List<CoinStats> positions;
+  final PortfolioSnapshot? latestSnapshot;
+  final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final void Function(CoinStats stats) onDetails;
+  final VoidCallback onViewEvolution;
+
+  const _SummaryQuickView({
+    required this.totals,
+    required this.positions,
+    required this.latestSnapshot,
+    required this.snapshots,
+    required this.chartType,
+    required this.onChartTypeChanged,
+    required this.onDetails,
+    required this.onViewEvolution,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _SummaryQuickMetricsGrid(totals: totals),
+        const SizedBox(height: 10),
+        _SummarySnapshotPanel(
+          snapshot: latestSnapshot,
+          onViewEvolution: onViewEvolution,
+        ),
+        const SizedBox(height: 10),
+        _SummaryQuickEvolutionPanel(
+          snapshots: snapshots,
+          chartType: chartType,
+          onChartTypeChanged: onChartTypeChanged,
+          onViewEvolution: onViewEvolution,
+        ),
+        const SizedBox(height: 16),
+        _SummaryCompactSection(
+          title: 'Monedas en foco',
+          subtitle: '${positions.length} posiciones visibles',
+        ),
+        const SizedBox(height: 8),
+        if (positions.isEmpty)
+          const _SummaryCompactNotice(
+            icon: Icons.account_balance_wallet_outlined,
+            title: 'Sin posiciones abiertas',
+            subtitle: 'Agrega movimientos para ver tu lectura rápida.',
+          )
+        else
+          ...positions.map(
+            (CoinStats stats) => Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: _SummaryQuickCoinRow(
+                stats: stats,
+                onDetails: () => onDetails(stats),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SummaryQuickMetricsGrid extends StatelessWidget {
+  final PortfolioTotals totals;
+
+  const _SummaryQuickMetricsGrid({required this.totals});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final List<_SummaryQuickMetricData> metrics = <_SummaryQuickMetricData>[
+      _SummaryQuickMetricData(
+        'Valor actual',
+        _summaryMoney(totals.currentValue),
+        Icons.account_balance_wallet_outlined,
+        tokens.primaryAccent,
+      ),
+      _SummaryQuickMetricData(
+        'Invertido',
+        _summaryMoney(totals.costBase),
+        Icons.savings_outlined,
+        tokens.chartSecondary,
+      ),
+      _SummaryQuickMetricData(
+        'P&L no realizado',
+        _summaryMoney(totals.unrealizedPL),
+        Icons.trending_up,
+        pnlColor(totals.unrealizedPL),
+      ),
+      _SummaryQuickMetricData(
+        'P&L realizado',
+        _summaryMoney(totals.realizedPL),
+        Icons.payments_outlined,
+        pnlColor(totals.realizedPL),
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (_, BoxConstraints constraints) {
+        final double width = (constraints.maxWidth - 8) / 2;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: metrics
+              .map(
+                (_SummaryQuickMetricData metric) => SizedBox(
+                  width: width,
+                  child: _SummaryQuickMetricCard(metric: metric),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _SummaryQuickMetricData {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _SummaryQuickMetricData(this.label, this.value, this.icon, this.color);
+}
+
+class _SummaryQuickMetricCard extends StatelessWidget {
+  final _SummaryQuickMetricData metric;
+
+  const _SummaryQuickMetricCard({required this.metric});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      height: 92,
+      padding: const EdgeInsets.all(11),
+      decoration: _summaryTokenBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(metric.icon, size: 15, color: metric.color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  metric.label,
+                  maxLines: 2,
+                  style: const TextStyle(
+                    color: Color(0xFFB6BED0),
+                    fontSize: 13,
+                    height: 1.05,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              metric.value,
+              style: TextStyle(
+                color: metric.color,
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryQuickEvolutionPanel extends StatelessWidget {
+  final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final VoidCallback onViewEvolution;
+
+  const _SummaryQuickEvolutionPanel({
+    required this.snapshots,
+    required this.chartType,
+    required this.onChartTypeChanged,
+    required this.onViewEvolution,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<PortfolioSnapshot> ordered = snapshots.toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+
+    return _SummaryPanel(
+      icon: Icons.show_chart,
+      title: 'Evolución de cartera',
+      titleFontSize: 20,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _SummaryChartTypeButton(
+                  value: chartType,
+                  onChanged: onChartTypeChanged,
+                  compact: true,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: onViewEvolution,
+                tooltip: 'Abrir gráficas',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
+                ),
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.open_in_new, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (ordered.length < 2)
+            const _SummaryCompactNotice(
+              icon: Icons.show_chart_outlined,
+              title: 'Histórico insuficiente',
+              subtitle: 'Guarda dos instantáneas para dibujar la evolución.',
+            )
+          else
+            SnapshotLineChart(
+              snapshots: ordered,
+              height: 160,
+              includeZero: true,
+              chartType: chartType,
+              series: <SnapshotChartSeries>[
+                SnapshotChartSeries(
+                  label: 'Valor actual',
+                  color: tokens.chartPrimary,
+                  values: ordered
+                      .map((PortfolioSnapshot s) => s.totalCurrentValue)
+                      .toList(),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryQuickCoinRow extends StatelessWidget {
+  final CoinStats stats;
+  final VoidCallback onDetails;
+
+  const _SummaryQuickCoinRow({required this.stats, required this.onDetails});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color resultColor = pnlColor(stats.unrealizedPL);
+    return Container(
+      height: 66,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: _summaryTokenBox(context, radius: 11),
+      child: Row(
+        children: <Widget>[
+          CoinLogo(coin: stats.coin, size: 30),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  stats.coin,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  crypto(stats.quantity),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFAAB3C5),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 118),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _summaryMoney(stats.currentValue),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _summaryMoney(stats.unrealizedPL),
+                    style: TextStyle(
+                      color: resultColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onDetails,
+            tooltip: 'Detalles',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.chevron_right, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryChartTypeButton extends StatelessWidget {
+  final SummaryChartType value;
+  final ValueChanged<SummaryChartType> onChanged;
+  final bool compact;
+
+  const _SummaryChartTypeButton({
+    required this.value,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return OutlinedButton.icon(
+      onPressed: () => _showSummaryChartTypeSheet(
+        context,
+        value: value,
+        onChanged: onChanged,
+        hasOhlc: false,
+      ),
+      icon: Icon(value.icon, size: 17),
+      label: Text(
+        compact ? 'Tipo de gráfico' : 'Tipo de gráfico · ${value.label}',
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: tokens.primaryAccent,
+        minimumSize: Size(0, compact ? 40 : 44),
+        visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+        side: BorderSide(color: tokens.selectedBorder),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+Future<void> _showSummaryChartTypeSheet(
+  BuildContext context, {
+  required SummaryChartType value,
+  required ValueChanged<SummaryChartType> onChanged,
+  required bool hasOhlc,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (BuildContext sheetContext) {
+      final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(
+        sheetContext,
+      );
+      final ColorScheme colors = Theme.of(sheetContext).colorScheme;
+      return Container(
+        decoration: BoxDecoration(
+          color: tokens.sheetBackground,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border(top: BorderSide(color: tokens.cardBorder)),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: tokens.primaryAccent.withValues(alpha: 0.22),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Tipo de gráfico',
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: 25,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Elige cómo representar la serie temporal actual.',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 16),
+              ),
+              const SizedBox(height: 14),
+              for (final SummaryChartType type in SummaryChartType.values)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _SummaryChartTypeOption(
+                    type: type,
+                    selected: value == type,
+                    enabled: type != SummaryChartType.candles || hasOhlc,
+                    onTap: () {
+                      onChanged(type);
+                      Navigator.of(sheetContext).pop();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _SummaryChartTypeOption extends StatelessWidget {
+  final SummaryChartType type;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _SummaryChartTypeOption({
+    required this.type,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color accent = enabled
+        ? tokens.primaryAccent
+        : colors.onSurfaceVariant.withValues(alpha: 0.62);
+    return Material(
+      color: selected ? tokens.selectedBackground : tokens.surfaceElevated,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? tokens.selectedBorder : tokens.cardBorder,
+            ),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(type.icon, color: accent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      type.label,
+                      style: TextStyle(
+                        color: enabled ? Colors.white : const Color(0xFF7F899D),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (!enabled)
+                      const Text(
+                        'Requiere OHLC',
+                        style: TextStyle(
+                          color: Color(0xFFAAB3C5),
+                          fontSize: 14,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle, color: tokens.primaryAccent, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryMockupHero extends StatelessWidget {
+  final PortfolioTotals totals;
+  const _SummaryMockupHero({required this.totals});
+  @override
+  Widget build(BuildContext context) {
+    final Color resultColor = pnlColor(totals.unrealizedPL);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      height: 180,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: tokens.selectedBorder),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: tokens.glowColor,
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: tokens.primaryAccent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 14,
+                  color: tokens.primaryAccent,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Valor de cartera',
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _summaryMoney(totals.currentValue),
+              maxLines: 1,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: 30,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const Spacer(),
+          Container(height: 1, color: tokens.divider),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'P&L no realizado',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _summaryMoney(totals.unrealizedPL),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: resultColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: resultColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      totals.unrealizedPL >= 0
+                          ? Icons.trending_up
+                          : Icons.trending_down,
+                      size: 14,
+                      color: resultColor,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      totals.unrealizedPL >= 0 ? 'Positivo' : 'Negativo',
+                      style: TextStyle(
+                        color: resultColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryMiniMetricGrid extends StatelessWidget {
+  final PortfolioTotals totals;
+  final CoinStats? leader;
+  const _SummaryMiniMetricGrid({required this.totals, required this.leader});
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> items = <Widget>[
+      _SummaryMiniMetricCard(
+        icon: Icons.savings_outlined,
+        label: 'Invertido',
+        value: _summaryMoney(totals.costBase).replaceFirst(' MXN', ''),
+      ),
+      _SummaryMiniMetricCard(
+        icon: Icons.payments_outlined,
+        label: 'P&L realizado',
+        value: _summaryMoney(totals.realizedPL).replaceFirst(' MXN', ''),
+        color: pnlColor(totals.realizedPL),
+      ),
+      _SummaryMiniMetricCard(
+        icon: Icons.workspace_premium_outlined,
+        label: 'Mayor posición',
+        value: leader?.coin ?? 'Sin posición',
+        color: const Color(0xFFF59E0B),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (_, BoxConstraints constraints) {
+        final double availableWidth = constraints.maxWidth;
+        final double cardWidth = (availableWidth - 16) / 3;
+        return Row(
+          children: <Widget>[
+            SizedBox(width: cardWidth, child: items[0]),
+            const SizedBox(width: 8),
+            SizedBox(width: cardWidth, child: items[1]),
+            const SizedBox(width: 8),
+            SizedBox(width: cardWidth, child: items[2]),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SummaryMiniMetricCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  const _SummaryMiniMetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.color = _summaryPurple,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final Color resolvedColor = color == _summaryPurple
+        ? tokens.primaryAccent
+        : color;
+    return Container(
+      height: 90,
+      padding: const EdgeInsets.all(10),
+      decoration: _summaryTokenBox(context, radius: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(icon, size: 14, color: resolvedColor),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  style: const TextStyle(
+                    color: Color(0xFFB6BED0),
+                    fontSize: 14,
+                    height: 1.05,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: color == _summaryPurple
+                    ? Theme.of(context).colorScheme.onSurface
+                    : resolvedColor,
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryDistributionPanel extends StatelessWidget {
+  final List<CoinStats> positions;
+  final double totalValue;
+  const _SummaryDistributionPanel({
+    required this.positions,
+    required this.totalValue,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final List<Color> distributionColors = _summaryDistributionPalette(context);
+    final List<CoinStats> valued = positions
+        .where((CoinStats item) => item.currentValue > 0)
+        .take(5)
+        .toList();
+    return _SummaryPanel(
+      icon: Icons.donut_small_outlined,
+      title: 'Distribución por valor',
+      titleFontSize: 20,
+      child: valued.isEmpty
+          ? const Text(
+              'Sin posiciones valuadas para distribuir.',
+              style: TextStyle(color: Color(0xFFB6BED0), fontSize: 13),
+            )
+          : Column(
+              children: <Widget>[
+                for (int i = 0; i < valued.length; i++)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      bottom: i == valued.length - 1 ? 0 : 7,
+                    ),
+                    child: _SummaryDistributionRow(
+                      stats: valued[i],
+                      share: totalValue > 0
+                          ? valued[i].currentValue / totalValue
+                          : 0,
+                      color: distributionColors[i % distributionColors.length],
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+class _SummaryDistributionRow extends StatelessWidget {
+  final CoinStats stats;
+  final double share;
+  final Color color;
+  const _SummaryDistributionRow({
+    required this.stats,
+    required this.share,
+    required this.color,
+  });
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      SizedBox(
+        width: 42,
+        child: Text(
+          stats.coin,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            height: 7,
+            color: Colors.white.withValues(alpha: 0.06),
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: share.clamp(0.0, 1.0).toDouble(),
+              child: ColoredBox(color: color),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 9),
+      SizedBox(
+        width: 62,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(
+            pct(share * 100),
+            maxLines: 1,
+            softWrap: false,
+            textAlign: TextAlign.right,
+            style: const TextStyle(color: Color(0xFFD0D7E5), fontSize: 14),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+class _SummaryCompactFocusTile extends StatelessWidget {
+  final CoinStats? weakest;
+  final int recovered;
+  final int positionCount;
+  final double sellFeePercent;
+  const _SummaryCompactFocusTile({
+    required this.weakest,
+    required this.recovered,
+    required this.positionCount,
+    required this.sellFeePercent,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final CoinStats? focus = weakest;
+    final Color color = focus == null
+        ? const Color(0xFF22C55E)
+        : pnlColor(focus.unrealizedPL);
+    return _SummaryCompactNotice(
+      icon: Icons.notifications_active_outlined,
+      title: focus == null
+          ? 'Resultado a vigilar'
+          : '${focus.coin} requiere atención',
+      subtitle: focus == null
+          ? 'Sin posiciones abiertas por revisar.'
+          : '${_summaryMoney(focus.unrealizedPL)} · $recovered/$positionCount en equilibrio',
+      badge: focus == null
+          ? 'Normal'
+          : _positionStatusLabel(focus, sellFeePercent),
+      color: color,
+    );
+  }
+}
+
+class _SummarySnapshotPanel extends StatelessWidget {
+  final PortfolioSnapshot? snapshot;
+  final VoidCallback onViewEvolution;
+  const _SummarySnapshotPanel({
+    required this.snapshot,
+    required this.onViewEvolution,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final PortfolioSnapshot? current = snapshot;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return _SummaryPanel(
+      icon: Icons.camera_alt_outlined,
+      title: 'Última instantánea',
+      titleFontSize: 18,
+      trailing: IconButton(
+        onPressed: onViewEvolution,
+        tooltip: 'Ver gráficas',
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+        padding: EdgeInsets.zero,
+        icon: Icon(Icons.show_chart, size: 17, color: tokens.primaryAccent),
+      ),
+      child: current == null
+          ? Text(
+              'Aún no hay instantáneas guardadas.',
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  longDate(current.createdAt),
+                  style: TextStyle(color: colors.onSurface, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _SummaryTinyMetric(
+                        label: 'Valor',
+                        value: _summaryMoney(current.totalCurrentValue),
+                        valueFontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _SummaryTinyMetric(
+                        label: 'P&L pendiente',
+                        value: _summaryMoney(current.totalUnrealizedPL),
+                        color: pnlColor(current.totalUnrealizedPL),
+                        valueFontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _SummaryTinyMetric(
+                        label: 'P&L realizado',
+                        value: _summaryMoney(current.totalRealizedPL),
+                        color: pnlColor(current.totalRealizedPL),
+                        valueFontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _SummaryCompactSection extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _SummaryCompactSection({required this.title, required this.subtitle});
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Row(
+      children: <Widget>[
+        Icon(
+          Icons.account_balance_wallet_outlined,
+          size: 17,
+          color: tokens.primaryAccent,
+        ),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                title,
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SummaryCompactCoinTile extends StatelessWidget {
+  final CoinStats stats;
+  final double sellFeePercent;
+  final VoidCallback onDetails;
+  const _SummaryCompactCoinTile({
+    required this.stats,
+    required this.sellFeePercent,
+    required this.onDetails,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool recovered = stats.isAtOrAboveNetBreakEven(sellFeePercent);
+    final bool hasPrice = stats.currentPrice > 0;
+    final String distance = stats.quantity <= 0 || recovered
+        ? '0.00%'
+        : pct(stats.percentToNetBreakEven(sellFeePercent));
+    final Color resultColor = pnlColor(stats.unrealizedPL);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 8),
+      decoration: _summaryTokenBox(context),
+      child: Column(
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              CoinLogo(coin: stats.coin, size: 34),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      stats.coin,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      crypto(stats.quantity),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 128),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _summaryMoney(stats.currentValue),
+                        style: TextStyle(
+                          color: colors.onSurface,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _summaryMoney(stats.unrealizedPL),
+                        style: TextStyle(
+                          color: resultColor,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _SummaryTinyMetric(
+                  label: 'Break-even',
+                  value: hasPrice
+                      ? _summaryMoney(
+                          stats.netBreakEvenPrice(sellFeePercent),
+                          decimals: 2,
+                        )
+                      : 'Sin precio',
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _SummaryTinyMetric(label: 'Falta', value: distance),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _SummaryTinyMetric(
+                  label: 'Promedio',
+                  value: _summaryMoney(stats.avgPrice, decimals: 2),
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (recovered ? const Color(0xFF22C55E) : resultColor)
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  recovered
+                      ? 'En equilibrio'
+                      : _positionStatusLabel(stats, sellFeePercent),
+                  style: TextStyle(
+                    color: recovered ? const Color(0xFF4ADE80) : resultColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: onDetails,
+                icon: const Icon(Icons.arrow_forward, size: 15),
+                label: const Text('Detalles'),
+                style: TextButton.styleFrom(
+                  foregroundColor: tokens.primaryAccent,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryDetailLine extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool emphasized;
+  final Color? valueColor;
+
+  const _SummaryDetailLine(
+    this.label,
+    this.value, {
+    this.emphasized = false,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final TextStyle labelStyle = TextStyle(
+      color: colors.onSurfaceVariant,
+      fontSize: 14,
+      height: 1.2,
+    );
+    final TextStyle valueStyle = TextStyle(
+      color: valueColor ?? colors.onSurface,
+      fontSize: 16,
+      fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+      height: 1.2,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool stacked =
+              constraints.maxWidth < 280 ||
+              MediaQuery.textScalerOf(context).scale(1) >= 1.3;
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(label, style: labelStyle),
+                const SizedBox(height: 3),
+                Text(value, style: valueStyle),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                flex: 5,
+                child: Text(label, maxLines: 2, style: labelStyle),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 6,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: valueStyle,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SummaryTinyMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? color;
+  final double valueFontSize;
+  const _SummaryTinyMetric({
+    required this.label,
+    required this.value,
+    this.color,
+    this.valueFontSize = 14,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 58),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: _summaryTokenBox(
+        context,
+        color: tokens.surfaceElevated.withValues(alpha: 0.72),
+        radius: 8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 2,
+            style: const TextStyle(
+              color: Color(0xFFAAB3C5),
+              fontSize: 13,
+              height: 1.05,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: color ?? const Color(0xFFDCE3F0),
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCompactNotice extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final Color? color;
+  const _SummaryCompactNotice({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    this.color,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final Color resolvedColor = color ?? tokens.primaryAccent;
+    return Container(
+      padding: const EdgeInsets.all(11),
+      decoration: _summaryTokenBox(context, radius: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: resolvedColor.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 16, color: resolvedColor),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (badge != null)
+            Container(
+              margin: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: resolvedColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              constraints: const BoxConstraints(maxWidth: 104),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  badge!,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: resolvedColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryPanel extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final Widget child;
+  final Widget? trailing;
+  final double titleFontSize;
+  const _SummaryPanel({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.trailing,
+    this.titleFontSize = 16,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: _summaryTokenBox(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 16, color: tokens.primaryAccent),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: titleFontSize,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryWelcomePanel extends StatelessWidget {
+  final VoidCallback onAddMovement;
+  final VoidCallback onImportBackup;
+  const _SummaryWelcomePanel({
+    required this.onAddMovement,
+    required this.onImportBackup,
+  });
+  @override
+  Widget build(BuildContext context) => _SummaryPanel(
+    icon: Icons.auto_awesome_outlined,
+    title: 'Comienza tu cartera',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Text(
+          'Registra un movimiento o restaura una copia existente.',
+          style: TextStyle(color: Color(0xFFB6BED0), fontSize: 14),
+        ),
+        const SizedBox(height: 9),
+        Wrap(
+          spacing: 7,
+          children: <Widget>[
+            FilledButton.icon(
+              onPressed: onAddMovement,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Agregar'),
+            ),
+            OutlinedButton.icon(
+              onPressed: onImportBackup,
+              icon: const Icon(Icons.upload_file_outlined, size: 16),
+              label: const Text('Restaurar'),
             ),
           ],
         ),
+      ],
+    ),
+  );
+}
+
+class SummaryHeroPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final PortfolioTotals totals;
+  final CoinStats? leader;
+
+  const SummaryHeroPanel({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.totals,
+    required this.leader,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color unrealizedColor = pnlColor(totals.unrealizedPL);
+    final Color realizedColor = pnlColor(totals.realizedPL);
+
+    return PremiumCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.space_dashboard_outlined, color: colors.primary),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Valor de cartera',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            moneyShort(totals.currentValue),
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              _HeaderMetric(
+                label: 'P&L no realizado',
+                value: moneyShort(totals.unrealizedPL),
+                color: unrealizedColor,
+                icon: totals.unrealizedPL >= 0
+                    ? Icons.trending_up
+                    : Icons.trending_down,
+              ),
+              _HeaderMetric(
+                label: 'P&L realizado',
+                value: moneyShort(totals.realizedPL),
+                color: realizedColor,
+                icon: Icons.payments_outlined,
+              ),
+              _HeaderMetric(
+                label: 'Mayor posición',
+                value: leader?.coin ?? '—',
+                icon: Icons.military_tech_outlined,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -5177,8 +7672,8 @@ class LatestSnapshotCard extends StatelessWidget {
     return CardPanel(
       title: 'Última instantánea',
       subtitle: current == null
-          ? 'Sin instantánea guardada todavía.'
-          : 'Guardado el ${longDate(current.createdAt)}.',
+          ? 'Sin instantánea guardada.'
+          : longDate(current.createdAt),
       child: current == null
           ? const Text(
               'Resumen muestra solo la última instantánea. Gestiona el histórico '
@@ -5202,7 +7697,7 @@ class LatestSnapshotCard extends StatelessWidget {
                 ),
                 InfoLine('Inversión total', money(current.totalCostBase)),
                 InfoLine('Moneda dominante', current.dominantCoinLabel),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -5315,13 +7810,13 @@ class CleanCoinCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
-                CoinLogo(coin: stats.coin, size: 46),
+                CoinLogo(coin: stats.coin, size: 42),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -5339,7 +7834,7 @@ class CleanCoinCard extends StatelessWidget {
                             : '${crypto(stats.quantity)} · Precio no disponible',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      const SizedBox(height: 7),
+                      const SizedBox(height: 6),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: StatusPill(
@@ -5354,10 +7849,10 @@ class CleanCoinCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 10,
-              runSpacing: 10,
+              runSpacing: 8,
               children: <Widget>[
                 MiniMetric(
                   label: 'Resultado',
@@ -5368,7 +7863,7 @@ class CleanCoinCard extends StatelessWidget {
                 MiniMetric(label: 'Promedio', value: money(stats.avgPrice)),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton.tonalIcon(
@@ -6552,12 +9047,15 @@ class _MovementsTabState extends State<MovementsTab> {
               Container(
                 width: double.infinity,
                 constraints: const BoxConstraints(maxHeight: 180),
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
+                  color: Theme.of(
+                    sheetContext,
+                  ).colorScheme.surfaceContainerHighest,
                   border: Border.all(
                     color: Theme.of(sheetContext).colorScheme.outlineVariant,
                   ),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: SingleChildScrollView(
                   child: SelectableText(
@@ -6800,7 +9298,7 @@ class _MovementsTabState extends State<MovementsTab> {
                       initialValue: _coinFilter,
                       decoration: const InputDecoration(
                         labelText: 'Moneda',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.currency_bitcoin),
                       ),
                       items: <DropdownMenuItem<String>>[
                         const DropdownMenuItem<String>(
@@ -6825,7 +9323,7 @@ class _MovementsTabState extends State<MovementsTab> {
                       initialValue: _typeFilter,
                       decoration: const InputDecoration(
                         labelText: 'Tipo',
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.swap_vert_rounded),
                       ),
                       items: <DropdownMenuItem<String>>[
                         const DropdownMenuItem<String>(
@@ -6855,7 +9353,6 @@ class _MovementsTabState extends State<MovementsTab> {
             decoration: const InputDecoration(
               labelText: 'Buscar',
               prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 12),
@@ -6942,21 +9439,34 @@ class _MovementsTabState extends State<MovementsTab> {
                     if (value == 'edit') _editMovement(m);
                     if (value == 'delete') _confirmDeleteMovement(context, m);
                   },
-                  itemBuilder: (BuildContext context) =>
-                      const <PopupMenuEntry<String>>[
-                        PopupMenuItem<String>(
-                          value: 'details',
-                          child: Text('Ver detalle'),
+                  itemBuilder: (BuildContext context) {
+                    final ColorScheme colors = Theme.of(context).colorScheme;
+                    return <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
+                        value: 'details',
+                        child: _PopupActionLabel(
+                          icon: Icons.visibility_outlined,
+                          label: 'Ver detalle',
                         ),
-                        PopupMenuItem<String>(
-                          value: 'edit',
-                          child: Text('Editar'),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'edit',
+                        child: _PopupActionLabel(
+                          icon: Icons.edit_outlined,
+                          label: 'Editar',
                         ),
-                        PopupMenuItem<String>(
-                          value: 'delete',
-                          child: Text('Borrar'),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: _PopupActionLabel(
+                          icon: Icons.delete_outline,
+                          label: 'Borrar',
+                          color: colors.error,
                         ),
-                      ],
+                      ),
+                    ];
+                  },
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -7014,8 +9524,13 @@ class SimulationTab extends StatefulWidget {
 }
 
 class _SimulationTabState extends State<SimulationTab> {
+  static const String _savedSimulationsKey = 'saved_simulations_v1_json';
+  static const int _savedSimulationsLimit = 50;
+
   SimulationMode _mode = SimulationMode.operation;
   OperationSimulationMode _operationMode = OperationSimulationMode.buy;
+  final List<_SavedSimulationRecord> _savedSimulations =
+      <_SavedSimulationRecord>[];
 
   String _buyCoin = 'UNI';
   final TextEditingController _buyGrossAmountController = TextEditingController(
@@ -7067,6 +9582,7 @@ class _SimulationTabState extends State<SimulationTab> {
   void initState() {
     super.initState();
     _mode = widget.initialMode;
+    unawaited(_loadSavedSimulations());
   }
 
   @override
@@ -7098,6 +9614,315 @@ class _SimulationTabState extends State<SimulationTab> {
     super.dispose();
   }
 
+  InputDecoration _simulationInputDecoration(
+    String label, {
+    IconData? icon,
+    String? prefixText,
+    String? suffixText,
+    String? helperText,
+  }) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final inputTheme = Theme.of(context).inputDecorationTheme;
+
+    return InputDecoration(
+      isDense: false,
+      labelText: label,
+      prefixIcon: icon == null ? null : Icon(icon, size: 18),
+      prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      prefixText: prefixText,
+      suffixText: suffixText,
+      helperText: helperText,
+      prefixStyle: TextStyle(
+        color: colors.onSurface,
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      ),
+      suffixStyle: TextStyle(
+        color: colors.onSurfaceVariant,
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      ),
+      helperStyle: TextStyle(
+        color: colors.onSurfaceVariant,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      ),
+      filled: true,
+      fillColor: inputTheme.fillColor ?? colors.surfaceContainerHighest,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: colors.primary, width: 1.4),
+      ),
+    );
+  }
+
+  Widget _simulationQuickChip(String label, VoidCallback onPressed) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 74, minHeight: 36),
+      child: ActionChip(
+        label: Center(child: Text(label)),
+        onPressed: onPressed,
+        backgroundColor: colors.primaryContainer.withValues(alpha: 0.56),
+        side: BorderSide(color: colors.primary.withValues(alpha: 0.22)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        labelStyle: TextStyle(
+          color: colors.onPrimaryContainer,
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+
+  String _simulationQuickAmountLabel(double amount) {
+    return _summaryMoney(amount).replaceFirst(' MXN', '');
+  }
+
+  Widget _simulationQuickAmountGrid() {
+    final double currentAmount = _parseInput(_buyGrossAmountController);
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 10;
+        final int columns = constraints.maxWidth >= 284 ? 3 : 2;
+        final double width =
+            (constraints.maxWidth - (gap * (columns - 1))) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: <Widget>[
+            for (final double amount in _quickAmountValues)
+              SizedBox(
+                width: width,
+                height: 44,
+                child: _SimulationQuickAmountButton(
+                  label: _simulationQuickAmountLabel(amount),
+                  selected: (currentAmount - amount).abs() < 0.01,
+                  onPressed: () {
+                    setState(
+                      () => _buyGrossAmountController.text = compact(amount),
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _loadSavedSimulations() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString(_savedSimulationsKey);
+      if (raw == null || raw.trim().isEmpty) return;
+      final dynamic decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final List<_SavedSimulationRecord> loaded = decoded
+          .whereType<Map<dynamic, dynamic>>()
+          .map(
+            (Map<dynamic, dynamic> json) => _SavedSimulationRecord.fromJson(
+              Map<String, dynamic>.from(json),
+            ),
+          )
+          .whereType<_SavedSimulationRecord>()
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _savedSimulations
+          ..clear()
+          ..addAll(loaded.take(_savedSimulationsLimit));
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _persistSavedSimulations() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _savedSimulationsKey,
+      jsonEncode(
+        _savedSimulations
+            .take(_savedSimulationsLimit)
+            .map((_SavedSimulationRecord record) => record.toJson())
+            .toList(),
+      ),
+    );
+  }
+
+  int _currentStrategyScore(bool valid) {
+    if (!valid) return 0;
+    return switch (_mode) {
+      SimulationMode.rotation => 82,
+      SimulationMode.operation =>
+        _operationMode == OperationSimulationMode.buy ? 76 : 70,
+    };
+  }
+
+  String _strategyLabelForScore(int score) {
+    if (score >= 80) return 'Alta prioridad';
+    if (score >= 70) return 'Interesante';
+    if (score >= 55) return 'Revisar';
+    return 'No prioritaria';
+  }
+
+  Future<void> _saveCurrentSimulation({
+    required bool valid,
+    required String primaryLabel,
+    required String primaryValue,
+  }) async {
+    if (!valid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Corrige la simulación antes de guardarla.'),
+        ),
+      );
+      return;
+    }
+
+    await _addSavedSimulation(
+      _SavedSimulationRecord(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        createdAt: DateTime.now(),
+        modeLabel: _modeLabel,
+        selectedAsset: _simulationPairLabel,
+        scenario: _simulationScenarioLabel,
+        feeLabel: _activeFeeLabel,
+        primaryLabel: primaryLabel,
+        primaryValue: primaryValue,
+        strategyScore: _currentStrategyScore(valid),
+        strategyLabel: _strategyLabelForScore(_currentStrategyScore(valid)),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Simulación guardada.')));
+  }
+
+  Future<void> _addSavedSimulation(_SavedSimulationRecord record) async {
+    setState(() {
+      _savedSimulations.insert(0, record);
+      if (_savedSimulations.length > _savedSimulationsLimit) {
+        _savedSimulations.removeRange(
+          _savedSimulationsLimit,
+          _savedSimulations.length,
+        );
+      }
+    });
+    await _persistSavedSimulations();
+  }
+
+  Future<void> _duplicateSavedSimulation(_SavedSimulationRecord record) async {
+    await _addSavedSimulation(record.copyAsNew());
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Simulación duplicada.')));
+  }
+
+  Future<void> _deleteSavedSimulation(String id) async {
+    setState(() {
+      _savedSimulations.removeWhere(
+        (_SavedSimulationRecord record) => record.id == id,
+      );
+    });
+    await _persistSavedSimulations();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Simulación eliminada.')));
+  }
+
+  void _showSavedSimulations() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) => _SavedSimulationsSheet(
+        records: List<_SavedSimulationRecord>.of(_savedSimulations),
+        onDuplicate: (_SavedSimulationRecord record) {
+          Navigator.of(sheetContext).pop();
+          unawaited(_duplicateSavedSimulation(record));
+        },
+        onDelete: (_SavedSimulationRecord record) {
+          Navigator.of(sheetContext).pop();
+          unawaited(_deleteSavedSimulation(record.id));
+        },
+      ),
+    );
+  }
+
+  void _showSimulationComparator() {
+    if (_savedSimulations.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Guarda al menos dos simulaciones para comparar.'),
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) => _SimulationComparatorSheet(
+        left: _savedSimulations[0],
+        right: _savedSimulations[1],
+      ),
+    );
+  }
+
+  Widget _buildSimulationPositionPanel(CoinStats stats, String title) {
+    return _SimulationPanel(
+      title: title,
+      subtitle: 'Lectura actual antes de simular.',
+      icon: Icons.account_balance_wallet_outlined,
+      child: _SimulationMetricGrid(
+        metrics: <_SimulationMetricData>[
+          _SimulationMetricData(
+            label: 'Cantidad',
+            value: _simulationCrypto(stats.quantity),
+          ),
+          _SimulationMetricData(
+            label: 'Promedio',
+            value: _simulationMoney(stats.avgPrice),
+          ),
+          _SimulationMetricData(
+            label: 'Break-even',
+            value: _simulationMoney(
+              stats.breakEvenWithExitFee(widget.targetExitFeePercent),
+            ),
+          ),
+          _SimulationMetricData(
+            label: 'Valor actual',
+            value: _simulationMoney(stats.currentValue),
+          ),
+          _SimulationMetricData(
+            label: 'P&L',
+            value: _simulationMoney(stats.unrealizedPL),
+            color: pnlColor(stats.unrealizedPL),
+          ),
+        ],
+      ),
+    );
+  }
+
   String get _modeLabel => switch (_mode) {
     SimulationMode.operation =>
       _operationMode == OperationSimulationMode.buy
@@ -7124,18 +9949,18 @@ class _SimulationTabState extends State<SimulationTab> {
   String get _simulationScenarioLabel => switch (_mode) {
     SimulationMode.operation =>
       _operationMode == OperationSimulationMode.buy
-          ? moneyShort(_parseInput(_buyGrossAmountController))
+          ? _simulationMoney(_parseInput(_buyGrossAmountController))
           : _sellMethod == SimulationSellMethod.percent
           ? '${_sellPercentController.text.trim()}% de posición'
           : _sellMethod == SimulationSellMethod.quantity
           ? '${_sellQuantityController.text.trim()} cripto'
-          : moneyShort(_parseInput(_sellGrossController)),
+          : _simulationMoney(_parseInput(_sellGrossController)),
     SimulationMode.rotation =>
       _rotationMethod == SimulationRotationMethod.percent
           ? '${_rotationPercentController.text.trim()}% origen'
           : _rotationMethod == SimulationRotationMethod.quantity
           ? '${_rotationQuantityController.text.trim()} cripto'
-          : moneyShort(_parseInput(_rotationGrossController)),
+          : _simulationMoney(_parseInput(_rotationGrossController)),
   };
 
   @override
@@ -7173,111 +9998,157 @@ class _SimulationTabState extends State<SimulationTab> {
       rotationOriginStats,
       rotationTargetStats,
     );
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-      children: <Widget>[
-        PremiumDashboardHero(
-          title: 'Simulación táctica',
-          subtitle:
-              'Prueba compra, venta o rotación sin alterar tu cartera real',
-          icon: Icons.tune_outlined,
-          metrics: <PremiumMetricData>[
-            PremiumMetricData(
-              label: 'Modo activo',
-              value: _modeLabel,
-              icon: Icons.bolt_outlined,
-            ),
-            PremiumMetricData(
-              label: 'Moneda / par',
-              value: _simulationPairLabel,
-              icon: Icons.token_outlined,
-            ),
-            PremiumMetricData(
-              label: 'Comisión usada',
-              value: _activeFeeLabel,
-              icon: Icons.percent_outlined,
-            ),
-            PremiumMetricData(
-              label: 'Escenario',
-              value: _simulationScenarioLabel,
-              icon: Icons.auto_graph_outlined,
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        PremiumSegmentShell(
-          child: SegmentedButton<SimulationMode>(
-            segments: const <ButtonSegment<SimulationMode>>[
-              ButtonSegment<SimulationMode>(
-                value: SimulationMode.operation,
-                label: Text('Operación'),
-                icon: Icon(Icons.calculate_outlined),
-              ),
-              ButtonSegment<SimulationMode>(
-                value: SimulationMode.rotation,
-                label: Text('Rotar'),
-                icon: Icon(Icons.sync_alt),
-              ),
-            ],
-            selected: <SimulationMode>{_mode},
-            onSelectionChanged: (Set<SimulationMode> value) {
-              setState(() => _mode = value.first);
-            },
+    return PremiumScaffoldSurface(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: <Widget>[
+          _SimulationHero(
+            title: 'Simular',
+            subtitle: 'Calculadora profesional para escenarios de cartera.',
+            selectedAsset: _simulationPairLabel,
+            scenario: _simulationScenarioLabel,
+            operationType: _modeLabel,
+            feeLabel: _activeFeeLabel,
+            savedCount: _savedSimulations.length,
+            accentColor:
+                _mode == SimulationMode.operation &&
+                    _operationMode == OperationSimulationMode.sell
+                ? const Color(0xFFF87171)
+                : tokens.primaryAccent,
           ),
-        ),
-        if (_mode == SimulationMode.operation) ...<Widget>[
-          const SizedBox(height: 10),
-          PremiumSegmentShell(
-            child: SegmentedButton<OperationSimulationMode>(
-              segments: const <ButtonSegment<OperationSimulationMode>>[
-                ButtonSegment<OperationSimulationMode>(
-                  value: OperationSimulationMode.buy,
-                  label: Text('Compra'),
-                  icon: Icon(Icons.add_circle_outline),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: _savedSimulations.isEmpty
+                      ? null
+                      : _showSavedSimulations,
+                  icon: const Icon(Icons.history_outlined),
+                  label: Text('Historial (${_savedSimulations.length})'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: tokens.primaryAccent,
+                    side: BorderSide(color: tokens.selectedBorder),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
-                ButtonSegment<OperationSimulationMode>(
-                  value: OperationSimulationMode.sell,
-                  label: Text('Venta'),
-                  icon: Icon(Icons.remove_circle_outline),
+                OutlinedButton.icon(
+                  onPressed: _savedSimulations.length < 2
+                      ? null
+                      : _showSimulationComparator,
+                  icon: const Icon(Icons.compare_arrows_outlined),
+                  label: const Text('Comparar'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: tokens.primaryAccent,
+                    side: BorderSide(color: tokens.selectedBorder),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
               ],
-              selected: <OperationSimulationMode>{_operationMode},
-              onSelectionChanged: (Set<OperationSimulationMode> value) {
-                setState(() => _operationMode = value.first);
+            ),
+          ),
+          const SizedBox(height: 8),
+          PremiumSegmentShell(
+            child: SegmentedButton<SimulationMode>(
+              segments: const <ButtonSegment<SimulationMode>>[
+                ButtonSegment<SimulationMode>(
+                  value: SimulationMode.operation,
+                  label: Text('Operación'),
+                  icon: Icon(Icons.calculate_outlined),
+                ),
+                ButtonSegment<SimulationMode>(
+                  value: SimulationMode.rotation,
+                  label: Text('Rotar'),
+                  icon: Icon(Icons.sync_alt),
+                ),
+              ],
+              selected: <SimulationMode>{_mode},
+              onSelectionChanged: (Set<SimulationMode> value) {
+                setState(() => _mode = value.first);
+              },
+            ),
+          ),
+          if (_mode == SimulationMode.operation) ...<Widget>[
+            const SizedBox(height: 8),
+            PremiumSegmentShell(
+              child: SegmentedButton<OperationSimulationMode>(
+                segments: const <ButtonSegment<OperationSimulationMode>>[
+                  ButtonSegment<OperationSimulationMode>(
+                    value: OperationSimulationMode.buy,
+                    label: Text('Compra'),
+                    icon: Icon(Icons.add_circle_outline),
+                  ),
+                  ButtonSegment<OperationSimulationMode>(
+                    value: OperationSimulationMode.sell,
+                    label: Text('Venta'),
+                    icon: Icon(Icons.remove_circle_outline),
+                  ),
+                ],
+                selected: <OperationSimulationMode>{_operationMode},
+                onSelectionChanged: (Set<OperationSimulationMode> value) {
+                  setState(() => _operationMode = value.first);
+                },
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.025),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: Column(
+              key: ValueKey<String>('${_mode.name}-${_operationMode.name}'),
+              children: switch (_mode) {
+                SimulationMode.operation =>
+                  _operationMode == OperationSimulationMode.buy
+                      ? _buildBuyMode(buyStats, buyResult)
+                      : _buildSellMode(sellStats, sellResult),
+                SimulationMode.rotation => _buildRotationMode(
+                  rotationOriginStats,
+                  rotationTargetStats,
+                  rotationResult,
+                ),
               },
             ),
           ),
         ],
-        const SizedBox(height: 14),
-        ...switch (_mode) {
-          SimulationMode.operation =>
-            _operationMode == OperationSimulationMode.buy
-                ? _buildBuyMode(buyStats, buyResult)
-                : _buildSellMode(sellStats, sellResult),
-          SimulationMode.rotation => _buildRotationMode(
-            rotationOriginStats,
-            rotationTargetStats,
-            rotationResult,
-          ),
-        },
-      ],
+      ),
     );
   }
 
   List<Widget> _buildBuyMode(CoinStats stats, BuySimulationResult result) {
     return <Widget>[
-      CardPanel(
-        title: 'Datos de entrada',
-        subtitle:
-            'Ajusta entradas para simular compra sin mover fondos reales.',
+      _buildSimulationPositionPanel(stats, 'Posición actual · $_buyCoin'),
+      const SizedBox(height: 8),
+      _SimulationPanel(
+        title: 'Nueva operación',
+        subtitle: 'Compra simulada sin mover fondos reales.',
+        icon: Icons.add_circle_outline,
         child: Column(
           children: <Widget>[
             DropdownButtonFormField<String>(
               initialValue: _buyCoin,
-              decoration: const InputDecoration(
-                labelText: 'Moneda',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Moneda',
+                icon: Icons.token_outlined,
               ),
               items: widget.coins
                   .map(
@@ -7294,172 +10165,158 @@ class _SimulationTabState extends State<SimulationTab> {
                 });
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _buyGrossAmountController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Monto bruto MXN',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Monto bruto MXN',
+                icon: Icons.payments_outlined,
+                prefixText: '\$ ',
+                suffixText: 'MXN',
+                helperText: _simulationMoney(
+                  _parseInput(_buyGrossAmountController),
+                ),
               ),
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final double amount in _quickAmountValues)
-                  ActionChip(
-                    label: Text(moneyShort(amount)),
-                    onPressed: () {
-                      setState(
-                        () => _buyGrossAmountController.text = compact(amount),
-                      );
-                    },
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            _simulationQuickAmountGrid(),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _buyPriceController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Precio de compra MXN',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Precio de compra MXN',
+                icon: Icons.show_chart_outlined,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _buyFeeController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Comisión compra %',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Comisión compra %',
+                icon: Icons.percent_outlined,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _buySellFeeController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Comisión estimada de salida %',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Comisión estimada de salida %',
+                icon: Icons.exit_to_app_outlined,
               ),
             ),
-            const SizedBox(height: 10),
-            InfoLine('Cantidad actual', crypto(stats.quantity)),
-            InfoLine('Costo base actual', money(stats.costBase)),
-            InfoLine('Precio actual', money(stats.currentPrice)),
           ],
         ),
       ),
-      CardPanel(
-        title: 'Resultado esperado',
+      const SizedBox(height: 8),
+      _SimulationResultPanel(
+        title: 'Resultado',
         subtitle: result.valid
             ? 'Proyección de compra, no movimiento real.'
             : result.invalidReason,
+        accentColor: ccmx.CcmxVisualTokens.of(context).primaryAccent,
+        valid: result.valid,
+        primaryLabel: 'Nuevo promedio',
+        primaryValue: result.valid
+            ? _simulationMoney(result.avgAfter)
+            : 'Sin resultado',
+        primaryColor: Colors.white,
+        onSave: () => _saveCurrentSimulation(
+          valid: result.valid,
+          primaryLabel: 'Nuevo promedio',
+          primaryValue: result.valid
+              ? _simulationMoney(result.avgAfter)
+              : 'Sin resultado',
+        ),
         child: result.valid
-            ? Column(
-                children: <Widget>[
-                  InfoLine(
-                    'Cantidad estimada comprada',
-                    crypto(result.quantityBought),
+            ? _SimulationMetricGrid(
+                metrics: <_SimulationMetricData>[
+                  _SimulationMetricData(
+                    label: 'Nuevo break-even',
+                    value: _simulationMoney(result.breakEvenNetAfter),
                   ),
-                  InfoLine('Comisión estimada', money(result.buyCommission)),
-                  InfoLine('Capital neto usado', money(result.netBuyCapital)),
-                  InfoLine(
-                    'Cantidad total después',
-                    crypto(result.quantityAfter),
-                    emphasized: true,
+                  _SimulationMetricData(
+                    label: 'Capital requerido',
+                    value: _simulationMoney(result.netBuyCapital),
                   ),
-                  InfoLine('Costo base después', money(result.costBaseAfter)),
-                  InfoLine('Promedio actual', money(result.avgCurrent)),
-                  InfoLine(
-                    'Promedio después',
-                    money(result.avgAfter),
-                    emphasized: true,
+                  _SimulationMetricData(
+                    label: 'Costo promedio',
+                    value: _simulationMoney(result.avgAfter),
                   ),
-                  InfoLine(
-                    'Diferencia de promedio',
-                    _moneyAndPercent(
+                  _SimulationMetricData(
+                    label: 'Cambio porcentual',
+                    value: _percentOrNa(result.avgDifferencePct),
+                    color: result.avgDifferencePct == null
+                        ? null
+                        : pnlColor(result.avgDifferencePct!),
+                  ),
+                  _SimulationMetricData(
+                    label: 'Variación',
+                    value: _moneyAndPercent(
                       result.avgDifferenceMxn,
                       result.avgDifferencePct,
                     ),
                   ),
-                  InfoLine(
-                    'Break even neto después',
-                    money(result.breakEvenNetAfter),
-                    emphasized: true,
-                  ),
-                  InfoLine(
-                    'Distancia al break even neto',
-                    _percentOrNa(result.distanceToBreakEvenPct),
-                    valueColor: result.distanceToBreakEvenPct == null
+                  _SimulationMetricData(
+                    label: 'Resultado esperado',
+                    value: _percentOrNa(result.distanceToBreakEvenPct),
+                    color: result.distanceToBreakEvenPct == null
                         ? null
                         : pnlColor(-result.distanceToBreakEvenPct!),
                   ),
-                ],
-              )
-            : const SizedBox.shrink(),
-      ),
-      CardPanel(
-        title: 'Impacto táctico',
-        subtitle: result.valid
-            ? 'Lectura compacta del escenario de entrada.'
-            : result.invalidReason,
-        child: result.valid
-            ? Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: <Widget>[
-                  MiniMetric(
+                  _SimulationMetricData(
                     label: 'Cantidad estimada',
-                    value: crypto(result.quantityBought),
+                    value: _simulationCrypto(result.quantityBought),
                   ),
-                  MiniMetric(
-                    label: 'Costo después',
-                    value: money(result.costBaseAfter),
-                  ),
-                  MiniMetric(
-                    label: 'Break even',
-                    value: money(result.breakEvenNetAfter),
-                  ),
-                  MiniMetric(
-                    label: 'Comisión total',
-                    value: money(result.buyCommission),
+                  _SimulationMetricData(
+                    label: 'Comisión',
+                    value: _simulationMoney(result.buyCommission),
                   ),
                 ],
               )
-            : const SizedBox.shrink(),
+            : _SimulationInvalidState(message: result.invalidReason),
       ),
     ];
   }
 
   List<Widget> _buildSellMode(CoinStats stats, SellSimulationResult result) {
     return <Widget>[
-      CardPanel(
-        title: 'Datos de entrada',
-        subtitle:
-            'Simula salida parcial o total sin registrar movimiento real.',
+      _buildSimulationPositionPanel(stats, 'Posición actual · $_sellCoin'),
+      const SizedBox(height: 8),
+      _SimulationPanel(
+        title: 'Nueva operación',
+        subtitle: 'Salida parcial o total sin registrar movimiento real.',
+        icon: Icons.remove_circle_outline,
         child: Column(
           children: <Widget>[
             DropdownButtonFormField<String>(
               initialValue: _sellCoin,
-              decoration: const InputDecoration(
-                labelText: 'Moneda',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Moneda',
+                icon: Icons.token_outlined,
               ),
               items: widget.coins
                   .map(
@@ -7476,185 +10333,183 @@ class _SimulationTabState extends State<SimulationTab> {
                 });
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _sellPriceController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Precio de venta MXN',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Precio de venta MXN',
+                icon: Icons.show_chart_outlined,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _sellFeeController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Comisión venta %',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Comisión venta %',
+                icon: Icons.percent_outlined,
               ),
             ),
-            const SizedBox(height: 12),
-            SegmentedButton<SimulationSellMethod>(
-              segments: const <ButtonSegment<SimulationSellMethod>>[
-                ButtonSegment<SimulationSellMethod>(
-                  value: SimulationSellMethod.percent,
-                  label: Text('%'),
-                ),
-                ButtonSegment<SimulationSellMethod>(
-                  value: SimulationSellMethod.quantity,
-                  label: Text('Cripto'),
-                ),
-                ButtonSegment<SimulationSellMethod>(
-                  value: SimulationSellMethod.grossAmount,
-                  label: Text('MXN'),
-                ),
-              ],
-              selected: <SimulationSellMethod>{_sellMethod},
-              onSelectionChanged: (Set<SimulationSellMethod> value) {
-                setState(() => _sellMethod = value.first);
-              },
+            const SizedBox(height: 8),
+            PremiumSegmentShell(
+              child: SegmentedButton<SimulationSellMethod>(
+                segments: const <ButtonSegment<SimulationSellMethod>>[
+                  ButtonSegment<SimulationSellMethod>(
+                    value: SimulationSellMethod.percent,
+                    label: Text('%'),
+                  ),
+                  ButtonSegment<SimulationSellMethod>(
+                    value: SimulationSellMethod.quantity,
+                    label: Text('Cripto'),
+                  ),
+                  ButtonSegment<SimulationSellMethod>(
+                    value: SimulationSellMethod.grossAmount,
+                    label: Text('MXN'),
+                  ),
+                ],
+                selected: <SimulationSellMethod>{_sellMethod},
+                onSelectionChanged: (Set<SimulationSellMethod> value) {
+                  setState(() => _sellMethod = value.first);
+                },
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             if (_sellMethod == SimulationSellMethod.percent) ...<Widget>[
               TextField(
+                style: _simulationInputTextStyle,
+                textAlignVertical: TextAlignVertical.center,
                 controller: _sellPercentController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Porcentaje de posición %',
-                  border: OutlineInputBorder(),
+                decoration: _simulationInputDecoration(
+                  'Porcentaje de posición %',
+                  icon: Icons.pie_chart_outline,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
                   for (final double value in _quickPercentValues)
-                    ActionChip(
-                      label: Text(pct(value)),
-                      onPressed: () {
-                        setState(
-                          () => _sellPercentController.text = compact(value),
-                        );
-                      },
-                    ),
+                    _simulationQuickChip(pct(value), () {
+                      setState(
+                        () => _sellPercentController.text = compact(value),
+                      );
+                    }),
                 ],
               ),
             ],
             if (_sellMethod == SimulationSellMethod.quantity)
               TextField(
+                style: _simulationInputTextStyle,
+                textAlignVertical: TextAlignVertical.center,
                 controller: _sellQuantityController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Cantidad cripto',
-                  border: OutlineInputBorder(),
+                decoration: _simulationInputDecoration(
+                  'Cantidad cripto',
+                  icon: Icons.numbers_outlined,
                 ),
               ),
             if (_sellMethod == SimulationSellMethod.grossAmount)
               TextField(
+                style: _simulationInputTextStyle,
+                textAlignVertical: TextAlignVertical.center,
                 controller: _sellGrossController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Monto bruto MXN',
-                  border: OutlineInputBorder(),
+                decoration: _simulationInputDecoration(
+                  'Monto bruto MXN',
+                  icon: Icons.payments_outlined,
                 ),
               ),
-            const SizedBox(height: 10),
-            InfoLine('Cantidad disponible', crypto(stats.quantity)),
-            InfoLine('Costo base actual', money(stats.costBase)),
-            InfoLine('Promedio actual', money(stats.avgPrice)),
           ],
         ),
       ),
-      CardPanel(
-        title: 'Resultado esperado',
+      const SizedBox(height: 8),
+      _SimulationResultPanel(
+        title: 'Resultado',
         subtitle: result.valid
             ? 'Proyección de venta, no movimiento real.'
             : result.invalidReason,
+        accentColor: pnlColor(result.realizedPLEstimate),
+        valid: result.valid,
+        primaryLabel: 'P&L realizado estimado',
+        primaryValue: result.valid
+            ? _simulationMoney(result.realizedPLEstimate)
+            : 'Sin resultado',
+        primaryColor: result.valid ? pnlColor(result.realizedPLEstimate) : null,
+        onSave: () => _saveCurrentSimulation(
+          valid: result.valid,
+          primaryLabel: 'P&L realizado estimado',
+          primaryValue: result.valid
+              ? _simulationMoney(result.realizedPLEstimate)
+              : 'Sin resultado',
+        ),
         child: result.valid
             ? Column(
                 children: <Widget>[
-                  InfoLine(
-                    'Cantidad a vender',
-                    crypto(result.quantitySold),
-                    emphasized: true,
+                  _SimulationMetricGrid(
+                    metrics: <_SimulationMetricData>[
+                      _SimulationMetricData(
+                        label: 'Neto recibido',
+                        value: _simulationMoney(result.netReceived),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Venta bruta',
+                        value: _simulationMoney(result.grossSale),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Cantidad a vender',
+                        value: _simulationCrypto(result.quantitySold),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Comisión',
+                        value: _simulationMoney(result.sellCommission),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Costo promedio',
+                        value: _simulationMoney(result.removedAverageCost),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Cantidad restante',
+                        value: _simulationCrypto(result.quantityRemaining),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Costo base restante',
+                        value: _simulationMoney(result.costBaseRemaining),
+                      ),
+                      _SimulationMetricData(
+                        label: 'Promedio restante',
+                        value: _simulationMoney(result.avgRemaining),
+                      ),
+                    ],
                   ),
-                  InfoLine('Venta bruta', money(result.grossSale)),
-                  InfoLine('Comisión', money(result.sellCommission)),
-                  InfoLine('Neto recibido', money(result.netReceived)),
-                  InfoLine(
-                    'Costo promedio removido',
-                    money(result.removedAverageCost),
-                  ),
-                  InfoLine(
-                    'P&L realizado estimado',
-                    money(result.realizedPLEstimate),
-                    valueColor: pnlColor(result.realizedPLEstimate),
-                    emphasized: true,
-                  ),
-                  InfoLine(
-                    'Cantidad restante',
-                    crypto(result.quantityRemaining),
-                  ),
-                  InfoLine(
-                    'Costo base restante',
-                    money(result.costBaseRemaining),
-                  ),
-                  InfoLine('Promedio restante', money(result.avgRemaining)),
                   if (result.warnings.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     ...result.warnings.map(_warningLine),
                   ],
                 ],
               )
-            : const SizedBox.shrink(),
-      ),
-      CardPanel(
-        title: 'Impacto táctico',
-        subtitle: result.valid
-            ? 'Salida neta y efecto realizado del escenario.'
-            : result.invalidReason,
-        child: result.valid
-            ? Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: <Widget>[
-                  MiniMetric(
-                    label: 'Neto recibido',
-                    value: money(result.netReceived),
-                  ),
-                  MiniMetric(
-                    label: 'P&L realizado',
-                    value: money(result.realizedPLEstimate),
-                    color: pnlColor(result.realizedPLEstimate),
-                  ),
-                  MiniMetric(
-                    label: 'Cantidad restante',
-                    value: crypto(result.quantityRemaining),
-                  ),
-                  MiniMetric(
-                    label: 'Comisión total',
-                    value: money(result.sellCommission),
-                  ),
-                ],
-              )
-            : const SizedBox.shrink(),
+            : _SimulationInvalidState(message: result.invalidReason),
       ),
     ];
   }
@@ -7665,16 +10520,27 @@ class _SimulationTabState extends State<SimulationTab> {
     RotationSimulationResult result,
   ) {
     return <Widget>[
-      CardPanel(
-        title: 'Datos de entrada',
+      _buildSimulationPositionPanel(
+        originStats,
+        'Posición origen · $_rotationOriginCoin',
+      ),
+      const SizedBox(height: 8),
+      _buildSimulationPositionPanel(
+        targetStats,
+        'Posición destino · $_rotationTargetCoin',
+      ),
+      const SizedBox(height: 8),
+      _SimulationPanel(
+        title: 'Nueva operación',
         subtitle: 'Modela venta de origen y compra de destino.',
+        icon: Icons.sync_alt,
         child: Column(
           children: <Widget>[
             DropdownButtonFormField<String>(
               initialValue: _rotationOriginCoin,
-              decoration: const InputDecoration(
-                labelText: 'Moneda origen',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Moneda origen',
+                icon: Icons.call_made_outlined,
               ),
               items: widget.coins
                   .map(
@@ -7694,12 +10560,12 @@ class _SimulationTabState extends State<SimulationTab> {
                 });
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               initialValue: _rotationTargetCoin,
-              decoration: const InputDecoration(
-                labelText: 'Moneda destino',
-                border: OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Moneda destino',
+                icon: Icons.call_received_outlined,
               ),
               items: widget.coins
                   .map(
@@ -7719,12 +10585,13 @@ class _SimulationTabState extends State<SimulationTab> {
                 });
               },
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[
                 FilledButton.tonal(
+                  style: _simulationTonalButtonStyle(context),
                   onPressed: () {
                     setState(() {
                       _rotationOriginCoin = 'LINK';
@@ -7742,6 +10609,7 @@ class _SimulationTabState extends State<SimulationTab> {
                   child: const Text('LINK → BTC'),
                 ),
                 FilledButton.tonal(
+                  style: _simulationTonalButtonStyle(context),
                   onPressed: () {
                     setState(() {
                       _rotationOriginCoin = 'UNI';
@@ -7760,330 +10628,344 @@ class _SimulationTabState extends State<SimulationTab> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _rotationOriginPriceController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: 'Precio $_rotationOriginCoin MXN',
-                border: const OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Precio $_rotationOriginCoin MXN',
+                icon: Icons.show_chart_outlined,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _rotationTargetPriceController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: 'Precio $_rotationTargetCoin MXN',
-                border: const OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Precio $_rotationTargetCoin MXN',
+                icon: Icons.show_chart_outlined,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _rotationSellFeeController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: 'Comisión venta $_rotationOriginCoin %',
-                border: const OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Comisión venta $_rotationOriginCoin %',
+                icon: Icons.percent_outlined,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             TextField(
+              style: _simulationInputTextStyle,
+              textAlignVertical: TextAlignVertical.center,
               controller: _rotationBuyFeeController,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: 'Comisión compra $_rotationTargetCoin %',
-                border: const OutlineInputBorder(),
+              decoration: _simulationInputDecoration(
+                'Comisión compra $_rotationTargetCoin %',
+                icon: Icons.percent_outlined,
               ),
             ),
-            const SizedBox(height: 12),
-            SegmentedButton<SimulationRotationMethod>(
-              segments: const <ButtonSegment<SimulationRotationMethod>>[
-                ButtonSegment<SimulationRotationMethod>(
-                  value: SimulationRotationMethod.percent,
-                  label: Text('%'),
-                ),
-                ButtonSegment<SimulationRotationMethod>(
-                  value: SimulationRotationMethod.quantity,
-                  label: Text('Cripto'),
-                ),
-                ButtonSegment<SimulationRotationMethod>(
-                  value: SimulationRotationMethod.grossAmount,
-                  label: Text('MXN'),
-                ),
-              ],
-              selected: <SimulationRotationMethod>{_rotationMethod},
-              onSelectionChanged: (Set<SimulationRotationMethod> value) {
-                setState(() => _rotationMethod = value.first);
-              },
+            const SizedBox(height: 8),
+            PremiumSegmentShell(
+              child: SegmentedButton<SimulationRotationMethod>(
+                segments: const <ButtonSegment<SimulationRotationMethod>>[
+                  ButtonSegment<SimulationRotationMethod>(
+                    value: SimulationRotationMethod.percent,
+                    label: Text('%'),
+                  ),
+                  ButtonSegment<SimulationRotationMethod>(
+                    value: SimulationRotationMethod.quantity,
+                    label: Text('Cripto'),
+                  ),
+                  ButtonSegment<SimulationRotationMethod>(
+                    value: SimulationRotationMethod.grossAmount,
+                    label: Text('MXN'),
+                  ),
+                ],
+                selected: <SimulationRotationMethod>{_rotationMethod},
+                onSelectionChanged: (Set<SimulationRotationMethod> value) {
+                  setState(() => _rotationMethod = value.first);
+                },
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             if (_rotationMethod ==
                 SimulationRotationMethod.percent) ...<Widget>[
               TextField(
+                style: _simulationInputTextStyle,
+                textAlignVertical: TextAlignVertical.center,
                 controller: _rotationPercentController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: 'Porcentaje $_rotationOriginCoin %',
-                  border: const OutlineInputBorder(),
+                decoration: _simulationInputDecoration(
+                  'Porcentaje $_rotationOriginCoin %',
+                  icon: Icons.pie_chart_outline,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
                   for (final double value in _quickPercentValues)
-                    ActionChip(
-                      label: Text(pct(value)),
-                      onPressed: () {
-                        setState(
-                          () =>
-                              _rotationPercentController.text = compact(value),
-                        );
-                      },
-                    ),
+                    _simulationQuickChip(pct(value), () {
+                      setState(
+                        () => _rotationPercentController.text = compact(value),
+                      );
+                    }),
                 ],
               ),
             ],
             if (_rotationMethod == SimulationRotationMethod.quantity)
               TextField(
+                style: _simulationInputTextStyle,
+                textAlignVertical: TextAlignVertical.center,
                 controller: _rotationQuantityController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: 'Cantidad $_rotationOriginCoin',
-                  border: const OutlineInputBorder(),
+                decoration: _simulationInputDecoration(
+                  'Cantidad $_rotationOriginCoin',
+                  icon: Icons.numbers_outlined,
                 ),
               ),
             if (_rotationMethod == SimulationRotationMethod.grossAmount)
               TextField(
+                style: _simulationInputTextStyle,
+                textAlignVertical: TextAlignVertical.center,
                 controller: _rotationGrossController,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Monto bruto MXN',
-                  border: OutlineInputBorder(),
+                decoration: _simulationInputDecoration(
+                  'Monto bruto MXN',
+                  icon: Icons.payments_outlined,
                 ),
               ),
-            const SizedBox(height: 10),
-            InfoLine(
-              '$_rotationOriginCoin disponible',
-              crypto(originStats.quantity),
-            ),
-            InfoLine(
-              '$_rotationTargetCoin actual',
-              crypto(targetStats.quantity),
-            ),
           ],
         ),
       ),
-      CardPanel(
-        title: 'Resumen de rotación',
+      const SizedBox(height: 8),
+      _SimulationResultPanel(
+        title: 'Resultado',
         subtitle: result.valid
             ? 'Ruta: $_rotationOriginCoin → $_rotationTargetCoin'
             : result.invalidReason,
+        accentColor: ccmx.CcmxVisualTokens.of(context).primaryAccent,
+        valid: result.valid,
+        primaryLabel: '$_rotationTargetCoin comprado',
+        primaryValue: result.valid
+            ? _simulationCrypto(result.targetQuantityBought)
+            : 'Sin resultado',
+        primaryColor: Colors.white,
+        onSave: () => _saveCurrentSimulation(
+          valid: result.valid,
+          primaryLabel: '$_rotationTargetCoin comprado',
+          primaryValue: result.valid
+              ? _simulationCrypto(result.targetQuantityBought)
+              : 'Sin resultado',
+        ),
         child: result.valid
-            ? Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: <Widget>[
-                  MiniMetric(
-                    label: 'Ruta',
-                    value: '$_rotationOriginCoin → $_rotationTargetCoin',
+            ? _SimulationMetricGrid(
+                metrics: <_SimulationMetricData>[
+                  _SimulationMetricData(
+                    label: 'Resultado esperado',
+                    value: _simulationCrypto(result.targetBalanceAfter),
                   ),
-                  MiniMetric(
-                    label: 'Pérdida realizada estimada',
-                    value: money(result.originRealizedPLEstimate),
+                  _SimulationMetricData(
+                    label: 'Nuevo promedio',
+                    value: _simulationMoney(result.targetAvgAfter),
+                  ),
+                  _SimulationMetricData(
+                    label: 'Nuevo break-even',
+                    value: _simulationMoney(result.targetBreakEvenAfter),
+                  ),
+                  _SimulationMetricData(
+                    label: 'Capital requerido',
+                    value: _simulationMoney(result.targetConvertedCapital),
+                  ),
+                  _SimulationMetricData(
+                    label: 'P&L realizado',
+                    value: _simulationMoney(result.originRealizedPLEstimate),
                     color: pnlColor(result.originRealizedPLEstimate),
                   ),
-                  MiniMetric(
-                    label: 'Comisiones totales',
-                    value: money(result.totalCommissions),
-                  ),
-                  MiniMetric(
-                    label: '$_rotationTargetCoin comprado',
-                    value: crypto(result.targetQuantityBought),
-                  ),
-                  MiniMetric(
-                    label: '$_rotationTargetCoin después',
-                    value: crypto(result.targetBalanceAfter),
-                  ),
-                  MiniMetric(
-                    label: 'Promedio $_rotationTargetCoin antes',
-                    value: money(result.targetAvgBefore),
-                  ),
-                  MiniMetric(
-                    label: 'Promedio $_rotationTargetCoin después',
-                    value: money(result.targetAvgAfter),
-                  ),
-                  MiniMetric(
-                    label: 'Break even $_rotationTargetCoin después',
-                    value: money(result.targetBreakEvenAfter),
-                  ),
-                  MiniMetric(
-                    label: 'Faltante a break even',
+                  _SimulationMetricData(
+                    label: 'Variación',
                     value: _percentOrNa(result.targetDistanceToBreakEvenPct),
                     color: result.targetDistanceToBreakEvenPct == null
                         ? null
                         : pnlColor(-result.targetDistanceToBreakEvenPct!),
                   ),
+                  _SimulationMetricData(
+                    label: 'Comisiones',
+                    value: _simulationMoney(result.totalCommissions),
+                  ),
+                  _SimulationMetricData(
+                    label: 'Neto disponible',
+                    value: _simulationMoney(result.netAvailable),
+                  ),
                 ],
               )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (result.warnings.isNotEmpty) ...<Widget>[
-                    ...result.warnings.map(_warningLine),
-                  ],
-                ],
-              ),
+            : _SimulationInvalidState(message: result.invalidReason),
       ),
-      CardPanel(
-        title: 'Impacto táctico',
-        subtitle: result.valid
-            ? 'Proyección de rotación, no movimiento real.'
-            : result.invalidReason,
-        child: result.valid
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'Venta simulada de $_rotationOriginCoin',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  InfoLine(
-                    '$_rotationOriginCoin vendido',
-                    crypto(result.originQuantitySold),
-                  ),
-                  InfoLine(
-                    'Venta bruta $_rotationOriginCoin',
-                    money(result.originGrossSale),
-                  ),
-                  InfoLine(
-                    'Comisión venta $_rotationOriginCoin',
-                    money(result.originSellCommission),
-                  ),
-                  InfoLine('Neto disponible', money(result.netAvailable)),
-                  InfoLine(
-                    'Costo base removido $_rotationOriginCoin',
-                    money(result.originRemovedAverageCost),
-                  ),
-                  InfoLine(
-                    'Promedio $_rotationOriginCoin removido',
-                    '\$${result.originRemovedAveragePrice.toStringAsFixed(2)}'
-                        '/$_rotationOriginCoin',
-                  ),
-                  InfoLine(
-                    'P&L realizado estimado',
-                    money(result.originRealizedPLEstimate),
-                    valueColor: pnlColor(result.originRealizedPLEstimate),
-                    emphasized: true,
-                  ),
-                  InfoLine(
-                    '$_rotationOriginCoin restante',
-                    crypto(result.originQuantityRemaining),
-                  ),
-                  InfoLine(
-                    'Costo base restante $_rotationOriginCoin',
-                    money(result.originCostBaseRemaining),
-                  ),
-                  InfoLine(
-                    'Promedio restante $_rotationOriginCoin',
-                    money(result.originAvgRemaining),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Compra simulada de $_rotationTargetCoin',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  InfoLine(
-                    'Comisión compra $_rotationTargetCoin',
-                    money(result.targetBuyCommission),
-                  ),
-                  InfoLine(
-                    'Capital convertido $_rotationTargetCoin',
-                    money(result.targetConvertedCapital),
-                  ),
-                  InfoLine(
-                    '$_rotationTargetCoin comprado',
-                    crypto(result.targetQuantityBought),
-                  ),
-                  InfoLine(
-                    '$_rotationTargetCoin después',
-                    crypto(result.targetBalanceAfter),
-                  ),
-                  InfoLine(
-                    'Promedio $_rotationTargetCoin antes',
-                    money(result.targetAvgBefore),
-                  ),
-                  InfoLine(
-                    'Promedio $_rotationTargetCoin después',
-                    money(result.targetAvgAfter),
-                    emphasized: true,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Resultado de rotación',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  InfoLine(
-                    'Costo base $_rotationTargetCoin después',
-                    money(result.targetCostBaseAfter),
-                  ),
-                  InfoLine(
-                    'Break even $_rotationTargetCoin después',
-                    money(result.targetBreakEvenAfter),
-                  ),
-                  InfoLine(
-                    'Faltante a break even',
-                    _percentOrNa(result.targetDistanceToBreakEvenPct),
-                    valueColor: result.targetDistanceToBreakEvenPct == null
-                        ? null
-                        : pnlColor(-result.targetDistanceToBreakEvenPct!),
-                  ),
-                  InfoLine(
-                    'Comisiones totales',
-                    money(result.totalCommissions),
-                    emphasized: true,
-                  ),
-                  if (result.warnings.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 10),
-                    ...result.warnings.map(_warningLine),
+      if (result.valid) ...<Widget>[
+        const SizedBox(height: 8),
+        _SimulationPanel(
+          title: 'Detalle de rotación',
+          subtitle: 'Venta simulada y compra proyectada.',
+          icon: Icons.receipt_long_outlined,
+          child: result.valid
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      'Venta simulada de $_rotationOriginCoin',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    InfoLine(
+                      '$_rotationOriginCoin vendido',
+                      _simulationCrypto(result.originQuantitySold),
+                    ),
+                    InfoLine(
+                      'Venta bruta $_rotationOriginCoin',
+                      _simulationMoney(result.originGrossSale),
+                    ),
+                    InfoLine(
+                      'Comisión venta $_rotationOriginCoin',
+                      _simulationMoney(result.originSellCommission),
+                    ),
+                    InfoLine(
+                      'Neto disponible',
+                      _simulationMoney(result.netAvailable),
+                    ),
+                    InfoLine(
+                      'Costo base removido $_rotationOriginCoin',
+                      _simulationMoney(result.originRemovedAverageCost),
+                    ),
+                    InfoLine(
+                      'Promedio $_rotationOriginCoin removido',
+                      '\$${result.originRemovedAveragePrice.toStringAsFixed(2)}'
+                          '/$_rotationOriginCoin',
+                    ),
+                    InfoLine(
+                      'P&L realizado estimado',
+                      _simulationMoney(result.originRealizedPLEstimate),
+                      valueColor: pnlColor(result.originRealizedPLEstimate),
+                      emphasized: true,
+                    ),
+                    InfoLine(
+                      '$_rotationOriginCoin restante',
+                      _simulationCrypto(result.originQuantityRemaining),
+                    ),
+                    InfoLine(
+                      'Costo base restante $_rotationOriginCoin',
+                      _simulationMoney(result.originCostBaseRemaining),
+                    ),
+                    InfoLine(
+                      'Promedio restante $_rotationOriginCoin',
+                      _simulationMoney(result.originAvgRemaining),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Compra simulada de $_rotationTargetCoin',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    InfoLine(
+                      'Comisión compra $_rotationTargetCoin',
+                      _simulationMoney(result.targetBuyCommission),
+                    ),
+                    InfoLine(
+                      'Capital convertido $_rotationTargetCoin',
+                      _simulationMoney(result.targetConvertedCapital),
+                    ),
+                    InfoLine(
+                      '$_rotationTargetCoin comprado',
+                      _simulationCrypto(result.targetQuantityBought),
+                    ),
+                    InfoLine(
+                      '$_rotationTargetCoin después',
+                      _simulationCrypto(result.targetBalanceAfter),
+                    ),
+                    InfoLine(
+                      'Promedio $_rotationTargetCoin antes',
+                      _simulationMoney(result.targetAvgBefore),
+                    ),
+                    InfoLine(
+                      'Promedio $_rotationTargetCoin después',
+                      _simulationMoney(result.targetAvgAfter),
+                      emphasized: true,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Resultado de rotación',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    InfoLine(
+                      'Costo base $_rotationTargetCoin después',
+                      _simulationMoney(result.targetCostBaseAfter),
+                    ),
+                    InfoLine(
+                      'Break even $_rotationTargetCoin después',
+                      _simulationMoney(result.targetBreakEvenAfter),
+                    ),
+                    InfoLine(
+                      'Faltante a break even',
+                      _percentOrNa(result.targetDistanceToBreakEvenPct),
+                      valueColor: result.targetDistanceToBreakEvenPct == null
+                          ? null
+                          : pnlColor(-result.targetDistanceToBreakEvenPct!),
+                    ),
+                    InfoLine(
+                      'Comisiones totales',
+                      _simulationMoney(result.totalCommissions),
+                      emphasized: true,
+                    ),
+                    if (result.warnings.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 8),
+                      ...result.warnings.map(_warningLine),
+                    ],
                   ],
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (result.warnings.isNotEmpty) ...<Widget>[
-                    ...result.warnings.map(_warningLine),
-                  ],
-                ],
-              ),
-      ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ] else if (result.warnings.isNotEmpty) ...<Widget>[
+        const SizedBox(height: 8),
+        _SimulationPanel(
+          title: 'Observaciones',
+          subtitle: result.invalidReason,
+          icon: Icons.info_outline,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: result.warnings.map(_warningLine).toList(),
+          ),
+        ),
+      ],
     ];
   }
 
@@ -8452,8 +11334,8 @@ class _SimulationTabState extends State<SimulationTab> {
   }
 
   String _moneyAndPercent(double value, double? percentValue) {
-    if (percentValue == null) return '${money(value)} (N/A)';
-    return '${money(value)} (${pct(percentValue)})';
+    if (percentValue == null) return '${_simulationMoney(value)} (N/A)';
+    return '${_simulationMoney(value)} (${pct(percentValue)})';
   }
 
   Widget _warningLine(String text) {
@@ -8486,6 +11368,1787 @@ class _SimulationTabState extends State<SimulationTab> {
   ];
 
   static const List<double> _quickPercentValues = <double>[25, 50, 75, 100];
+}
+
+const TextStyle _simulationInputTextStyle = TextStyle(
+  color: Colors.white,
+  fontSize: 15,
+  fontWeight: FontWeight.w700,
+  fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+);
+
+String _simulationMoney(double value) => _summaryMoney(value, decimals: 2);
+
+String _simulationCrypto(double value) {
+  final int decimals = value.abs() >= 1
+      ? 4
+      : value.abs() >= 0.01
+      ? 6
+      : 8;
+  final String text = value.toStringAsFixed(decimals);
+  return text.replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+ButtonStyle _simulationTonalButtonStyle(BuildContext context) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return FilledButton.styleFrom(
+    backgroundColor: tokens.selectedBackground,
+    foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    side: BorderSide(color: tokens.selectedBorder),
+  );
+}
+
+BoxDecoration _simulationBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: <BoxShadow>[
+      BoxShadow(color: tokens.glowColor, blurRadius: 18, spreadRadius: -10),
+    ],
+  );
+}
+
+BoxDecoration _simulationTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+  );
+}
+
+class _SimulationHero extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String selectedAsset;
+  final String scenario;
+  final String operationType;
+  final String feeLabel;
+  final int savedCount;
+  final Color accentColor;
+
+  const _SimulationHero({
+    required this.title,
+    required this.subtitle,
+    required this.selectedAsset,
+    required this.scenario,
+    required this.operationType,
+    required this.feeLabel,
+    required this.savedCount,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String animationKey =
+        '$selectedAsset|$scenario|$operationType|$feeLabel';
+
+    return TweenAnimationBuilder<double>(
+      key: ValueKey<String>(animationKey),
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 480),
+      curve: Curves.easeOutCubic,
+      builder: (BuildContext context, double value, Widget? child) {
+        final double eased = Curves.easeOutCubic.transform(value);
+        return Opacity(
+          opacity: 0.86 + (0.14 * eased),
+          child: Transform.translate(
+            offset: Offset(0, 10 * (1 - eased)),
+            child: child,
+          ),
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: tokens.selectedBorder),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: tokens.glowColor,
+              blurRadius: 24,
+              offset: const Offset(0, 14),
+            ),
+          ],
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              tokens.gradientStart,
+              tokens.surfaceElevated,
+              tokens.backgroundSecondary,
+            ],
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
+            children: <Widget>[
+              Positioned(
+                right: -42,
+                top: -48,
+                child: _SimulationHeroGlow(
+                  color: tokens.primaryAccent,
+                  size: 132,
+                  opacity: 0.18,
+                ),
+              ),
+              Positioned(
+                left: -34,
+                bottom: -58,
+                child: _SimulationHeroGlow(
+                  color: Colors.white,
+                  size: 116,
+                  opacity: 0.07,
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 9,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: tokens.primaryAccent.withValues(
+                                      alpha: 0.16,
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: tokens.selectedBorder.withValues(
+                                        alpha: 0.42,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'SIMULAR',
+                                    style: TextStyle(
+                                      color: tokens.primaryAccent,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.6,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Calculadora activa',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: colors.onSurfaceVariant,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              title,
+                              style: TextStyle(
+                                color: colors.onSurface,
+                                fontSize: 25,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              subtitle,
+                              style: TextStyle(
+                                color: colors.onSurfaceVariant,
+                                fontSize: 13,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        switchInCurve: Curves.easeOutBack,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder:
+                            (Widget child, Animation<double> animation) {
+                              return ScaleTransition(
+                                scale: animation,
+                                child: FadeTransition(
+                                  opacity: animation,
+                                  child: child,
+                                ),
+                              );
+                            },
+                        child: Container(
+                          key: ValueKey<String>(operationType),
+                          width: 46,
+                          height: 46,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: tokens.primaryAccent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: tokens.selectedBorder.withValues(
+                                alpha: 0.42,
+                              ),
+                            ),
+                          ),
+                          child: Icon(
+                            operationType.contains('Venta')
+                                ? Icons.trending_down
+                                : operationType.contains('Rotación')
+                                ? Icons.sync_alt
+                                : Icons.trending_up,
+                            color: tokens.primaryAccent,
+                            size: 26,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 240),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder:
+                        (Widget child, Animation<double> animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.05),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
+                            ),
+                          );
+                        },
+                    child: LayoutBuilder(
+                      key: ValueKey<String>('metrics-$animationKey'),
+                      builder:
+                          (BuildContext context, BoxConstraints constraints) {
+                            const double gap = 8;
+                            final double width = constraints.maxWidth >= 340
+                                ? (constraints.maxWidth - gap * 2) / 3
+                                : (constraints.maxWidth - gap) / 2;
+                            final List<_SimulationMetricData> metrics =
+                                <_SimulationMetricData>[
+                                  _SimulationMetricData(
+                                    label: 'Moneda',
+                                    value: selectedAsset,
+                                    icon: Icons.token_outlined,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Operación',
+                                    value: operationType,
+                                    icon: Icons.bolt_outlined,
+                                    color: accentColor,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Escenario',
+                                    value: scenario,
+                                    icon: Icons.auto_graph_outlined,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Comisión',
+                                    value: feeLabel,
+                                    icon: Icons.percent_outlined,
+                                  ),
+                                  _SimulationMetricData(
+                                    label: 'Guardadas',
+                                    value: savedCount.toString(),
+                                    icon: Icons.bookmark_added_outlined,
+                                  ),
+                                ];
+                            return Wrap(
+                              spacing: gap,
+                              runSpacing: gap,
+                              children: metrics
+                                  .map(
+                                    (_SimulationMetricData metric) =>
+                                        _SimulationMetricCard(
+                                          metric: metric,
+                                          width: width,
+                                          compact: true,
+                                        ),
+                                  )
+                                  .toList(),
+                            );
+                          },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationHeroGlow extends StatelessWidget {
+  final Color color;
+  final double size;
+  final double opacity;
+
+  const _SimulationHeroGlow({
+    required this.color,
+    required this.size,
+    required this.opacity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: <Color>[
+              color.withValues(alpha: opacity),
+              color.withValues(alpha: 0),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Widget child;
+
+  const _SimulationPanel({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: _simulationTokenBox(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 18, color: tokens.primaryAccent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: colors.onSurface,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 14,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationResultPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color accentColor;
+  final bool valid;
+  final String primaryLabel;
+  final String primaryValue;
+  final Color? primaryColor;
+  final VoidCallback? onSave;
+  final Widget child;
+
+  const _SimulationResultPanel({
+    required this.title,
+    required this.subtitle,
+    required this.accentColor,
+    required this.valid,
+    required this.primaryLabel,
+    required this.primaryValue,
+    required this.primaryColor,
+    this.onSave,
+    required this.child,
+  });
+
+  void _showResultModal(BuildContext context, Color resolvedAccent) {
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: _SimulationResultModalCard(
+          title: title,
+          subtitle: subtitle,
+          accentColor: resolvedAccent,
+          valid: valid,
+          primaryLabel: primaryLabel,
+          primaryValue: primaryValue,
+          primaryColor: primaryColor,
+          detail: child,
+          onSave: onSave,
+          onClose: () => Navigator.of(dialogContext).pop(),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color resolvedAccent = valid ? accentColor : const Color(0xFFF59E0B);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: resolvedAccent.withValues(alpha: 0.30)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final List<Widget> actions = <Widget>[
+                TextButton.icon(
+                  onPressed: onSave,
+                  icon: const Icon(Icons.bookmark_add_outlined, size: 16),
+                  label: const Text('Guardar'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: resolvedAccent,
+                    visualDensity: VisualDensity.compact,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => _showResultModal(context, resolvedAccent),
+                  icon: const Icon(Icons.open_in_full, size: 16),
+                  label: const Text('Ver'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: resolvedAccent,
+                    visualDensity: VisualDensity.compact,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ];
+              final Widget titleRow = Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.insights_outlined,
+                    color: resolvedAccent,
+                    size: 19,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+
+              if (constraints.maxWidth < 380) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    titleRow,
+                    const SizedBox(height: 6),
+                    Wrap(spacing: 4, children: actions),
+                  ],
+                );
+              }
+
+              return Row(
+                children: <Widget>[
+                  Expanded(child: titleRow),
+                  const SizedBox(width: 8),
+                  Wrap(spacing: 4, children: actions),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 14,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: _simulationTokenBox(
+              context,
+              color: tokens.surfacePrimary,
+              radius: 14,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  primaryLabel,
+                  style: const TextStyle(
+                    color: Color(0xFFB7C0D4),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 190),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeOutCubic,
+                  transitionBuilder:
+                      (Widget child, Animation<double> animation) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.10),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        );
+                      },
+                  child: FittedBox(
+                    key: ValueKey<String>(primaryValue),
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      primaryValue,
+                      style: TextStyle(
+                        color: primaryColor ?? Colors.white,
+                        fontSize: 27,
+                        fontWeight: FontWeight.w900,
+                        fontFeatures: const <FontFeature>[
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationResultModalCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color accentColor;
+  final bool valid;
+  final String primaryLabel;
+  final String primaryValue;
+  final Color? primaryColor;
+  final Widget detail;
+  final VoidCallback? onSave;
+  final VoidCallback onClose;
+
+  const _SimulationResultModalCard({
+    required this.title,
+    required this.subtitle,
+    required this.accentColor,
+    required this.valid,
+    required this.primaryLabel,
+    required this.primaryValue,
+    required this.primaryColor,
+    required this.detail,
+    this.onSave,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 540, maxHeight: 720),
+      child: Container(
+        decoration: BoxDecoration(
+          color: tokens.surfaceElevated,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: accentColor.withValues(alpha: 0.38)),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.34),
+              blurRadius: 28,
+              offset: const Offset(0, 18),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Stack(
+            children: <Widget>[
+              Positioned(
+                right: -56,
+                top: -52,
+                child: _SimulationHeroGlow(
+                  color: accentColor,
+                  size: 156,
+                  opacity: 0.18,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: accentColor.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: accentColor.withValues(alpha: 0.34),
+                              ),
+                            ),
+                            child: Icon(
+                              valid
+                                  ? Icons.insights_outlined
+                                  : Icons.warning_amber_outlined,
+                              color: accentColor,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  title,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  subtitle,
+                                  style: const TextStyle(
+                                    color: Color(0xFFB7C0D4),
+                                    fontSize: 13,
+                                    height: 1.28,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cerrar',
+                            onPressed: onClose,
+                            icon: const Icon(Icons.close),
+                            color: Colors.white,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: _simulationBox(
+                          context,
+                          color: ccmx.CcmxVisualTokens.of(
+                            context,
+                          ).surfaceElevated,
+                          radius: 16,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              primaryLabel,
+                              style: const TextStyle(
+                                color: Color(0xFFB7C0D4),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                primaryValue,
+                                style: TextStyle(
+                                  color: primaryColor ?? Colors.white,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w900,
+                                  fontFeatures: const <FontFeature>[
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      detail,
+                      const SizedBox(height: 14),
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: onSave,
+                              icon: const Icon(Icons.bookmark_add_outlined),
+                              label: const Text('Guardar'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: BorderSide(
+                                  color: accentColor.withValues(alpha: 0.42),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: onClose,
+                              icon: const Icon(Icons.check_circle_outline),
+                              label: const Text('Cerrar'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: accentColor.withValues(
+                                  alpha: 0.18,
+                                ),
+                                foregroundColor: Colors.white,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationStrategyBadge extends StatelessWidget {
+  final int score;
+  final String label;
+  final Color color;
+
+  const _SimulationStrategyBadge({
+    required this.score,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String text = score <= 0 ? label : '$score/100 · $label';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(Icons.query_stats_outlined, color: color, size: 16),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SavedSimulationRecord {
+  final String id;
+  final DateTime createdAt;
+  final String modeLabel;
+  final String selectedAsset;
+  final String scenario;
+  final String feeLabel;
+  final String primaryLabel;
+  final String primaryValue;
+  final int strategyScore;
+  final String strategyLabel;
+
+  const _SavedSimulationRecord({
+    required this.id,
+    required this.createdAt,
+    required this.modeLabel,
+    required this.selectedAsset,
+    required this.scenario,
+    required this.feeLabel,
+    required this.primaryLabel,
+    required this.primaryValue,
+    this.strategyScore = 0,
+    this.strategyLabel = 'Sin score',
+  });
+
+  Map<String, Object> toJson() => <String, Object>{
+    'id': id,
+    'createdAt': createdAt.toIso8601String(),
+    'modeLabel': modeLabel,
+    'selectedAsset': selectedAsset,
+    'scenario': scenario,
+    'feeLabel': feeLabel,
+    'primaryLabel': primaryLabel,
+    'primaryValue': primaryValue,
+    'strategyScore': strategyScore,
+    'strategyLabel': strategyLabel,
+  };
+
+  _SavedSimulationRecord copyAsNew() => _SavedSimulationRecord(
+    id: DateTime.now().microsecondsSinceEpoch.toString(),
+    createdAt: DateTime.now(),
+    modeLabel: modeLabel,
+    selectedAsset: selectedAsset,
+    scenario: scenario,
+    feeLabel: feeLabel,
+    primaryLabel: primaryLabel,
+    primaryValue: primaryValue,
+    strategyScore: strategyScore,
+    strategyLabel: strategyLabel,
+  );
+
+  static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
+    final String id = (json['id'] ?? '').toString();
+    final DateTime? createdAt = DateTime.tryParse(
+      (json['createdAt'] ?? '').toString(),
+    );
+    if (id.isEmpty || createdAt == null) return null;
+    return _SavedSimulationRecord(
+      id: id,
+      createdAt: createdAt,
+      modeLabel: (json['modeLabel'] ?? '').toString(),
+      selectedAsset: (json['selectedAsset'] ?? '').toString(),
+      scenario: (json['scenario'] ?? '').toString(),
+      feeLabel: (json['feeLabel'] ?? '').toString(),
+      primaryLabel: (json['primaryLabel'] ?? '').toString(),
+      primaryValue: (json['primaryValue'] ?? '').toString(),
+      strategyScore:
+          int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
+      strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
+    );
+  }
+}
+
+class _SavedSimulationsSheet extends StatelessWidget {
+  final List<_SavedSimulationRecord> records;
+  final ValueChanged<_SavedSimulationRecord> onDuplicate;
+  final ValueChanged<_SavedSimulationRecord> onDelete;
+
+  const _SavedSimulationsSheet({
+    required this.records,
+    required this.onDuplicate,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final double maxHeight = MediaQuery.sizeOf(context).height * 0.82;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 620),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: tokens.surfaceElevated,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: tokens.selectedBorder),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 26,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.history_outlined,
+                          color: tokens.primaryAccent,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Historial de simulaciones (${records.length})',
+                            style: TextStyle(
+                              color: colors.onSurface,
+                              fontSize: 19,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Cerrar',
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close),
+                          color: colors.onSurface,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, color: tokens.divider),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: records.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (BuildContext context, int index) {
+                        final _SavedSimulationRecord record = records[index];
+                        return _SavedSimulationCard(
+                          record: record,
+                          onDuplicate: () => onDuplicate(record),
+                          onDelete: () => onDelete(record),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedSimulationCard extends StatelessWidget {
+  final _SavedSimulationRecord record;
+  final VoidCallback onDuplicate;
+  final VoidCallback onDelete;
+
+  const _SavedSimulationCard({
+    required this.record,
+    required this.onDuplicate,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      decoration: _simulationBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 16,
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: tokens.selectedBackground,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.bookmark_added_outlined,
+                  color: tokens.primaryAccent,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      record.selectedAsset,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${record.modeLabel} · ${record.scenario}',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _SimulationStrategyBadge(
+                      score: record.strategyScore,
+                      label: record.strategyLabel,
+                      color: tokens.primaryAccent,
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                color: tokens.surfaceElevated,
+                iconColor: colors.onSurface,
+                onSelected: (String value) {
+                  if (value == 'duplicate') onDuplicate();
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (BuildContext context) =>
+                    const <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'duplicate',
+                        child: Text('Duplicar'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text('Eliminar'),
+                      ),
+                    ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _SimulationMetricGrid(
+            metrics: <_SimulationMetricData>[
+              _SimulationMetricData(
+                label: record.primaryLabel,
+                value: record.primaryValue,
+                icon: Icons.insights_outlined,
+              ),
+              _SimulationMetricData(
+                label: 'Comisión',
+                value: record.feeLabel,
+                icon: Icons.percent_outlined,
+              ),
+              _SimulationMetricData(
+                label: 'Guardada',
+                value: shortDate(record.createdAt),
+                icon: Icons.event_available_outlined,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationComparatorSheet extends StatelessWidget {
+  final _SavedSimulationRecord left;
+  final _SavedSimulationRecord right;
+
+  const _SimulationComparatorSheet({required this.left, required this.right});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final double maxHeight = MediaQuery.sizeOf(context).height * 0.84;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 680),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: tokens.surfaceElevated,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: tokens.selectedBorder),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 26,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.compare_arrows_outlined,
+                          color: tokens.primaryAccent,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Comparador de simulaciones',
+                            style: TextStyle(
+                              color: colors.onSurface,
+                              fontSize: 19,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Cerrar',
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close),
+                          color: colors.onSurface,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Compara las dos simulaciones guardadas más recientes.',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    LayoutBuilder(
+                      builder:
+                          (BuildContext context, BoxConstraints constraints) {
+                            final bool stacked = constraints.maxWidth < 560;
+                            final List<Widget> cards = <Widget>[
+                              Expanded(
+                                child: _SimulationComparatorCard(
+                                  title: 'A · Más reciente',
+                                  record: left,
+                                  accentColor: tokens.primaryAccent,
+                                ),
+                              ),
+                              Expanded(
+                                child: _SimulationComparatorCard(
+                                  title: 'B · Anterior',
+                                  record: right,
+                                  accentColor: tokens.chartSecondary,
+                                ),
+                              ),
+                            ];
+
+                            if (stacked) {
+                              return Column(
+                                children: <Widget>[
+                                  _SimulationComparatorCard(
+                                    title: 'A · Más reciente',
+                                    record: left,
+                                    accentColor: tokens.primaryAccent,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _SimulationComparatorCard(
+                                    title: 'B · Anterior',
+                                    record: right,
+                                    accentColor: tokens.chartSecondary,
+                                  ),
+                                ],
+                              );
+                            }
+
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                cards[0],
+                                const SizedBox(width: 10),
+                                cards[1],
+                              ],
+                            );
+                          },
+                    ),
+                    const SizedBox(height: 12),
+                    _SimulationComparisonMatrix(left: left, right: right),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationComparatorCard extends StatelessWidget {
+  final String title;
+  final _SavedSimulationRecord record;
+  final Color accentColor;
+
+  const _SimulationComparatorCard({
+    required this.title,
+    required this.record,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      decoration: _simulationBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 16,
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: TextStyle(
+              color: accentColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            record.selectedAsset,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            record.modeLabel,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SimulationStrategyBadge(
+            score: record.strategyScore,
+            label: record.strategyLabel,
+            color: accentColor,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            record.primaryLabel,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              record.primaryValue,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationComparisonMatrix extends StatelessWidget {
+  final _SavedSimulationRecord left;
+  final _SavedSimulationRecord right;
+
+  const _SimulationComparisonMatrix({required this.left, required this.right});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final List<_SimulationComparisonRowData>
+    rows = <_SimulationComparisonRowData>[
+      _SimulationComparisonRowData(
+        'Activo',
+        left.selectedAsset,
+        right.selectedAsset,
+      ),
+      _SimulationComparisonRowData('Modo', left.modeLabel, right.modeLabel),
+      _SimulationComparisonRowData('Escenario', left.scenario, right.scenario),
+      _SimulationComparisonRowData(
+        'Score',
+        left.strategyScore <= 0
+            ? left.strategyLabel
+            : '${left.strategyScore}/100 · ${left.strategyLabel}',
+        right.strategyScore <= 0
+            ? right.strategyLabel
+            : '${right.strategyScore}/100 · ${right.strategyLabel}',
+      ),
+      _SimulationComparisonRowData('Comisión', left.feeLabel, right.feeLabel),
+      _SimulationComparisonRowData(
+        left.primaryLabel == right.primaryLabel
+            ? left.primaryLabel
+            : 'Resultado',
+        left.primaryValue,
+        right.primaryValue,
+      ),
+      _SimulationComparisonRowData(
+        'Guardada',
+        shortDate(left.createdAt),
+        shortDate(right.createdAt),
+      ),
+    ];
+
+    return Container(
+      decoration: _simulationBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 16,
+      ),
+      child: Column(
+        children: <Widget>[
+          for (int index = 0; index < rows.length; index++) ...<Widget>[
+            _SimulationComparisonRow(data: rows[index]),
+            if (index != rows.length - 1)
+              Divider(height: 1, color: tokens.divider),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationComparisonRowData {
+  final String label;
+  final String leftValue;
+  final String rightValue;
+
+  const _SimulationComparisonRowData(
+    this.label,
+    this.leftValue,
+    this.rightValue,
+  );
+}
+
+class _SimulationComparisonRow extends StatelessWidget {
+  final _SimulationComparisonRowData data;
+
+  const _SimulationComparisonRow({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool differs = data.leftValue != data.rightValue;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 86,
+            child: Text(
+              data.label,
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              data.leftValue,
+              style: TextStyle(
+                color: differs ? tokens.primaryAccent : colors.onSurface,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              data.rightValue,
+              style: TextStyle(
+                color: differs ? tokens.chartSecondary : colors.onSurface,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationMetricData {
+  final String label;
+  final String value;
+  final Color? color;
+  final IconData? icon;
+
+  const _SimulationMetricData({
+    required this.label,
+    required this.value,
+    this.color,
+    this.icon,
+  });
+}
+
+class _SimulationMetricGrid extends StatelessWidget {
+  final List<_SimulationMetricData> metrics;
+
+  const _SimulationMetricGrid({required this.metrics});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 8;
+        final double width = constraints.maxWidth >= 520
+            ? (constraints.maxWidth - gap * 2) / 3
+            : (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: metrics
+              .map(
+                (_SimulationMetricData metric) =>
+                    _SimulationMetricCard(metric: metric, width: width),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _SimulationMetricCard extends StatelessWidget {
+  final _SimulationMetricData metric;
+  final double width;
+  final bool compact;
+
+  const _SimulationMetricCard({
+    required this.metric,
+    required this.width,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: width,
+      height: 72,
+      padding: EdgeInsets.all(compact ? 8 : 9),
+      decoration: _simulationTokenBox(
+        context,
+        color: tokens.surfacePrimary,
+        radius: 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              if (metric.icon != null) ...<Widget>[
+                Icon(
+                  metric.icon,
+                  size: compact ? 14 : 15,
+                  color: metric.color ?? tokens.primaryAccent,
+                ),
+                const SizedBox(width: 5),
+              ],
+              Expanded(
+                child: Text(
+                  metric.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Align(
+            alignment: compact ? Alignment.centerLeft : Alignment.centerRight,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 190),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeOutCubic,
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.10),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: FittedBox(
+                key: ValueKey<String>(metric.value),
+                fit: BoxFit.scaleDown,
+                alignment: compact
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                child: Text(
+                  metric.value,
+                  textAlign: compact ? TextAlign.left : TextAlign.right,
+                  style: TextStyle(
+                    color: metric.color ?? colors.onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: const <FontFeature>[
+                      FontFeature.tabularFigures(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationInvalidState extends StatelessWidget {
+  final String message;
+
+  const _SimulationInvalidState({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _simulationBox(
+        context,
+        color: Theme.of(
+          context,
+        ).colorScheme.tertiaryContainer.withValues(alpha: 0.28),
+        radius: 13,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(Icons.info_outline, color: Color(0xFFF59E0B), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFFFDE68A),
+                fontSize: 14,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimulationQuickAmountButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  const _SimulationQuickAmountButton({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        splashColor: tokens.pressedOverlay,
+        highlightColor: tokens.pressedOverlay,
+        onTap: onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? tokens.selectedBackground : tokens.surfacePrimary,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? tokens.selectedBorder : tokens.cardBorder,
+              width: selected ? 0.9 : 1,
+            ),
+            boxShadow: selected
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: tokens.glowColor,
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : const <BoxShadow>[],
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.visible,
+            style: TextStyle(
+              color: selected
+                  ? Theme.of(context).colorScheme.onSurface
+                  : tokens.primaryAccent,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class BuySimulationResult {
@@ -8662,27 +13325,58 @@ class RotationSimulationResult {
   );
 }
 
+String _coinsMoney(double value) => _summaryMoney(value, decimals: 2);
+
+String _coinsPrice(double value) =>
+    value > 0 ? _coinsMoney(value) : 'Precio no disponible';
+
 class CoinsTab extends StatelessWidget {
   final List<String> coins;
   final Map<String, CoinStats> stats;
+  final List<PortfolioSnapshot> snapshots;
   final double sellFeePercent;
   final Map<String, String> priceModes;
   final Map<String, int> manualPriceUpdatedAtMs;
   final Future<void> Function() onRefreshPrices;
   final void Function(String coin) onEditPrice;
   final void Function(CoinStats stats) onDetails;
+  final VoidCallback onViewMovements;
 
   const CoinsTab({
     super.key,
     required this.coins,
     required this.stats,
+    required this.snapshots,
     required this.sellFeePercent,
     required this.priceModes,
     required this.manualPriceUpdatedAtMs,
     required this.onRefreshPrices,
     required this.onEditPrice,
     required this.onDetails,
+    required this.onViewMovements,
   });
+
+  void _openCoinDetail(
+    BuildContext context,
+    CoinStats stat,
+    String priceMode,
+    int? manualPriceUpdatedAt,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext routeContext) => _CoinDetailPage(
+          stat: stat,
+          snapshots: snapshots,
+          sellFeePercent: sellFeePercent,
+          priceMode: priceMode,
+          manualPriceUpdatedAtMs: manualPriceUpdatedAt,
+          onEditPrice: () => onEditPrice(stat.coin),
+          onQuickDetails: () => onDetails(stat),
+          onViewMovements: onViewMovements,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -8692,51 +13386,539 @@ class CoinsTab extends StatelessWidget {
     final int pricedCount = coins
         .where((String coin) => (stats[coin]?.currentPrice ?? 0) > 0)
         .length;
+    final List<String> activeCoins = coins
+        .where((String coin) => (stats[coin]?.quantity ?? 0) > 0)
+        .toList();
+    final List<String> trackedCoins = coins
+        .where((String coin) => (stats[coin]?.quantity ?? 0) <= 0)
+        .toList();
 
-    return RefreshIndicator(
-      onRefresh: onRefreshPrices,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+    return ColoredBox(
+      color: const Color(0xFF070B14),
+      child: RefreshIndicator(
+        onRefresh: onRefreshPrices,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+          children: <Widget>[
+            _CoinsPremiumHeader(
+              activeCount: activeCount,
+              monitoredCount: coins.length,
+              pricedCount: pricedCount,
+            ),
+            const SizedBox(height: 16),
+            const _CoinsSectionHeader(),
+            const SizedBox(height: 10),
+            for (
+              int index = 0;
+              index < activeCoins.length;
+              index++
+            ) ...<Widget>[
+              Builder(
+                builder: (BuildContext context) {
+                  final String coin = activeCoins[index];
+                  final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+                  final String priceMode =
+                      priceModes[coin] == PriceService.manualMode
+                      ? PriceService.manualMode
+                      : PriceService.automaticMode;
+                  return PremiumCoinCard(
+                    stat: stat,
+                    sellFeePercent: sellFeePercent,
+                    priceMode: priceMode,
+                    manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
+                    onEditPrice: () => onEditPrice(coin),
+                    onDetails: () => _openCoinDetail(
+                      context,
+                      stat,
+                      priceMode,
+                      manualPriceUpdatedAtMs[coin],
+                    ),
+                  );
+                },
+              ),
+              if (index != activeCoins.length - 1) const SizedBox(height: 10),
+            ],
+            if (activeCoins.isEmpty) const _CoinsEmptyActiveState(),
+            if (trackedCoins.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 18),
+              _CoinsTrackingHeader(count: trackedCoins.length),
+              const SizedBox(height: 9),
+              for (
+                int index = 0;
+                index < trackedCoins.length;
+                index++
+              ) ...<Widget>[
+                Builder(
+                  builder: (BuildContext context) {
+                    final String coin = trackedCoins[index];
+                    final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
+                    final String priceMode =
+                        priceModes[coin] == PriceService.manualMode
+                        ? PriceService.manualMode
+                        : PriceService.automaticMode;
+                    return _TrackedCoinTile(
+                      stat: stat,
+                      priceMode: priceMode,
+                      onEditPrice: () => onEditPrice(coin),
+                      onDetails: () => _openCoinDetail(
+                        context,
+                        stat,
+                        priceMode,
+                        manualPriceUpdatedAtMs[coin],
+                      ),
+                    );
+                  },
+                ),
+                if (index != trackedCoins.length - 1) const SizedBox(height: 8),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoinsPremiumHeader extends StatelessWidget {
+  final int activeCount;
+  final int monitoredCount;
+  final int pricedCount;
+
+  const _CoinsPremiumHeader({
+    required this.activeCount,
+    required this.monitoredCount,
+    required this.pricedCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
+        ),
+        border: Border.all(color: tokens.selectedBorder),
+        boxShadow: <BoxShadow>[
+          BoxShadow(color: tokens.glowColor, blurRadius: 18),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          PremiumDashboardHero(
-            title: 'Monedas',
-            subtitle: 'Precios y lectura general de tus posiciones',
-            icon: Icons.token_outlined,
-            metrics: <PremiumMetricData>[
-              PremiumMetricData(
-                label: 'Activas',
-                value: '$activeCount / ${coins.length}',
-                icon: Icons.account_balance_wallet_outlined,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Monedas',
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Precios y lectura general de tus posiciones',
+                      maxLines: 2,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 14,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              PremiumMetricData(
-                label: 'Actualizadas',
-                value: '$pricedCount precios',
-                icon: Icons.price_check_outlined,
-              ),
-              PremiumMetricData(
-                label: 'Fuente',
-                value: 'CoinGecko',
-                icon: Icons.cloud_outlined,
+              const SizedBox(width: 10),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: tokens.selectedBackground,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.currency_bitcoin,
+                  size: 20,
+                  color: tokens.primaryAccent,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          _CommandSection(
-            title: 'Paneles por moneda',
-            children: coins.map((String coin) {
-              final CoinStats stat = stats[coin] ?? CoinStats(coin: coin);
-              return PremiumCoinCard(
-                stat: stat,
-                sellFeePercent: sellFeePercent,
-                priceMode: priceModes[coin] == PriceService.manualMode
-                    ? PriceService.manualMode
-                    : PriceService.automaticMode,
-                manualPriceUpdatedAtMs: manualPriceUpdatedAtMs[coin],
-                onEditPrice: () => onEditPrice(coin),
-                onDetails: () => onDetails(stat),
-              );
-            }).toList(),
+          const SizedBox(height: 13),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Expanded(
+                  child: _CoinsHeaderMetric(
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: 'Activas',
+                    value: '$activeCount/$monitoredCount',
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: _CoinsHeaderMetric(
+                    icon: Icons.price_check_outlined,
+                    label: 'Con precio',
+                    value: '$pricedCount/$monitoredCount',
+                  ),
+                ),
+                const SizedBox(width: 7),
+                const Expanded(
+                  child: _CoinsHeaderMetric(
+                    icon: Icons.cloud_outlined,
+                    label: 'Fuente',
+                    value: 'CoinGecko',
+                    valueFontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinsHeaderMetric extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final double valueFontSize;
+
+  const _CoinsHeaderMetric({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueFontSize = 19,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 96),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: BoxDecoration(
+        color: tokens.surfacePrimary.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 13, color: tokens.primaryAccent),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  softWrap: true,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 13,
+                    height: 1.05,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinsSectionHeader extends StatelessWidget {
+  const _CoinsSectionHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Tus monedas',
+          style: TextStyle(
+            color: colors.onSurface,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Precios, posiciones y resultados',
+          style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+        ),
+      ],
+    );
+  }
+}
+
+class _CoinsTrackingHeader extends StatelessWidget {
+  final int count;
+
+  const _CoinsTrackingHeader({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'En seguimiento',
+                style: TextStyle(
+                  color: colors.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Precios disponibles sin posición abierta',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: tokens.selectedBackground,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '$count',
+            style: TextStyle(
+              color: tokens.primaryAccent,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CoinsEmptyActiveState extends StatelessWidget {
+  const _CoinsEmptyActiveState();
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.account_balance_wallet_outlined,
+            color: tokens.primaryAccent,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'No hay posiciones abiertas. Tus monedas monitoreadas aparecen abajo.',
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 14,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrackedCoinTile extends StatelessWidget {
+  final CoinStats stat;
+  final String priceMode;
+  final VoidCallback onEditPrice;
+  final VoidCallback onDetails;
+
+  const _TrackedCoinTile({
+    required this.stat,
+    required this.priceMode,
+    required this.onEditPrice,
+    required this.onDetails,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool isManual = priceMode == PriceService.manualMode;
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+    final String name = cryptoAssetMetadata[stat.coin]?.name ?? stat.coin;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(11, 10, 8, 8),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              CoinLogo(coin: stat.coin, size: 36),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      stat.coin,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      name,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Editar precio',
+                onPressed: onEditPrice,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
+                ),
+                icon: Icon(
+                  Icons.edit_outlined,
+                  size: 17,
+                  color: tokens.primaryAccent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Precio actual',
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _coinsPrice(stat.currentPrice),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: colors.onSurface,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 5),
+          Row(
+            children: <Widget>[
+              _CoinModeChip(isManual: isManual, color: modeColor),
+              const SizedBox(width: 7),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: tokens.chartSecondary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Text(
+                  'Sin posición',
+                  style: TextStyle(
+                    color: tokens.chartSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              const SizedBox(width: 4),
+              TextButton(
+                onPressed: onDetails,
+                style: TextButton.styleFrom(
+                  foregroundColor: tokens.primaryAccent,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: const Text('Detalles'),
+              ),
+            ],
           ),
         ],
       ),
@@ -8764,6 +13946,8 @@ class PremiumCoinCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool hasPosition = stat.quantity > 0;
     final bool recovered = stat.isAtOrAboveNetBreakEven(sellFeePercent);
     final bool hasPrice = stat.currentPrice > 0;
@@ -8776,109 +13960,1292 @@ class PremiumCoinCard extends StatelessWidget {
               ? 'Precio manual'
               : 'Manual · ${longDate(manualUpdatedAt)}'
         : 'Precio automático';
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                CoinLogo(coin: stat.coin, size: 52),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        hasPosition
-                            ? 'Posición abierta'
-                            : 'Sin posición activa',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+    final Color resultColor = pnlColor(stat.unrealizedPL);
+    final String assetName = cryptoAssetMetadata[stat.coin]?.name ?? stat.coin;
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 9),
+      decoration: BoxDecoration(
+        color: hasPosition ? tokens.surfacePrimary : tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              CoinLogo(coin: stat.coin, size: 42),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      stat.coin,
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      assetName,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '${crypto(stat.quantity)} en cartera',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
+                          fontSize: 15,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        hasPosition
-                            ? '${crypto(stat.quantity)} en cartera'
-                            : 'Precio listo para seguimiento',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 6),
-                      StatusPill(
-                        label: isManual ? 'Manual' : 'Automático',
-                        positive: !isManual,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        priceModeLabel,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                IconButton.filledTonal(
-                  tooltip: 'Editar precio',
-                  onPressed: onEditPrice,
-                  icon: const Icon(Icons.edit_outlined),
+              ),
+              const SizedBox(width: 6),
+              _CoinModeChip(isManual: isManual, color: modeColor),
+              const SizedBox(width: 5),
+              IconButton(
+                tooltip: 'Editar precio',
+                onPressed: onEditPrice,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: <Widget>[
-                MiniMetric(
-                  label: 'Precio',
-                  value: priceDisplay(stat.currentPrice),
+                style: IconButton.styleFrom(
+                  backgroundColor: tokens.selectedBackground,
+                  foregroundColor: tokens.primaryAccent,
                 ),
-                MiniMetric(
-                  label: 'Valor actual',
-                  value: money(stat.currentValue),
-                ),
-                MiniMetric(
-                  label: 'Resultado',
-                  value: money(stat.unrealizedPL),
-                  color: pnlColor(stat.unrealizedPL),
-                ),
-                MiniMetric(
-                  label: 'Break even',
-                  value: money(stat.netBreakEvenPrice(sellFeePercent)),
-                ),
-              ],
-            ),
-            if (!hasPrice) ...<Widget>[
-              const SizedBox(height: 8),
-              Text(
-                'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
-                style: Theme.of(context).textTheme.bodySmall,
+                icon: const Icon(Icons.edit_outlined, size: 18),
               ),
             ],
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                StatusPill(
-                  label: hasPosition
-                      ? (recovered ? 'Arriba del equilibrio' : 'Vigilar')
-                      : 'Sin posición',
-                  positive: !hasPosition || recovered,
+          ),
+          if (isManual || !hasPrice)
+            Padding(
+              padding: const EdgeInsets.only(left: 52, top: 3),
+              child: Text(
+                hasPrice ? priceModeLabel : 'Sin precio disponible',
+                maxLines: 2,
+                style: TextStyle(
+                  color: hasPrice
+                      ? const Color(0xFF8994AA)
+                      : const Color(0xFFF59E0B),
+                  fontSize: 13,
                 ),
-                FilledButton.tonalIcon(
-                  onPressed: onDetails,
-                  icon: const Icon(Icons.info_outline),
-                  label: const Text('Detalles'),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Column(
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: _CoinFinancialMetric(
+                      label: 'Precio',
+                      value: _coinsPrice(stat.currentPrice),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: _CoinFinancialMetric(
+                      label: 'Valor actual',
+                      value: _coinsMoney(stat.currentValue),
+                      color: tokens.primaryAccent,
+                      valueFontSize: 20,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              _CoinResultMetric(
+                value: _coinsMoney(stat.unrealizedPL),
+                color: resultColor,
+              ),
+            ],
+          ),
+          if (!hasPrice) ...<Widget>[
+            const SizedBox(height: 6),
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(Icons.info_outline, size: 14, color: Color(0xFFF59E0B)),
+                SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Se usa \$0.00 como fallback técnico; no necesariamente es valor real de mercado.',
+                    style: TextStyle(
+                      color: Color(0xFFAAB3C5),
+                      fontSize: 13,
+                      height: 1.15,
+                    ),
+                  ),
                 ),
               ],
             ),
           ],
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              const Text(
+                'Break-even',
+                style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _coinsMoney(stat.netBreakEvenPrice(sellFeePercent)),
+                    maxLines: 1,
+                    softWrap: false,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            children: <Widget>[
+              _CoinPositionChip(
+                label: hasPosition
+                    ? (recovered ? 'Arriba del equilibrio' : 'Vigilar')
+                    : 'Sin posición',
+                positive: !hasPosition || recovered,
+              ),
+              const Spacer(),
+              const SizedBox(width: 3),
+              TextButton.icon(
+                onPressed: onDetails,
+                icon: const Icon(Icons.arrow_forward, size: 15),
+                label: const Text('Detalles'),
+                style: TextButton.styleFrom(
+                  foregroundColor: tokens.primaryAccent,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinModeChip extends StatelessWidget {
+  final bool isManual;
+  final Color color;
+
+  const _CoinModeChip({required this.isManual, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(isManual ? Icons.tune : Icons.sync, size: 12, color: color),
+        const SizedBox(width: 3),
+        Text(
+          isManual ? 'Manual' : 'Automático',
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinFinancialMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? color;
+  final double valueFontSize;
+
+  const _CoinFinancialMetric({
+    required this.label,
+    required this.value,
+    this.color,
+    this.valueFontSize = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 60),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(height: 5),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                color: color ?? colors.onSurface,
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinResultMetric extends StatelessWidget {
+  final String value;
+  final Color color;
+
+  const _CoinResultMetric({required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 46),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Text(
+            'Resultado',
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinPositionChip extends StatelessWidget {
+  final String label;
+  final bool positive;
+
+  const _CoinPositionChip({required this.label, required this.positive});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = positive
+        ? const Color(0xFF4ADE80)
+        : const Color(0xFFF59E0B);
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 112),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
+    );
+  }
+}
+
+enum _CoinDetailView { summary, chart }
+
+enum _CoinChartRange { days7, days30, days90, all }
+
+extension on _CoinChartRange {
+  String get label => switch (this) {
+    _CoinChartRange.days7 => '7D',
+    _CoinChartRange.days30 => '30D',
+    _CoinChartRange.days90 => '90D',
+    _CoinChartRange.all => 'Todo',
+  };
+
+  int? get days => switch (this) {
+    _CoinChartRange.days7 => 7,
+    _CoinChartRange.days30 => 30,
+    _CoinChartRange.days90 => 90,
+    _CoinChartRange.all => null,
+  };
+}
+
+class _CoinDetailPage extends StatefulWidget {
+  final CoinStats stat;
+  final List<PortfolioSnapshot> snapshots;
+  final double sellFeePercent;
+  final String priceMode;
+  final int? manualPriceUpdatedAtMs;
+  final VoidCallback onEditPrice;
+  final VoidCallback onQuickDetails;
+  final VoidCallback onViewMovements;
+
+  const _CoinDetailPage({
+    required this.stat,
+    required this.snapshots,
+    required this.sellFeePercent,
+    required this.priceMode,
+    required this.manualPriceUpdatedAtMs,
+    required this.onEditPrice,
+    required this.onQuickDetails,
+    required this.onViewMovements,
+  });
+
+  @override
+  State<_CoinDetailPage> createState() => _CoinDetailPageState();
+}
+
+class _CoinDetailPageState extends State<_CoinDetailPage> {
+  _CoinDetailView _view = _CoinDetailView.summary;
+  _CoinChartRange _range = _CoinChartRange.days30;
+  SummaryChartType _chartType = SummaryChartType.line;
+
+  List<PortfolioSnapshot> get _coinSnapshots {
+    final List<PortfolioSnapshot> available =
+        widget.snapshots
+            .where(
+              (PortfolioSnapshot snapshot) => snapshot.coins.any(
+                (CoinSnapshot coin) => coin.coin == widget.stat.coin,
+              ),
+            )
+            .toList()
+          ..sort(
+            (PortfolioSnapshot a, PortfolioSnapshot b) =>
+                a.createdAt.compareTo(b.createdAt),
+          );
+    final int? days = _range.days;
+    if (days == null || available.isEmpty) return available;
+    final DateTime cutoff = available.last.createdAt.subtract(
+      Duration(days: days),
+    );
+    return available
+        .where(
+          (PortfolioSnapshot snapshot) => !snapshot.createdAt.isBefore(cutoff),
+        )
+        .toList();
+  }
+
+  double _coinValue(PortfolioSnapshot snapshot) => snapshot.coins
+      .firstWhere((CoinSnapshot coin) => coin.coin == widget.stat.coin)
+      .currentValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final String name =
+        cryptoAssetMetadata[widget.stat.coin]?.name ?? widget.stat.coin;
+    final bool isManual = widget.priceMode == PriceService.manualMode;
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            _CoinDetailTopBar(
+              coin: widget.stat.coin,
+              name: name,
+              onBack: () => Navigator.of(context).pop(),
+              onQuickDetails: widget.onQuickDetails,
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+                children: <Widget>[
+                  _CoinDetailIdentity(
+                    stat: widget.stat,
+                    name: name,
+                    isManual: isManual,
+                    manualPriceUpdatedAtMs: widget.manualPriceUpdatedAtMs,
+                    onEditPrice: widget.onEditPrice,
+                  ),
+                  const SizedBox(height: 12),
+                  _CoinDetailViewSelector(
+                    value: _view,
+                    onChanged: (_CoinDetailView value) {
+                      setState(() => _view = value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  if (_view == _CoinDetailView.summary)
+                    _CoinDetailSummary(
+                      stat: widget.stat,
+                      isManual: isManual,
+                      sellFeePercent: widget.sellFeePercent,
+                      onEditPrice: widget.onEditPrice,
+                      onQuickDetails: widget.onQuickDetails,
+                      onViewMovements: widget.onViewMovements,
+                    )
+                  else
+                    _CoinDetailChart(
+                      coin: widget.stat.coin,
+                      snapshots: _coinSnapshots,
+                      values: _coinSnapshots.map(_coinValue).toList(),
+                      range: _range,
+                      chartType: _chartType,
+                      onRangeChanged: (_CoinChartRange value) {
+                        setState(() => _range = value);
+                      },
+                      onChartTypeChanged: (SummaryChartType value) {
+                        setState(() => _chartType = value);
+                      },
+                      onViewMovements: widget.onViewMovements,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoinDetailTopBar extends StatelessWidget {
+  final String coin;
+  final String name;
+  final VoidCallback onBack;
+  final VoidCallback onQuickDetails;
+
+  const _CoinDetailTopBar({
+    required this.coin,
+    required this.name,
+    required this.onBack,
+    required this.onQuickDetails,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      child: Row(
+        children: <Widget>[
+          IconButton(
+            onPressed: onBack,
+            tooltip: 'Volver',
+            icon: const Icon(Icons.arrow_back),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  name,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: colors.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  coin,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onQuickDetails,
+            tooltip: 'Auditoría rápida',
+            icon: const Icon(Icons.fact_check_outlined, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinDetailIdentity extends StatelessWidget {
+  final CoinStats stat;
+  final String name;
+  final bool isManual;
+  final int? manualPriceUpdatedAtMs;
+  final VoidCallback onEditPrice;
+
+  const _CoinDetailIdentity({
+    required this.stat,
+    required this.name,
+    required this.isManual,
+    required this.manualPriceUpdatedAtMs,
+    required this.onEditPrice,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+    final DateTime? updatedAt = manualPriceUpdatedAtMs == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(manualPriceUpdatedAtMs!);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: tokens.selectedBorder),
+      ),
+      child: Row(
+        children: <Widget>[
+          CoinLogo(coin: stat.coin, size: 52),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '${stat.coin} · $name',
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: colors.onSurface,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  stat.quantity > 0
+                      ? '${crypto(stat.quantity)} en cartera'
+                      : 'Sin posición activa',
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    _CoinModeChip(isManual: isManual, color: modeColor),
+                    if (isManual && updatedAt != null)
+                      Text(
+                        longDate(updatedAt),
+                        style: const TextStyle(
+                          color: Color(0xFF8994AA),
+                          fontSize: 13,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          IconButton(
+            onPressed: onEditPrice,
+            tooltip: 'Editar precio',
+            style: IconButton.styleFrom(
+              backgroundColor: tokens.selectedBackground,
+              foregroundColor: tokens.primaryAccent,
+            ),
+            icon: const Icon(Icons.edit_outlined, size: 19),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinDetailViewSelector extends StatelessWidget {
+  final _CoinDetailView value;
+  final ValueChanged<_CoinDetailView> onChanged;
+
+  const _CoinDetailViewSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return SegmentedButton<_CoinDetailView>(
+      segments: const <ButtonSegment<_CoinDetailView>>[
+        ButtonSegment<_CoinDetailView>(
+          value: _CoinDetailView.summary,
+          icon: Icon(Icons.dashboard_outlined, size: 17),
+          label: Text('Resumen'),
+        ),
+        ButtonSegment<_CoinDetailView>(
+          value: _CoinDetailView.chart,
+          icon: Icon(Icons.show_chart, size: 17),
+          label: Text('Gráfica'),
+        ),
+      ],
+      selected: <_CoinDetailView>{value},
+      onSelectionChanged: (Set<_CoinDetailView> selection) {
+        onChanged(selection.first);
+      },
+      showSelectedIcon: false,
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? tokens.selectedBackground
+              : tokens.surfaceElevated,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? colors.onSurface
+              : colors.onSurfaceVariant,
+        ),
+        side: WidgetStateProperty.all(BorderSide(color: tokens.selectedBorder)),
+        textStyle: WidgetStateProperty.all(
+          const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+}
+
+class _CoinDetailSummary extends StatelessWidget {
+  final CoinStats stat;
+  final bool isManual;
+  final double sellFeePercent;
+  final VoidCallback onEditPrice;
+  final VoidCallback onQuickDetails;
+  final VoidCallback onViewMovements;
+
+  const _CoinDetailSummary({
+    required this.stat,
+    required this.isManual,
+    required this.sellFeePercent,
+    required this.onEditPrice,
+    required this.onQuickDetails,
+    required this.onViewMovements,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (stat.quantity <= 0) {
+      return _CoinNoPositionSummary(
+        stat: stat,
+        isManual: isManual,
+        onEditPrice: onEditPrice,
+        onViewMovements: onViewMovements,
+      );
+    }
+    final Color resultColor = pnlColor(stat.unrealizedPL);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Column(
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: tokens.surfaceElevated,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: tokens.selectedBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Valor actual',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 15),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _coinsMoney(stat.currentValue),
+                  style: TextStyle(
+                    color: colors.onSurface,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _coinsMoney(stat.unrealizedPL),
+                style: TextStyle(
+                  color: resultColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Precio actual',
+                value: _coinsPrice(stat.currentPrice),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Invertido',
+                value: _coinsMoney(stat.costBase),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Break-even',
+                value: _coinsMoney(stat.netBreakEvenPrice(sellFeePercent)),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: _CoinDetailMetric(
+                label: 'Promedio',
+                value: _coinsMoney(stat.avgPrice),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _CoinDetailPanel(
+          title: 'Lectura de posición',
+          child: Column(
+            children: <Widget>[
+              _CoinDetailRow('Cantidad', crypto(stat.quantity)),
+              _CoinDetailRow(
+                'P&L no realizado',
+                _coinsMoney(stat.unrealizedPL),
+                valueColor: resultColor,
+              ),
+              _CoinDetailRow(
+                'P&L realizado',
+                _coinsMoney(stat.realizedPL),
+                valueColor: pnlColor(stat.realizedPL),
+              ),
+              _CoinDetailRow('Comisiones', _coinsMoney(stat.feesPaid)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onEditPrice,
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                label: const Text('Editar precio'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: onViewMovements,
+                icon: const Icon(Icons.receipt_long_outlined, size: 17),
+                label: const Text('Movimientos'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: tokens.selectedBackground,
+                  foregroundColor: colors.onSurface,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton.icon(
+            onPressed: onQuickDetails,
+            icon: const Icon(Icons.fact_check_outlined, size: 17),
+            label: const Text('Abrir auditoría rápida'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CoinNoPositionSummary extends StatelessWidget {
+  final CoinStats stat;
+  final bool isManual;
+  final VoidCallback onEditPrice;
+  final VoidCallback onViewMovements;
+
+  const _CoinNoPositionSummary({
+    required this.stat,
+    required this.isManual,
+    required this.onEditPrice,
+    required this.onViewMovements,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color modeColor = isManual
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF22C55E);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Column(
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: tokens.surfaceElevated,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: tokens.selectedBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Precio actual',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 15),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _coinsPrice(stat.currentPrice),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: colors.onSurface,
+                    fontSize: 38,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 7,
+                runSpacing: 6,
+                children: <Widget>[
+                  _CoinModeChip(isManual: isManual, color: modeColor),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: tokens.chartSecondary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(
+                      'Sin posición abierta',
+                      style: TextStyle(
+                        color: tokens.chartSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _CoinDetailPanel(
+          title: 'Seguimiento disponible',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Esta moneda tiene precio disponible, pero no existe una posición abierta en la cartera.',
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 14,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CoinDetailRow('Cantidad', crypto(stat.quantity)),
+              _CoinDetailRow(
+                'Valor de cartera',
+                _coinsMoney(stat.currentValue),
+              ),
+              _CoinDetailRow('Invertido', _coinsMoney(stat.costBase)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onEditPrice,
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                label: const Text('Editar precio'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: onViewMovements,
+                icon: const Icon(Icons.add_chart_outlined, size: 17),
+                label: const Text('Movimientos'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: tokens.selectedBackground,
+                  foregroundColor: colors.onSurface,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _CoinDetailMetric extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _CoinDetailMetric({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 68),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 2,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 13,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 5),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinDetailPanel extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _CoinDetailPanel({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinDetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _CoinDetailRow(this.label, this.value, {this.valueColor});
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            flex: 5,
+            child: Text(
+              label,
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 6,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: TextStyle(
+                  color: valueColor ?? colors.onSurface,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoinDetailChart extends StatelessWidget {
+  final String coin;
+  final List<PortfolioSnapshot> snapshots;
+  final List<double> values;
+  final _CoinChartRange range;
+  final SummaryChartType chartType;
+  final ValueChanged<_CoinChartRange> onRangeChanged;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final VoidCallback onViewMovements;
+
+  const _CoinDetailChart({
+    required this.coin,
+    required this.snapshots,
+    required this.values,
+    required this.range,
+    required this.chartType,
+    required this.onRangeChanged,
+    required this.onChartTypeChanged,
+    required this.onViewMovements,
+  });
+
+  @override
+  Widget build(BuildContext context) => _CoinDetailPanel(
+    title: 'Evolución de $coin',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _CoinRangeSelector(value: range, onChanged: onRangeChanged),
+        const SizedBox(height: 9),
+        _SummaryChartTypeButton(
+          value: chartType,
+          onChanged: onChartTypeChanged,
+          compact: true,
+        ),
+        const SizedBox(height: 12),
+        if (snapshots.length < 2)
+          const _SummaryCompactNotice(
+            icon: Icons.show_chart_outlined,
+            title: 'Histórico insuficiente',
+            subtitle: 'Se necesitan dos instantáneas de esta moneda.',
+          )
+        else
+          SnapshotLineChart(
+            snapshots: snapshots,
+            height: 220,
+            includeZero: true,
+            chartType: chartType,
+            series: <SnapshotChartSeries>[
+              SnapshotChartSeries(
+                label: 'Valor actual',
+                color: ccmx.CcmxVisualTokens.of(context).chartPrimary,
+                values: values,
+              ),
+            ],
+          ),
+        if (snapshots.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          _CoinDetailRow('Último valor', _coinsMoney(values.last)),
+          _CoinDetailRow('Instantáneas', snapshots.length.toString()),
+        ],
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            onPressed: onViewMovements,
+            icon: const Icon(Icons.receipt_long_outlined, size: 17),
+            label: const Text('Ver movimientos'),
+            style: FilledButton.styleFrom(
+              backgroundColor: ccmx.CcmxVisualTokens.of(
+                context,
+              ).selectedBackground,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CoinRangeSelector extends StatelessWidget {
+  final _CoinChartRange value;
+  final ValueChanged<_CoinChartRange> onChanged;
+
+  const _CoinRangeSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Row(
+      children: _CoinChartRange.values
+          .map(
+            (_CoinChartRange range) => Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  right: range == _CoinChartRange.all ? 0 : 6,
+                ),
+                child: InkWell(
+                  onTap: () => onChanged(range),
+                  borderRadius: BorderRadius.circular(8),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: value == range
+                          ? tokens.selectedBackground
+                          : tokens.surfaceElevated,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: value == range
+                            ? tokens.selectedBorder
+                            : tokens.cardBorder,
+                      ),
+                    ),
+                    child: Text(
+                      range.label,
+                      style: TextStyle(
+                        color: value == range
+                            ? Colors.white
+                            : const Color(0xFFB6BED0),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -8948,50 +15315,39 @@ class _AlertsTabState extends State<AlertsTab> {
     final int watchedCount = widget.coins
         .where((String coin) => (widget.stats[coin]?.currentPrice ?? 0) > 0)
         .length;
-    final String globalState =
-        widget.priceAlertsEnabled || widget.recoveryAlertsEnabled
-        ? 'Activas'
-        : 'En pausa';
     final String autoState = widget.automaticLocalAlertsEnabled
         ? intervalLabel(widget.automaticLocalAlertsIntervalMinutes)
         : 'Desactivadas';
+    final int activeRules =
+        (widget.priceAlertsEnabled ? 1 : 0) +
+        (widget.recoveryAlertsEnabled ? 1 : 0);
 
     return PremiumScaffoldSurface(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: <Widget>[
-          PremiumDashboardHero(
-            title: 'Alertas',
-            subtitle:
-                'Internas al usar la app y automáticas locales en Android',
-            icon: Icons.notifications_active_outlined,
-            metrics: <PremiumMetricData>[
-              PremiumMetricData(
-                label: 'Estado global',
-                value: globalState,
-                icon: Icons.radar_outlined,
-                color: globalState == 'Activas' ? Colors.green : null,
-              ),
-              PremiumMetricData(
-                label: 'Umbral mercado',
-                value: pct(widget.priceAlertThresholdPercent),
-                icon: Icons.percent_outlined,
-              ),
-              PremiumMetricData(
-                label: 'Referencias',
-                value: '$watchedCount monedas',
-                icon: Icons.track_changes_outlined,
-              ),
-              PremiumMetricData(
-                label: 'Automáticas',
-                value: autoState,
-                icon: Icons.work_history_outlined,
-              ),
-            ],
+          _AlertsHeader(
+            activeRules: activeRules,
+            watchedCount: watchedCount,
+            automaticState: autoState,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
+          _AlertsMonitoringCard(
+            automaticEnabled: widget.automaticLocalAlertsEnabled,
+            notificationsAllowed: widget.notificationsAllowed,
+            intervalLabel: intervalLabel(
+              widget.automaticLocalAlertsIntervalMinutes,
+            ),
+          ),
+          const SizedBox(height: 8),
           _buildAutomaticNotificationsCard(context),
-          const SizedBox(height: 14),
+          if (!widget.notificationsAllowed) ...<Widget>[
+            const SizedBox(height: 8),
+            _AlertsPermissionCard(
+              onActivate: () => widget.onAutomaticLocalAlertsChanged(true),
+            ),
+          ],
+          const SizedBox(height: 8),
           PremiumSegmentShell(
             child: SegmentedButton<int>(
               segments: const <ButtonSegment<int>>[
@@ -9012,49 +15368,82 @@ class _AlertsTabState extends State<AlertsTab> {
               },
             ),
           ),
-          const SizedBox(height: 14),
-          if (_segment == 0)
-            _buildMarketSection(context)
-          else
-            _buildRecoverySection(context),
+          const SizedBox(height: 8),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.985, end: 1).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey<int>(_segment),
+              child: _segment == 0
+                  ? _buildMarketSection(context)
+                  : _buildRecoverySection(context),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildAutomaticNotificationsCard(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-
-    return CardPanel(
-      title: 'Alertas automáticas locales',
-      subtitle: 'Revisión en segundo plano con WorkManager de Android.',
+    return _AlertsPanel(
+      title: 'Alertas automáticas',
+      subtitle:
+          'Consulta precios en segundo plano y evalúa tus reglas activas.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           SwitchListTile(
-            dense: true,
             value: widget.automaticLocalAlertsEnabled,
             onChanged: widget.onAutomaticLocalAlertsChanged,
-            title: const Text('Activar revisión automática local'),
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            title: const Text(
+              'Monitoreo automático',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
             subtitle: Text(
-              widget.notificationsAllowed
-                  ? 'Usa las mismas alertas de mercado y recuperación.'
-                  : 'Falta permiso de notificaciones de Android.',
+              widget.automaticLocalAlertsEnabled
+                  ? 'Activo con las reglas de Mercado y Recuperación.'
+                  : 'Las reglas se conservan aunque el monitoreo esté pausado.',
+              style: const TextStyle(fontSize: 14),
             ),
             contentPadding: EdgeInsets.zero,
           ),
-          const Text(
-            'Las alertas internas se revisan al abrir la app o actualizar precios. '
-            'Las alertas automáticas locales dependen de Android, batería, '
-            'permisos y conexión. Pueden no ser exactas al minuto.',
+          const SizedBox(height: 6),
+          Text(
+            'Android puede agrupar o retrasar revisiones para ahorrar batería.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Android puede agrupar o retrasar revisiones para ahorrar batería.',
-            style: TextStyle(color: colors.onSurfaceVariant),
+            'Frecuencia de revisión',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          const SizedBox(height: 12),
-          Text('Intervalo', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            'Cada cuánto se actualizan y evalúan las alertas automáticas.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -9062,11 +15451,43 @@ class _AlertsTabState extends State<AlertsTab> {
             children: PriceAlertService.automaticIntervalOptions.map((
               int minutes,
             ) {
+              final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(
+                context,
+              );
+              final ColorScheme colors = Theme.of(context).colorScheme;
+              final bool selected =
+                  widget.automaticLocalAlertsIntervalMinutes == minutes;
               return ChoiceChip(
-                selected: widget.automaticLocalAlertsIntervalMinutes == minutes,
+                selected: selected,
                 label: Text(intervalLabel(minutes)),
+                avatar: selected
+                    ? Icon(
+                        Icons.schedule,
+                        size: 15,
+                        color: tokens.primaryAccent,
+                      )
+                    : null,
                 onSelected: (_) =>
                     widget.onAutomaticLocalAlertIntervalChanged(minutes),
+                selectedColor: tokens.selectedBackground,
+                backgroundColor: tokens.surfaceElevated,
+                side: BorderSide(
+                  color: selected ? tokens.selectedBorder : tokens.cardBorder,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                labelStyle: TextStyle(
+                  color: selected ? colors.onSurface : colors.onSurfaceVariant,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
+                visualDensity: VisualDensity.compact,
+                showCheckmark: false,
               );
             }).toList(),
           ),
@@ -9082,34 +15503,45 @@ class _AlertsTabState extends State<AlertsTab> {
 
     return Column(
       children: <Widget>[
-        CardPanel(
-          title: 'Alertas internas de mercado',
+        _AlertsPanel(
+          title: 'Reglas de Mercado',
           subtitle:
               '${pct(widget.priceAlertThresholdPercent)} · ${priceUpdatedLabel(widget.pricesUpdatedAt)}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               SwitchListTile(
-                dense: true,
                 value: widget.priceAlertsEnabled,
                 onChanged: widget.onPriceAlertsChanged,
-                title: const Text('Activar mercado'),
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                title: const Text(
+                  'Alertas de mercado',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Evalúa la variación respecto al precio base guardado.',
+                  style: TextStyle(fontSize: 14),
+                ),
                 contentPadding: EdgeInsets.zero,
               ),
               if (widget.priceAlertsEnabled && !widget.notificationsAllowed)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
                   child: Text(
-                    'Falta permiso de notificaciones.',
+                    'Falta permiso de notificaciones de Android.',
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                      color: Color(0xFFFDE68A),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-              InfoLine('Umbral actual', pct(widget.priceAlertThresholdPercent)),
-              InfoLine(
-                'Monitoreo',
-                '${watchedCoins.length} monedas monitoreadas',
+              _AlertsRuleSummary(
+                primaryLabel: 'Umbral de variación',
+                primaryValue: pct(widget.priceAlertThresholdPercent),
+                secondaryLabel: 'Monedas vigiladas',
+                secondaryValue: watchedCoins.length.toString(),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -9117,6 +15549,7 @@ class _AlertsTabState extends State<AlertsTab> {
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonalIcon(
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.isRefreshingPrices
                         ? null
                         : widget.onRefreshPrices,
@@ -9126,16 +15559,18 @@ class _AlertsTabState extends State<AlertsTab> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.sync),
+                        : const Icon(Icons.sync, size: 18),
                     label: Text(
                       widget.isRefreshingPrices ? 'Actualizando' : 'Precios',
                     ),
                   ),
                   FilledButton.tonal(
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onEditPriceAlertThreshold,
                     child: const Text('Editar umbral'),
                   ),
                   FilledButton.tonal(
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onResetPriceAlertReferences,
                     child: const Text('Reiniciar precios base'),
                   ),
@@ -9144,11 +15579,12 @@ class _AlertsTabState extends State<AlertsTab> {
             ],
           ),
         ),
-        CardPanel(
-          title: 'Monedas',
+        const SizedBox(height: 8),
+        _AlertsPanel(
+          title: 'Monedas vigiladas',
           subtitle: watchedCoins.isEmpty
               ? 'Sin precios cargados.'
-              : '${watchedCoins.length} monedas monitoreadas',
+              : 'Lecturas de Mercado por moneda.',
           child: Column(
             children: widget.coins.map((String coin) {
               final CoinStats stat =
@@ -9186,38 +15622,52 @@ class _AlertsTabState extends State<AlertsTab> {
 
     return Column(
       children: <Widget>[
-        CardPanel(
-          title: 'Alertas internas de recuperación',
-          subtitle:
-              'Compara el P&L actual contra una base guardada y estima cuánto falta para volver al equilibrio.',
+        _AlertsPanel(
+          title: 'Reglas de Recuperación',
+          subtitle: 'P&L contra base guardada y equilibrio estimado.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               SwitchListTile(
-                dense: true,
                 value: widget.recoveryAlertsEnabled,
                 onChanged: widget.onRecoveryAlertsChanged,
-                title: const Text('Activar recuperación'),
-                subtitle: const Text('Basado en tu posición neta.'),
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                title: const Text(
+                  'Alertas de recuperación',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Basado en tu posición neta.',
+                  style: TextStyle(fontSize: 14),
+                ),
                 contentPadding: EdgeInsets.zero,
               ),
-              InfoLine(
-                'Umbral actual',
-                '${widget.recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
+              _AlertsRuleSummary(
+                primaryLabel: 'Umbral actual',
+                primaryValue:
+                    '${widget.recoveryAlertThresholdPoints.toStringAsFixed(2)} pts',
+                secondaryLabel: 'Regla',
+                secondaryValue: 'Cambio vs base',
               ),
+              const SizedBox(height: 10),
               const Text(
-                'P&L base guardado para comparar la recuperación. Cambio vs base: diferencia entre el P&L actual y la base, en puntos porcentuales. Falta para equilibrio: monto estimado que falta para volver al punto de equilibrio.',
+                'Cambio vs base compara el P&L actual contra la base guardada. '
+                'Falta para equilibrio estima el monto hacia break-even.',
+                style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
                   FilledButton.tonal(
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onEditRecoveryAlertThreshold,
                     child: const Text('Editar umbral'),
                   ),
                   FilledButton.tonal(
+                    style: _alertsTonalButtonStyle(context),
                     onPressed: widget.onResetRecoveryAlertReferences,
                     child: const Text('Reiniciar base de recuperación'),
                   ),
@@ -9226,17 +15676,19 @@ class _AlertsTabState extends State<AlertsTab> {
             ],
           ),
         ),
-        CardPanel(
-          title: 'P&L por moneda',
+        const SizedBox(height: 8),
+        _AlertsPanel(
+          title: 'Monedas vigiladas',
           subtitle: '${coinsToShow.length} monedas visibles',
           child: Column(
             children: <Widget>[
               SwitchListTile(
-                dense: true,
                 value: _showCoinsWithoutPosition,
                 onChanged: (bool value) {
                   setState(() => _showCoinsWithoutPosition = value);
                 },
+                dense: true,
+                visualDensity: VisualDensity.compact,
                 title: const Text('Mostrar monedas sin posición'),
                 contentPadding: EdgeInsets.zero,
               ),
@@ -9299,43 +15751,102 @@ class AlertCoinRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool hasPrice = currentPrice > 0;
+    final bool hasReference = referencePrice > 0;
     final String variationText = referencePrice <= 0
         ? 'Sin ref'
         : '${variationPercent >= 0 ? '+' : ''}${variationPercent.toStringAsFixed(2)}%';
+    final Color variationColor = triggered
+        ? const Color(0xFFF59E0B)
+        : pnlColor(variationPercent);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(9),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        color: const Color(0xFF162033),
+        border: Border.all(
+          color: triggered ? const Color(0x44F59E0B) : const Color(0x1FFFFFFF),
+        ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          CoinLogo(coin: coin, size: 40),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  money(currentPrice),
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                Text(
-                  'Ref ${money(referencePrice)} · Δ $variationText',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: StatusPill(
-                    label: triggered ? 'Revisar' : 'Normal',
-                    positive: !triggered,
+          Row(
+            children: <Widget>[
+              CoinLogo(coin: coin, size: 34),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  coin,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
-              ],
+              ),
+              _AlertsStatusChip(
+                label: triggered ? 'Alerta' : 'Normal',
+                color: triggered
+                    ? const Color(0xFFF59E0B)
+                    : const Color(0xFF4ADE80),
+                icon: triggered
+                    ? Icons.warning_amber_rounded
+                    : Icons.check_circle_outline,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'PRECIO ACTUAL',
+            style: TextStyle(
+              color: Color(0xFFAAB3C5),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
             ),
+          ),
+          const SizedBox(height: 1),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              hasPrice ? _alertsMoney(currentPrice) : 'Precio no disponible',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              const double gap = 8;
+              final double width = (constraints.maxWidth - gap) / 2;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: <Widget>[
+                  _AlertsMetricCell(
+                    width: width,
+                    label: 'Precio base',
+                    value: hasReference
+                        ? _alertsMoney(referencePrice)
+                        : 'Sin referencia',
+                  ),
+                  _AlertsMetricCell(
+                    width: width,
+                    label: 'Variación',
+                    value: variationText,
+                    color: hasReference ? variationColor : null,
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -9372,62 +15883,761 @@ class RecoveryAlertCoinRow extends StatelessWidget {
         ? 'Sin ref'
         : '${deltaPoints >= 0 ? '+' : ''}${deltaPoints.toStringAsFixed(2)} pts';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(9),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        color: const Color(0xFF162033),
+        border: Border.all(
+          color: triggered ? const Color(0x44F59E0B) : const Color(0x1FFFFFFF),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             children: <Widget>[
-              CoinLogo(coin: coin, size: 40),
-              const SizedBox(width: 12),
+              CoinLogo(coin: coin, size: 34),
+              const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  pnlText,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      coin,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      pnlText,
+                      style: TextStyle(
+                        color: hasPosition
+                            ? pnlColor(position.unrealizedPnl)
+                            : const Color(0xFFAAB3C5),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _AlertsStatusChip(
+                label: triggered ? 'Recuperación' : 'Normal',
+                color: triggered
+                    ? const Color(0xFFF59E0B)
+                    : const Color(0xFF4ADE80),
+                icon: triggered
+                    ? Icons.trending_up
+                    : Icons.check_circle_outline,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              const double gap = 8;
+              final double width = (constraints.maxWidth - gap) / 2;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: <Widget>[
+                  _AlertsMetricCell(
+                    width: width,
+                    label: 'P&L no realizado',
+                    value: hasPosition
+                        ? _alertsMoney(position.unrealizedPnl)
+                        : 'Sin posición activa',
                     color: hasPosition
                         ? pnlColor(position.unrealizedPnl)
                         : null,
                   ),
+                  _AlertsMetricCell(
+                    width: width,
+                    label: 'P&L base',
+                    value: referenceText,
+                  ),
+                  _AlertsMetricCell(
+                    width: width,
+                    label: 'Cambio vs base',
+                    value: deltaText,
+                    color: referencePnlPercent == null
+                        ? null
+                        : pnlColor(deltaPoints),
+                  ),
+                  _AlertsMetricCell(
+                    width: width,
+                    label: 'Falta para equilibrio',
+                    value: position.missingToBreakEven > 0
+                        ? _alertsMoney(position.missingToBreakEven)
+                        : 'Listo',
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+ButtonStyle _alertsPrimaryButtonStyle(BuildContext context) {
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  return FilledButton.styleFrom(
+    backgroundColor: colors.primary,
+    foregroundColor: colors.onPrimary,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  );
+}
+
+ButtonStyle _alertsTonalButtonStyle(BuildContext context) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  return FilledButton.styleFrom(
+    backgroundColor: tokens.selectedBackground,
+    foregroundColor: colors.onPrimaryContainer,
+    disabledBackgroundColor: colors.surfaceContainerHighest.withValues(
+      alpha: 0.55,
+    ),
+    disabledForegroundColor: colors.onSurfaceVariant.withValues(alpha: 0.55),
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    side: BorderSide(color: tokens.selectedBorder),
+  );
+}
+
+String _alertsMoney(double value) => _summaryMoney(value, decimals: 2);
+
+String _alertsIntervalCopy(String label) {
+  final String readable = label == '1 h'
+      ? '1 hora'
+      : label.endsWith(' h')
+      ? '${label.replaceAll(' h', '')} horas'
+      : label;
+  return 'Revisión automática cada $readable.';
+}
+
+BoxDecoration _alertsBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: <BoxShadow>[
+      BoxShadow(color: tokens.glowColor, blurRadius: 18, spreadRadius: -10),
+    ],
+  );
+}
+
+BoxDecoration _alertsTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+  );
+}
+
+class _AlertsHeader extends StatelessWidget {
+  final int activeRules;
+  final int watchedCount;
+  final String automaticState;
+
+  const _AlertsHeader({
+    required this.activeRules,
+    required this.watchedCount,
+    required this.automaticState,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: tokens.selectedBorder),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Alertas',
+                      style: TextStyle(
+                        color: colors.onSurface,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Monitorea precios y recibe avisos de tus monedas',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 13,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: tokens.primaryAccent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.notifications_active_outlined,
+                  color: tokens.primaryAccent,
+                  size: 22,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Align(
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              const double gap = 8;
+              final List<_AlertsHeaderMetricData> metrics =
+                  <_AlertsHeaderMetricData>[
+                    _AlertsHeaderMetricData(
+                      label: 'Reglas',
+                      value: activeRules.toString(),
+                      icon: Icons.check_circle_outline,
+                      color: activeRules > 0
+                          ? const Color(0xFF4ADE80)
+                          : const Color(0xFFAAB3C5),
+                    ),
+                    _AlertsHeaderMetricData(
+                      label: 'Monedas',
+                      value: watchedCount.toString(),
+                      icon: Icons.visibility_outlined,
+                      color: tokens.primaryAccent,
+                    ),
+                    _AlertsHeaderMetricData(
+                      label: 'Frecuencia',
+                      value: automaticState,
+                      icon: Icons.schedule_outlined,
+                      color: tokens.primaryAccent,
+                    ),
+                  ];
+              if (constraints.maxWidth >= 340) {
+                final double width = (constraints.maxWidth - gap * 2) / 3;
+                return Row(
+                  children: metrics
+                      .map(
+                        (_AlertsHeaderMetricData metric) => Padding(
+                          padding: EdgeInsets.only(
+                            right: metric == metrics.last ? 0 : gap,
+                          ),
+                          child: _AlertsHeaderMetric(
+                            metric: metric,
+                            width: width,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              }
+              final double halfWidth = (constraints.maxWidth - gap) / 2;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: <Widget>[
+                  _AlertsHeaderMetric(metric: metrics[0], width: halfWidth),
+                  _AlertsHeaderMetric(metric: metrics[1], width: halfWidth),
+                  _AlertsHeaderMetric(
+                    metric: metrics[2],
+                    width: constraints.maxWidth,
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsHeaderMetricData {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _AlertsHeaderMetricData({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+}
+
+class _AlertsHeaderMetric extends StatelessWidget {
+  final _AlertsHeaderMetricData metric;
+  final double width;
+
+  const _AlertsHeaderMetric({required this.metric, required this.width});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: width,
+      constraints: const BoxConstraints(minHeight: 58),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: tokens.surfacePrimary.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Icon(metric.icon, size: 16, color: metric.color),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: StatusPill(
-              label: triggered ? 'Revisar' : 'Normal',
-              positive: !triggered,
+            child: Text(
+              metric.value,
+              style: TextStyle(
+                color: metric.color,
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
+          const SizedBox(height: 1),
+          Text(
+            metric.label,
+            maxLines: 2,
+            style: const TextStyle(
+              color: Color(0xFFC2BCD9),
+              fontSize: 12,
+              height: 1.15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  const _AlertsPanel({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: _alertsTokenBox(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: 19,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 14,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsMonitoringCard extends StatelessWidget {
+  final bool automaticEnabled;
+  final bool notificationsAllowed;
+  final String intervalLabel;
+
+  const _AlertsMonitoringCard({
+    required this.automaticEnabled,
+    required this.notificationsAllowed,
+    required this.intervalLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String title = automaticEnabled
+        ? (notificationsAllowed ? 'Monitoreo configurado' : 'Permiso requerido')
+        : 'Monitoreo pausado';
+    final String subtitle = automaticEnabled
+        ? (notificationsAllowed
+              ? _alertsIntervalCopy(intervalLabel)
+              : 'Activa las notificaciones para recibir avisos fuera de la app.')
+        : 'Las reglas siguen guardadas y puedes reactivarlas cuando quieras.';
+    final Color color = automaticEnabled && notificationsAllowed
+        ? const Color(0xFF4ADE80)
+        : automaticEnabled
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFFAAB3C5);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: _alertsTokenBox(
+        context,
+        color: ccmx.CcmxVisualTokens.of(context).surfaceElevated,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.13),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              automaticEnabled
+                  ? Icons.monitor_heart_outlined
+                  : Icons.pause_circle_outline,
+              color: color,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Estado del monitoreo',
+                  style: const TextStyle(
+                    color: Color(0xFFAAB3C5),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Color(0xFFCDD5E1),
+                    fontSize: 14,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsPermissionCard extends StatelessWidget {
+  final VoidCallback onActivate;
+
+  const _AlertsPermissionCard({required this.onActivate});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: _alertsBox(
+        context,
+        color: Theme.of(
+          context,
+        ).colorScheme.tertiaryContainer.withValues(alpha: 0.28),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Row(
             children: <Widget>[
-              MiniMetric(
-                label: 'P&L no realizado',
-                value: hasPosition
-                    ? money(position.unrealizedPnl)
-                    : 'Sin posición activa',
-                color: hasPosition ? pnlColor(position.unrealizedPnl) : null,
-              ),
-              MiniMetric(label: 'P&L base', value: referenceText),
-              MiniMetric(label: 'Cambio vs base', value: deltaText),
-              MiniMetric(
-                label: 'Falta para equilibrio',
-                value: position.missingToBreakEven > 0
-                    ? money(position.missingToBreakEven)
-                    : 'Listo',
+              Icon(Icons.notifications_off_outlined, color: Color(0xFFF59E0B)),
+              SizedBox(width: 8),
+              Text(
+                'Permiso de notificaciones pendiente',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Actívalo para recibir avisos fuera de la aplicación.',
+            style: TextStyle(color: Color(0xFFAAB3C5), fontSize: 14),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            style: _alertsPrimaryButtonStyle(context),
+            onPressed: onActivate,
+            icon: const Icon(Icons.notifications_active_outlined, size: 18),
+            label: const Text('Activar alertas automáticas'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsStatusChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  const _AlertsStatusChip({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsRuleSummary extends StatelessWidget {
+  final String primaryLabel;
+  final String primaryValue;
+  final String secondaryLabel;
+  final String secondaryValue;
+
+  const _AlertsRuleSummary({
+    required this.primaryLabel,
+    required this.primaryValue,
+    required this.secondaryLabel,
+    required this.secondaryValue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: _alertsBox(
+        context,
+        color: ccmx.CcmxVisualTokens.of(context).surfaceElevated,
+        radius: 13,
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: _AlertsSummaryValue(
+              label: primaryLabel,
+              value: primaryValue,
+            ),
+          ),
+          Container(width: 1, height: 38, color: const Color(0x24FFFFFF)),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 14),
+              child: _AlertsSummaryValue(
+                label: secondaryLabel,
+                value: secondaryValue,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertsSummaryValue extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _AlertsSummaryValue({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+        ),
+        const SizedBox(height: 3),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AlertsMetricCell extends StatelessWidget {
+  final double width;
+  final String label;
+  final String value;
+  final Color? color;
+
+  const _AlertsMetricCell({
+    required this.width,
+    required this.label,
+    required this.value,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: width,
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.all(8),
+      decoration: _alertsBox(
+        context,
+        color: ccmx.CcmxVisualTokens.of(context).surfaceElevated,
+        radius: 11,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFFAAB3C5),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                color: color ?? Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ),
         ],
       ),
@@ -9439,6 +16649,54 @@ String _btcDominance(Map<String, CoinStats> stats, PortfolioTotals totals) {
   if (totals.currentValue <= 0) return '—';
   final double btcValue = stats['BTC']?.currentValue ?? 0;
   return pct((btcValue / totals.currentValue) * 100);
+}
+
+enum SummaryViewMode { executive, quick }
+
+extension SummaryViewModeDetails on SummaryViewMode {
+  String get label => switch (this) {
+    SummaryViewMode.executive => 'Ejecutivo',
+    SummaryViewMode.quick => 'Rápido',
+  };
+
+  IconData get icon => switch (this) {
+    SummaryViewMode.executive => Icons.space_dashboard_outlined,
+    SummaryViewMode.quick => Icons.grid_view_rounded,
+  };
+}
+
+SummaryViewMode summaryViewModeFromName(String? value) {
+  return SummaryViewMode.values.firstWhere(
+    (SummaryViewMode mode) => mode.name == value,
+    orElse: () => SummaryViewMode.executive,
+  );
+}
+
+enum SummaryChartType { line, area, lineMarkers, columns, candles }
+
+extension SummaryChartTypeDetails on SummaryChartType {
+  String get label => switch (this) {
+    SummaryChartType.line => 'Línea',
+    SummaryChartType.area => 'Área',
+    SummaryChartType.lineMarkers => 'Línea con marcadores',
+    SummaryChartType.columns => 'Columnas',
+    SummaryChartType.candles => 'Velas',
+  };
+
+  IconData get icon => switch (this) {
+    SummaryChartType.line => Icons.show_chart,
+    SummaryChartType.area => Icons.area_chart_outlined,
+    SummaryChartType.lineMarkers => Icons.scatter_plot_outlined,
+    SummaryChartType.columns => Icons.bar_chart_rounded,
+    SummaryChartType.candles => Icons.candlestick_chart_outlined,
+  };
+}
+
+SummaryChartType summaryChartTypeFromName(String? value) {
+  return SummaryChartType.values.firstWhere(
+    (SummaryChartType type) => type.name == value,
+    orElse: () => SummaryChartType.line,
+  );
 }
 
 enum SnapshotMetric {
@@ -9503,7 +16761,7 @@ extension SnapshotMetricDetails on SnapshotMetric {
       case SnapshotMetric.invested:
       case SnapshotMetric.unrealizedPnl:
       case SnapshotMetric.realizedPnl:
-        return money(value);
+        return _summaryMoney(value, decimals: 2);
     }
   }
 
@@ -9515,7 +16773,7 @@ extension SnapshotMetricDetails on SnapshotMetric {
       case SnapshotMetric.invested:
       case SnapshotMetric.unrealizedPnl:
       case SnapshotMetric.realizedPnl:
-        return moneyShort(value);
+        return _chartsAxisMoney(value);
     }
   }
 }
@@ -9527,10 +16785,78 @@ class SnapshotRangeOption {
   const SnapshotRangeOption(this.label, this.days);
 }
 
+String _chartsMoney(double value, {int decimals = 2}) =>
+    _summaryMoney(value, decimals: decimals);
+
+String _chartsSignedPercent(double value) =>
+    '${value >= 0 ? '+' : ''}${value.toStringAsFixed(2)}%';
+
+String _chartsAxisMoney(double value) {
+  final double absolute = value.abs();
+  if (absolute >= 1000000) {
+    return '${value < 0 ? '-' : ''}\$${(absolute / 1000000).toStringAsFixed(2)}M';
+  }
+  if (absolute >= 1000) {
+    return '${value < 0 ? '-' : ''}\$${(absolute / 1000).toStringAsFixed(1)}k';
+  }
+  return '${value < 0 ? '-' : ''}\$${absolute.toStringAsFixed(0)}';
+}
+
+BoxDecoration _chartsBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: <BoxShadow>[
+      BoxShadow(color: tokens.glowColor, blurRadius: 18, spreadRadius: -10),
+    ],
+  );
+}
+
+BoxDecoration _chartsTokenBox(
+  BuildContext context, {
+  Color? color,
+  double radius = 16,
+}) {
+  final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+  return BoxDecoration(
+    color: color ?? tokens.cardBackground,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
+    boxShadow: tokens.shadowOpacity == 0
+        ? null
+        : <BoxShadow>[
+            BoxShadow(
+              color: tokens.shadow.withValues(alpha: tokens.shadowOpacity),
+              blurRadius: 18,
+              offset: const Offset(0, 9),
+            ),
+          ],
+  );
+}
+
 class AnalyticsControlPanel extends StatefulWidget {
   final List<PortfolioSnapshot> snapshots;
+  final PortfolioTotals totals;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
+  final VoidCallback onSaveSnapshot;
+  final VoidCallback onViewSnapshots;
 
-  const AnalyticsControlPanel({super.key, required this.snapshots});
+  const AnalyticsControlPanel({
+    super.key,
+    required this.snapshots,
+    required this.totals,
+    required this.chartType,
+    required this.onChartTypeChanged,
+    required this.onSaveSnapshot,
+    required this.onViewSnapshots,
+  });
 
   @override
   State<AnalyticsControlPanel> createState() => _AnalyticsControlPanelState();
@@ -9566,19 +16892,19 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
   }
 
   Color _metricColor(BuildContext context, List<PortfolioSnapshot> filtered) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     switch (_metric) {
       case SnapshotMetric.portfolioValue:
-        return colors.primary;
+        return tokens.chartPrimary;
       case SnapshotMetric.invested:
-        return colors.tertiary;
+        return tokens.chartSecondary;
       case SnapshotMetric.unrealizedPnl:
         final double value = filtered.isEmpty
             ? 0
             : _metric.valueFor(filtered.last);
         return pnlColor(value);
       case SnapshotMetric.realizedPnl:
-        return colors.secondary;
+        return tokens.secondaryAccent;
       case SnapshotMetric.btcDominance:
         return const Color(0xFFF7931A);
     }
@@ -9588,119 +16914,1013 @@ class _AnalyticsControlPanelState extends State<AnalyticsControlPanel> {
   Widget build(BuildContext context) {
     final List<PortfolioSnapshot> filtered = _filteredSnapshots();
     final Color metricColor = _metricColor(context, filtered);
-    final double? latestValue = filtered.isEmpty
-        ? null
-        : _metric.valueFor(filtered.last);
-    final double? firstValue = filtered.isEmpty
-        ? null
-        : _metric.valueFor(filtered.first);
+    final List<double> values = filtered
+        .map((PortfolioSnapshot s) => _metric.valueFor(s))
+        .toList();
+    final double? latestValue = values.isEmpty ? null : values.last;
+    final double? firstValue = values.isEmpty ? null : values.first;
     final double? delta = latestValue == null || firstValue == null
         ? null
         : latestValue - firstValue;
+    final double? deltaPercent =
+        delta == null ||
+            firstValue == null ||
+            firstValue.abs() < 0.000001 ||
+            _metric == SnapshotMetric.btcDominance
+        ? null
+        : (delta / firstValue) * 100;
+    final List<PortfolioSnapshot> allSnapshots = widget.snapshots.toList()
+      ..sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            a.createdAt.compareTo(b.createdAt),
+      );
+    final PortfolioSnapshot? latestSnapshot = allSnapshots.isEmpty
+        ? null
+        : allSnapshots.last;
+    final double? portfolioChange = filtered.length < 2
+        ? null
+        : filtered.last.totalCurrentValue - filtered.first.totalCurrentValue;
+    final double? portfolioChangePercent =
+        portfolioChange == null ||
+            filtered.first.totalCurrentValue.abs() < 0.000001
+        ? null
+        : (portfolioChange / filtered.first.totalCurrentValue) * 100;
 
-    return CardPanel(
-      title: 'Evolución histórica',
-      subtitle:
-          'Filtra instantáneas por rango y elige la métrica que quieres leer.',
-      child: Column(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _ChartsPortfolioHero(
+          currentValue: widget.totals.currentValue,
+          periodChange: portfolioChange,
+          periodChangePercent: portfolioChangePercent,
+          latestSnapshot: latestSnapshot,
+          snapshotCount: allSnapshots.length,
+        ),
+        const SizedBox(height: 14),
+        _ChartsSectionPanel(
+          title: 'Serie principal',
+          subtitle: 'Selecciona el periodo, la métrica y la lectura visual.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _ChartsRangeSelector(
+                ranges: _ranges,
+                selected: _range,
+                onSelected: (SnapshotRangeOption range) =>
+                    setState(() => _range = range),
+              ),
+              const SizedBox(height: 12),
+              LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final Widget chartTypeButton = _SummaryChartTypeButton(
+                    value: widget.chartType,
+                    onChanged: widget.onChartTypeChanged,
+                  );
+                  final Widget metricSelector = _ChartsMetricSelector(
+                    value: _metric,
+                    onChanged: (SnapshotMetric value) =>
+                        setState(() => _metric = value),
+                  );
+                  if (constraints.maxWidth < 430) {
+                    return Column(
+                      children: <Widget>[
+                        SizedBox(
+                          width: double.infinity,
+                          child: chartTypeButton,
+                        ),
+                        const SizedBox(height: 10),
+                        metricSelector,
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: <Widget>[
+                      Expanded(child: chartTypeButton),
+                      const SizedBox(width: 10),
+                      Expanded(child: metricSelector),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              if (filtered.isEmpty)
+                _ChartsDataState(
+                  icon: Icons.timeline_outlined,
+                  title: allSnapshots.isEmpty
+                      ? 'Aún no hay evolución disponible'
+                      : 'Sin datos para este periodo',
+                  subtitle: allSnapshots.isEmpty
+                      ? 'Guarda snapshots para construir el historial de tu cartera.'
+                      : 'Prueba otro rango o espera nuevos snapshots.',
+                  actions: allSnapshots.isEmpty
+                      ? Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: <Widget>[
+                            FilledButton.icon(
+                              onPressed: widget.onSaveSnapshot,
+                              icon: const Icon(Icons.add_a_photo_outlined),
+                              label: const Text('Guardar instantánea'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: widget.onViewSnapshots,
+                              icon: const Icon(Icons.folder_open_outlined),
+                              label: const Text('Ver instantáneas'),
+                            ),
+                          ],
+                        )
+                      : null,
+                )
+              else if (filtered.length == 1)
+                _ChartsDataState(
+                  icon: Icons.addchart_outlined,
+                  title: 'Se necesita otro snapshot',
+                  subtitle:
+                      'Con dos registros podrás visualizar la evolución de la cartera.',
+                  detail:
+                      '${longDate(filtered.single.createdAt)} · ${_metric.format(values.single)}',
+                )
+              else ...<Widget>[
+                _PortfolioInteractiveChart(
+                  snapshots: filtered,
+                  values: values,
+                  metric: _metric,
+                  color: metricColor,
+                  chartType: widget.chartType,
+                ),
+                const SizedBox(height: 12),
+                ChartLegendDot(label: _metric.label, color: metricColor),
+                const SizedBox(height: 14),
+                _ChartsReadoutGrid(
+                  metric: _metric,
+                  first: firstValue!,
+                  latest: latestValue!,
+                  minimum: values.reduce(math.min),
+                  maximum: values.reduce(math.max),
+                  change: delta!,
+                  changePercent: deltaPercent,
+                  snapshotCount: filtered.length,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChartsPageHeader extends StatelessWidget {
+  const _ChartsPageHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 4, 2, 16),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _ranges.map((SnapshotRangeOption range) {
-              return ChoiceChip(
-                selected: _range == range,
-                label: Text(range.label),
-                onSelected: (_) => setState(() => _range = range),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<SnapshotMetric>(
-            value: _metric,
-            decoration: const InputDecoration(
-              labelText: 'Métrica a mostrar',
-              border: OutlineInputBorder(),
-            ),
-            items: SnapshotMetric.values
-                .map(
-                  (SnapshotMetric metric) => DropdownMenuItem<SnapshotMetric>(
-                    value: metric,
-                    child: Text(metric.label),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Evolución de cartera',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                    color: colors.onSurface,
                   ),
-                )
-                .toList(),
-            onChanged: (SnapshotMetric? value) {
-              if (value != null) setState(() => _metric = value);
-            },
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Lectura histórica',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'La línea aparece con 2 o más instantáneas.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          if (filtered.length < 2)
-            EmptyState(
-              icon: Icons.show_chart_outlined,
-              title: filtered.isEmpty
-                  ? 'Sin instantáneas en este rango'
-                  : 'Solo hay un punto en este rango',
-              subtitle: filtered.isEmpty
-                  ? 'Guarda al menos dos instantáneas para dibujar una línea histórica.'
-                  : 'Con una sola instantánea solo verás una lectura; agrega otra para trazar la tendencia.',
-            )
-          else ...<Widget>[
-            SnapshotLineChart(
-              snapshots: filtered,
-              height: 240,
-              includeZero: _metric != SnapshotMetric.btcDominance,
-              series: <SnapshotChartSeries>[
-                SnapshotChartSeries(
-                  label: _metric.label,
-                  color: metricColor,
-                  values: filtered
-                      .map((PortfolioSnapshot s) => _metric.valueFor(s))
-                      .toList(),
-                  valueFormatter: (double value) => _metric.shortFormat(value),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Historial, rendimiento y composición de tus posiciones',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            ChartLegendDot(label: _metric.label, color: metricColor),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: <Widget>[
-              MiniMetric(
-                label: 'Último dato',
-                value: latestValue == null ? '—' : _metric.format(latestValue),
-                color:
-                    _metric == SnapshotMetric.unrealizedPnl &&
-                        latestValue != null
-                    ? pnlColor(latestValue)
-                    : null,
-              ),
-              MiniMetric(
-                label: 'Cambio del periodo',
-                value: delta == null ? '—' : _metric.format(delta),
-                color: delta == null ? null : pnlColor(delta),
-              ),
-              MiniMetric(
-                label: 'Instantáneas filtradas',
-                value: filtered.length.toString(),
-              ),
-            ],
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: tokens.primaryAccent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: tokens.selectedBorder),
+            ),
+            child: Icon(Icons.insights_rounded, color: tokens.primaryAccent),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ChartsPortfolioHero extends StatelessWidget {
+  final double currentValue;
+  final double? periodChange;
+  final double? periodChangePercent;
+  final PortfolioSnapshot? latestSnapshot;
+  final int snapshotCount;
+
+  const _ChartsPortfolioHero({
+    required this.currentValue,
+    required this.periodChange,
+    required this.periodChangePercent,
+    required this.latestSnapshot,
+    required this.snapshotCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color changeColor = pnlColor(periodChange ?? 0);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String changeLabel = periodChange == null
+        ? 'Sin comparación de periodo'
+        : '${_chartsMoney(periodChange!)}${periodChangePercent == null ? '' : ' · ${_chartsSignedPercent(periodChangePercent!)}'}';
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 310),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: tokens.selectedBorder),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[tokens.gradientStart, tokens.surfaceElevated],
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'VALOR DE CARTERA',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _chartsMoney(currentValue),
+                        style: TextStyle(
+                          color: colors.onSurface,
+                          fontSize: 29,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Cambio del periodo',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFFAAB3C5),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      changeLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: periodChange == null
+                            ? const Color(0xFFAAB3C5)
+                            : changeColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 13),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 5,
+                      children: <Widget>[
+                        _ChartsHeroMeta(
+                          icon: Icons.schedule_outlined,
+                          label: latestSnapshot == null
+                              ? 'Sin instantánea'
+                              : longDate(latestSnapshot!.createdAt),
+                        ),
+                        _ChartsHeroMeta(
+                          icon: Icons.photo_library_outlined,
+                          label:
+                              '$snapshotCount ${snapshotCount == 1 ? 'snapshot' : 'snapshots'}',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                width: 48,
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: tokens.primaryAccent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: tokens.primaryAccent,
+                  size: 23,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ChartsHeroMeta extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _ChartsHeroMeta({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: 14, color: muted),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(color: muted, fontSize: 13)),
+      ],
+    );
+  }
+}
+
+class _ChartsSectionPanel extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  const _ChartsSectionPanel({
+    required this.title,
+    required this.child,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: _chartsTokenBox(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (subtitle != null) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(
+              subtitle!,
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 14,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ChartsRangeSelector extends StatelessWidget {
+  final List<SnapshotRangeOption> ranges;
+  final SnapshotRangeOption selected;
+  final ValueChanged<SnapshotRangeOption> onSelected;
+
+  const _ChartsRangeSelector({
+    required this.ranges,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 6;
+        final double itemWidth =
+            (constraints.maxWidth - gap * (ranges.length - 1)) / ranges.length;
+        return Row(
+          children: ranges.map((SnapshotRangeOption range) {
+            final bool isSelected = range == selected;
+            return Padding(
+              padding: EdgeInsets.only(right: range == ranges.last ? 0 : gap),
+              child: SizedBox(
+                width: itemWidth,
+                height: 46,
+                child: Semantics(
+                  button: true,
+                  selected: isSelected,
+                  label: 'Periodo ${range.label}',
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => onSelected(range),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? tokens.selectedBackground
+                              : tokens.surfaceElevated,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected
+                                ? tokens.selectedBorder
+                                : tokens.cardBorder,
+                          ),
+                        ),
+                        child: Text(
+                          range.label,
+                          style: TextStyle(
+                            color: isSelected
+                                ? Colors.white
+                                : const Color(0xFFC0C9D8),
+                            fontSize: 15,
+                            fontWeight: isSelected
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ChartsMetricSelector extends StatelessWidget {
+  final SnapshotMetric value;
+  final ValueChanged<SnapshotMetric> onChanged;
+
+  const _ChartsMetricSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: tokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<SnapshotMetric>(
+          value: value,
+          isExpanded: true,
+          icon: Icon(Icons.expand_more, color: tokens.primaryAccent),
+          dropdownColor: tokens.menuBackground,
+          style: TextStyle(
+            color: colors.onSurface,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+          items: SnapshotMetric.values
+              .map(
+                (SnapshotMetric metric) => DropdownMenuItem<SnapshotMetric>(
+                  value: metric,
+                  child: Text(metric.label),
+                ),
+              )
+              .toList(),
+          onChanged: (SnapshotMetric? metric) {
+            if (metric != null) onChanged(metric);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ChartsDataState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? detail;
+  final Widget? actions;
+
+  const _ChartsDataState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.detail,
+    this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: _chartsTokenBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 14,
+      ),
+      child: Column(
+        children: <Widget>[
+          Icon(icon, color: tokens.primaryAccent, size: 30),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 14),
+          ),
+          if (detail != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              detail!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFE2E8F0),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (actions != null) ...<Widget>[
+            const SizedBox(height: 16),
+            actions!,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ChartsReadoutGrid extends StatelessWidget {
+  final SnapshotMetric metric;
+  final double first;
+  final double latest;
+  final double minimum;
+  final double maximum;
+  final double change;
+  final double? changePercent;
+  final int snapshotCount;
+
+  const _ChartsReadoutGrid({
+    required this.metric,
+    required this.first,
+    required this.latest,
+    required this.minimum,
+    required this.maximum,
+    required this.change,
+    required this.changePercent,
+    required this.snapshotCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 10;
+        final double itemWidth = (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: <Widget>[
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Inicial',
+              value: metric.format(first),
+            ),
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Actual',
+              value: metric.format(latest),
+              valueColor: metric == SnapshotMetric.unrealizedPnl
+                  ? pnlColor(latest)
+                  : null,
+            ),
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Máximo',
+              value: metric.format(maximum),
+            ),
+            _ChartsReadoutTile(
+              width: itemWidth,
+              label: 'Mínimo',
+              value: metric.format(minimum),
+            ),
+            _ChartsReadoutTile(
+              width: constraints.maxWidth,
+              label:
+                  'Cambio · $snapshotCount ${snapshotCount == 1 ? 'snapshot' : 'snapshots'}',
+              value:
+                  '${metric.format(change)}${changePercent == null ? '' : ' · ${_chartsSignedPercent(changePercent!)}'}',
+              valueColor: pnlColor(change),
+              wide: true,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ChartsReadoutTile extends StatelessWidget {
+  final double width;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool wide;
+
+  const _ChartsReadoutTile({
+    required this.width,
+    required this.label,
+    required this.value,
+    this.valueColor,
+    this.wide = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(minHeight: 76),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: _chartsTokenBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xFFAAB3C5), fontSize: 13),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.white,
+                fontSize: wide ? 17 : 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PortfolioInteractiveChart extends StatefulWidget {
+  final List<PortfolioSnapshot> snapshots;
+  final List<double> values;
+  final SnapshotMetric metric;
+  final Color color;
+  final SummaryChartType chartType;
+
+  const _PortfolioInteractiveChart({
+    required this.snapshots,
+    required this.values,
+    required this.metric,
+    required this.color,
+    required this.chartType,
+  });
+
+  @override
+  State<_PortfolioInteractiveChart> createState() =>
+      _PortfolioInteractiveChartState();
+}
+
+class _PortfolioInteractiveChartState
+    extends State<_PortfolioInteractiveChart> {
+  int? _selectedIndex;
+  Timer? _dismissTimer;
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PortfolioInteractiveChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedIndex != null && _selectedIndex! >= widget.snapshots.length) {
+      _selectedIndex = null;
+    }
+  }
+
+  void _select(Offset localPosition, double width) {
+    _dismissTimer?.cancel();
+    final double usableWidth = math.max(1, width - 74);
+    final double normalized = ((localPosition.dx - 54) / usableWidth).clamp(
+      0.0,
+      1.0,
+    );
+    final int index = (normalized * (widget.snapshots.length - 1)).round();
+    if (index != _selectedIndex) setState(() => _selectedIndex = index);
+  }
+
+  void _dismissSelectionSoon() {
+    _dismissTimer?.cancel();
+    _dismissTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _selectedIndex = null);
+    });
+  }
+
+  void _dismissSelection() {
+    _dismissTimer?.cancel();
+    if (_selectedIndex != null) setState(() => _selectedIndex = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth;
+        final double height = (width * 1.04).clamp(355.0, 380.0);
+        final int? selectedIndex = _selectedIndex;
+        final double tooltipWidth = math.min(210, math.max(156, width - 20));
+        final double selectedX = selectedIndex == null
+            ? 0
+            : 54 +
+                  math.max(1, width - 74) *
+                      selectedIndex /
+                      (widget.snapshots.length - 1);
+        final double tooltipLeft = selectedIndex == null
+            ? 0
+            : (selectedX - tooltipWidth / 2).clamp(
+                8.0,
+                math.max(8.0, width - tooltipWidth - 8),
+              );
+
+        return SizedBox(
+          height: height,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (TapDownDetails details) =>
+                _select(details.localPosition, width),
+            onTapUp: (_) => _dismissSelectionSoon(),
+            onTapCancel: _dismissSelection,
+            onHorizontalDragStart: (_) => _dismissTimer?.cancel(),
+            onHorizontalDragUpdate: (DragUpdateDetails details) =>
+                _select(details.localPosition, width),
+            onHorizontalDragEnd: (_) => _dismissSelectionSoon(),
+            onHorizontalDragCancel: _dismissSelection,
+            child: Stack(
+              children: <Widget>[
+                SnapshotLineChart(
+                  snapshots: widget.snapshots,
+                  height: height,
+                  includeZero: widget.metric != SnapshotMetric.btcDominance,
+                  chartType: widget.chartType,
+                  series: <SnapshotChartSeries>[
+                    SnapshotChartSeries(
+                      label: widget.metric.label,
+                      color: widget.color,
+                      values: widget.values,
+                      valueFormatter: widget.metric.shortFormat,
+                    ),
+                  ],
+                ),
+                if (selectedIndex != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _ChartsSelectionPainter(
+                          index: selectedIndex,
+                          pointCount: widget.snapshots.length,
+                          chartType: widget.chartType,
+                          color: ccmx.CcmxVisualTokens.of(context).chartPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (selectedIndex != null)
+                  Positioned(
+                    top: 10,
+                    left: tooltipLeft,
+                    width: tooltipWidth,
+                    child: _ChartsPointTooltip(
+                      snapshot: widget.snapshots[selectedIndex],
+                      value: widget.values[selectedIndex],
+                      previousValue: selectedIndex > 0
+                          ? widget.values[selectedIndex - 1]
+                          : null,
+                      metric: widget.metric,
+                      color: widget.color,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ChartsSelectionPainter extends CustomPainter {
+  final int index;
+  final int pointCount;
+  final SummaryChartType chartType;
+  final Color color;
+
+  const _ChartsSelectionPainter({
+    required this.index,
+    required this.pointCount,
+    required this.chartType,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double x = pointCount == 1
+        ? size.width / 2
+        : 54 + (size.width - 74) * index / (pointCount - 1);
+    final Paint paint = Paint()
+      ..color = color.withValues(alpha: 0.7)
+      ..strokeWidth = 1.2;
+    if (chartType == SummaryChartType.columns) {
+      final double slotWidth = (size.width - 74) / pointCount;
+      final Rect highlight = Rect.fromLTWH(
+        x - slotWidth / 2,
+        12,
+        slotWidth,
+        size.height - 42,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(highlight, const Radius.circular(4)),
+        Paint()..color = color.withValues(alpha: 0.10),
+      );
+    }
+    const double dash = 5;
+    for (double y = 12; y < size.height - 30; y += dash * 2) {
+      canvas.drawLine(Offset(x, y), Offset(x, y + dash), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ChartsSelectionPainter oldDelegate) {
+    return oldDelegate.index != index ||
+        oldDelegate.pointCount != pointCount ||
+        oldDelegate.chartType != chartType ||
+        oldDelegate.color != color;
+  }
+}
+
+class _ChartsPointTooltip extends StatelessWidget {
+  final PortfolioSnapshot snapshot;
+  final double value;
+  final double? previousValue;
+  final SnapshotMetric metric;
+  final Color color;
+
+  const _ChartsPointTooltip({
+    required this.snapshot,
+    required this.value,
+    required this.previousValue,
+    required this.metric,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final double? variation = previousValue == null
+        ? null
+        : value - previousValue!;
+    final String seriesLabel = metric == SnapshotMetric.portfolioValue
+        ? 'Cartera total'
+        : metric.label;
+    return Semantics(
+      label: '${longDate(snapshot.createdAt)}, ${metric.format(value)}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0B1220).withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: tokens.chartPrimary.withValues(alpha: 0.6)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              longDate(snapshot.createdAt),
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              seriesLabel,
+              style: TextStyle(
+                color: tokens.chartPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                metric.format(value),
+                style: TextStyle(
+                  color: color,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            if (variation != null) ...<Widget>[
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Variación: ${metric.format(variation)}',
+                  style: TextStyle(
+                    color: pnlColor(variation),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -9710,6 +17930,8 @@ class ChartsTab extends StatelessWidget {
   final Map<String, CoinStats> stats;
   final PortfolioTotals totals;
   final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
+  final ValueChanged<SummaryChartType> onChartTypeChanged;
   final VoidCallback onSaveSnapshot;
   final VoidCallback onViewSnapshots;
 
@@ -9718,6 +17940,8 @@ class ChartsTab extends StatelessWidget {
     required this.stats,
     required this.totals,
     required this.snapshots,
+    required this.chartType,
+    required this.onChartTypeChanged,
     required this.onSaveSnapshot,
     required this.onViewSnapshots,
   });
@@ -9731,54 +17955,32 @@ class ChartsTab extends StatelessWidget {
         );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
       children: <Widget>[
-        Text(
-          'Gráficas premium',
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        const _ChartsPageHeader(),
+        AnalyticsControlPanel(
+          snapshots: snapshots,
+          totals: totals,
+          chartType: chartType,
+          onChartTypeChanged: onChartTypeChanged,
+          onSaveSnapshot: onSaveSnapshot,
+          onViewSnapshots: onViewSnapshots,
         ),
-        const SizedBox(height: 6),
-        const Text(
-          'Vista histórica sobre instantáneas guardadas. Ajusta rango y métrica para leer una serie a la vez.',
+        const SizedBox(height: 14),
+        _ChartsSectionPanel(
+          title: 'Lectura actual',
+          subtitle:
+              'Cifras vigentes de la cartera para contextualizar el histórico.',
+          child: _ChartsCurrentMetrics(stats: stats, totals: totals),
         ),
-        const SizedBox(height: 16),
-        AnalyticsControlPanel(snapshots: snapshots),
-        const SizedBox(height: 12),
-        _CommandSection(
-          title: 'Indicadores',
-          children: <Widget>[
-            PremiumMetricCard(
-              label: 'Valor de cartera',
-              value: moneyShort(totals.currentValue),
-              icon: Icons.account_balance_wallet_outlined,
-            ),
-            PremiumMetricCard(
-              label: 'Invertido',
-              value: moneyShort(totals.costBase),
-              icon: Icons.savings_outlined,
-            ),
-            PremiumMetricCard(
-              label: 'P&L no realizado',
-              value: moneyShort(totals.unrealizedPL),
-              icon: Icons.trending_up,
-              color: pnlColor(totals.unrealizedPL),
-            ),
-            PremiumMetricCard(
-              label: 'Dominancia BTC',
-              value: _btcDominance(stats, totals),
-              icon: Icons.currency_bitcoin,
-            ),
-          ],
-        ),
-        CardPanel(
-          title: 'Distribución actual',
+        const SizedBox(height: 14),
+        _ChartsSectionPanel(
+          title: 'Composición actual',
           subtitle: totals.currentValue <= 0
               ? 'Sin valor cargado para graficar.'
-              : 'Valor total: ${money(totals.currentValue)}',
+              : 'Valor total: ${_chartsMoney(totals.currentValue)}',
           child: active.isEmpty
-              ? const EmptyState(
+              ? const _ChartsDataState(
                   icon: Icons.pie_chart_outline,
                   title: 'Sin valor de cartera para graficar',
                   subtitle:
@@ -9786,71 +17988,188 @@ class ChartsTab extends StatelessWidget {
                       'lectura visual premium.',
                 )
               : Column(
-                  children: active.map((CoinStats stat) {
-                    final double share = totals.currentValue <= 0
-                        ? 0.0
-                        : stat.currentValue / totals.currentValue;
-                    return AllocationBar(
-                      label: stat.coin,
-                      value: money(stat.currentValue),
-                      share: share,
-                      result: stat.unrealizedPL,
-                    );
-                  }).toList(),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    ...active.map((CoinStats stat) {
+                      final double share = totals.currentValue <= 0
+                          ? 0.0
+                          : stat.currentValue / totals.currentValue;
+                      return AllocationBar(
+                        label: stat.coin,
+                        value: _chartsMoney(stat.currentValue),
+                        share: share,
+                        result: stat.unrealizedPL,
+                      );
+                    }),
+                    const Divider(height: 26, color: Color(0x20FFFFFF)),
+                    const Text(
+                      'Resultado no realizado por moneda',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...active.map((CoinStats stat) {
+                      final double maxAbs = active.fold<double>(
+                        1,
+                        (double maxValue, CoinStats item) =>
+                            math.max(maxValue, item.unrealizedPL.abs()),
+                      );
+                      return ResultBar(
+                        label: stat.coin,
+                        amount: stat.unrealizedPL,
+                        intensity: stat.unrealizedPL.abs() / maxAbs,
+                      );
+                    }),
+                  ],
                 ),
         ),
-        CardPanel(
-          title: 'P&L no realizado por moneda',
-          subtitle: 'Barras semánticas: ganancias verdes, pérdidas rojas.',
-          child: active.isEmpty
-              ? const Text('Sin valor de posiciones para graficar.')
-              : Column(
-                  children: active.map((CoinStats stat) {
-                    final double maxAbs = active.fold<double>(
-                      1,
-                      (double maxValue, CoinStats item) =>
-                          math.max(maxValue, item.unrealizedPL.abs()),
-                    );
-                    return ResultBar(
-                      label: stat.coin,
-                      amount: stat.unrealizedPL,
-                      intensity: stat.unrealizedPL.abs() / maxAbs,
-                    );
-                  }).toList(),
-                ),
-        ),
-        if (snapshots.isEmpty)
-          CardPanel(
-            title: 'Histórico de instantáneas',
-            subtitle:
-                'Aún no hay instantáneas guardadas. Crea una manual para comenzar el histórico.',
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                FilledButton.tonalIcon(
-                  onPressed: onSaveSnapshot,
-                  icon: const Icon(Icons.add_a_photo_outlined),
-                  label: const Text('Guardar instantánea'),
-                ),
-                FilledButton.tonal(
-                  onPressed: onViewSnapshots,
-                  child: const Text('Ver instantáneas'),
-                ),
-              ],
+        if (snapshots.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 14),
+          const Padding(
+            padding: EdgeInsets.only(left: 2, bottom: 8),
+            child: Text(
+              'Comparativas históricas',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          )
-        else ...<Widget>[
-          SnapshotTrendPanel(snapshots: snapshots),
+          ),
+          SnapshotTrendPanel(snapshots: snapshots, chartType: chartType),
           Align(
             alignment: Alignment.centerRight,
-            child: FilledButton.tonal(
+            child: OutlinedButton.icon(
               onPressed: onViewSnapshots,
-              child: const Text('Administrar instantáneas'),
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('Administrar instantáneas'),
             ),
           ),
         ],
       ],
+    );
+  }
+}
+
+class _ChartsCurrentMetrics extends StatelessWidget {
+  final Map<String, CoinStats> stats;
+  final PortfolioTotals totals;
+
+  const _ChartsCurrentMetrics({required this.stats, required this.totals});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_ChartsCurrentMetric> metrics = <_ChartsCurrentMetric>[
+      _ChartsCurrentMetric(
+        label: 'Valor de cartera',
+        value: _chartsMoney(totals.currentValue),
+        icon: Icons.account_balance_wallet_outlined,
+      ),
+      _ChartsCurrentMetric(
+        label: 'Invertido',
+        value: _chartsMoney(totals.costBase),
+        icon: Icons.savings_outlined,
+      ),
+      _ChartsCurrentMetric(
+        label: 'P&L no realizado',
+        value: _chartsMoney(totals.unrealizedPL),
+        icon: Icons.trending_up,
+        color: pnlColor(totals.unrealizedPL),
+      ),
+      _ChartsCurrentMetric(
+        label: 'Dominancia BTC',
+        value: _btcDominance(stats, totals),
+        icon: Icons.currency_bitcoin,
+        color: const Color(0xFFF59E0B),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double gap = 10;
+        final double width = (constraints.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: metrics
+              .map(
+                (_ChartsCurrentMetric metric) =>
+                    _ChartsCurrentMetricTile(metric: metric, width: width),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ChartsCurrentMetric {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color? color;
+
+  const _ChartsCurrentMetric({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.color,
+  });
+}
+
+class _ChartsCurrentMetricTile extends StatelessWidget {
+  final _ChartsCurrentMetric metric;
+  final double width;
+
+  const _ChartsCurrentMetricTile({required this.metric, required this.width});
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color valueColor = metric.color ?? colors.onSurface;
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(minHeight: 88),
+      padding: const EdgeInsets.all(12),
+      decoration: _chartsBox(
+        context,
+        color: tokens.surfaceElevated,
+        radius: 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Icon(
+            metric.icon,
+            size: 18,
+            color: metric.color ?? tokens.chartPrimary,
+          ),
+          const SizedBox(height: 7),
+          Text(
+            metric.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              metric.value,
+              style: TextStyle(
+                color: valueColor,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -9941,7 +18260,7 @@ class ResultBar extends StatelessWidget {
           SizedBox(
             width: 104,
             child: Text(
-              money(amount),
+              _chartsMoney(amount),
               textAlign: TextAlign.right,
               style: TextStyle(
                 color: pnlColor(amount),
@@ -10127,7 +18446,7 @@ class _FinancialResetScreenState extends State<_FinancialResetScreen> {
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
                       labelText: 'Escribe RESTABLECER',
-                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.warning_amber_rounded),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -10212,6 +18531,11 @@ class MoreTab extends StatelessWidget {
   final DateTime? cloudStateUploadedAt;
   final DateTime? cloudStateDownloadedAt;
   final String? googleAccountEmail;
+  final String? googleAccountDisplayName;
+  final DateTime? googleDriveLastConnectedAt;
+  final bool googleDriveWasConnected;
+  final GoogleDriveSessionStatus googleDriveSessionStatus;
+  final bool isGoogleDriveAuthorized;
   final DateTime? googleDriveBackupUpdatedAt;
   final bool isFirebaseAuthBusy;
   final bool isCloudUploading;
@@ -10246,6 +18570,7 @@ class MoreTab extends StatelessWidget {
   final VoidCallback onUploadFinancialStateToFirebase;
   final VoidCallback onDownloadFinancialStateFromFirebase;
   final VoidCallback onConnectGoogleDrive;
+  final VoidCallback onReconnectGoogleDrive;
   final VoidCallback onDisconnectGoogleDrive;
   final VoidCallback onCreateGoogleDriveBackup;
   final VoidCallback onRestoreGoogleDriveBackup;
@@ -10294,6 +18619,11 @@ class MoreTab extends StatelessWidget {
     required this.cloudStateUploadedAt,
     required this.cloudStateDownloadedAt,
     required this.googleAccountEmail,
+    required this.googleAccountDisplayName,
+    required this.googleDriveLastConnectedAt,
+    required this.googleDriveWasConnected,
+    required this.googleDriveSessionStatus,
+    required this.isGoogleDriveAuthorized,
     required this.googleDriveBackupUpdatedAt,
     required this.isFirebaseAuthBusy,
     required this.isCloudUploading,
@@ -10328,6 +18658,7 @@ class MoreTab extends StatelessWidget {
     required this.onUploadFinancialStateToFirebase,
     required this.onDownloadFinancialStateFromFirebase,
     required this.onConnectGoogleDrive,
+    required this.onReconnectGoogleDrive,
     required this.onDisconnectGoogleDrive,
     required this.onCreateGoogleDriveBackup,
     required this.onRestoreGoogleDriveBackup,
@@ -10354,9 +18685,49 @@ class MoreTab extends StatelessWidget {
   String get cloudStateDownloadLabel => cloudStateDownloadedAt == null
       ? 'Sin descargar'
       : longDate(cloudStateDownloadedAt!);
-  bool get googleDriveConnected => googleAccountEmail != null;
+  String get googleDriveAccountLabel =>
+      googleAccountEmail ?? googleAccountDisplayName ?? 'cuenta Google';
+  String get googleDriveLastConnectionLabel =>
+      googleDriveLastConnectedAt == null
+      ? 'sin fecha local'
+      : longDate(googleDriveLastConnectedAt!.toLocal());
+  String get googleDriveAccountStatusLabel => googleDriveLastConnectedAt == null
+      ? 'Cuenta: $googleDriveAccountLabel - Drive activo'
+      : 'Cuenta: $googleDriveAccountLabel - Ultima conexion: $googleDriveLastConnectionLabel';
+  bool get googleDriveHasKnownAccount =>
+      googleDriveWasConnected || googleAccountEmail != null;
+  bool get googleDriveVisuallyConnected =>
+      googleDriveHasKnownAccount &&
+      googleDriveSessionStatus != GoogleDriveSessionStatus.accountDisconnected;
+  bool get googleDriveVerificationPending =>
+      googleDriveSessionStatus ==
+      GoogleDriveSessionStatus.localPendingVerification;
+  bool get googleDriveVerificationFailed =>
+      googleDriveSessionStatus == GoogleDriveSessionStatus.temporaryError;
+  bool get googleDriveActionRequiresVerification =>
+      googleDriveVerificationPending || googleDriveVerificationFailed;
+  bool get googleDriveConnected =>
+      googleDriveHasKnownAccount &&
+      (googleDriveSessionStatus == GoogleDriveSessionStatus.accountConnected ||
+          googleDriveSessionStatus ==
+              GoogleDriveSessionStatus.driveAuthorized ||
+          googleDriveSessionStatus ==
+              GoogleDriveSessionStatus.driveAuthorizationRequired);
+  bool get googleDriveLocalPending =>
+      googleDriveSessionStatus ==
+      GoogleDriveSessionStatus.localPendingVerification;
+  bool get googleDriveSessionChecking =>
+      googleDriveSessionStatus == GoogleDriveSessionStatus.accountChecking;
+  bool get googleDriveAuthRequired =>
+      googleDriveSessionStatus ==
+      GoogleDriveSessionStatus.driveAuthorizationRequired;
+  bool get googleDriveTemporaryError =>
+      googleDriveSessionStatus == GoogleDriveSessionStatus.temporaryError;
   bool get googleDriveBusy =>
-      isGoogleConnecting || isGoogleDriveCreating || isGoogleDriveRestoring;
+      googleDriveSessionChecking ||
+      isGoogleConnecting ||
+      isGoogleDriveCreating ||
+      isGoogleDriveRestoring;
   String get googleDriveBackupLabel => googleDriveBackupUpdatedAt == null
       ? 'Sin copia en Drive'
       : longDate(googleDriveBackupUpdatedAt!.toLocal());
@@ -10366,28 +18737,28 @@ class MoreTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color semanticPnl = pnlColor(totals.unrealizedPL);
-
     return PremiumScaffoldSurface(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: <Widget>[
           _CommandCenterHeader(
-            totals: totals,
-            pnlColor: semanticPnl,
             pricesUpdatedAt: pricesUpdatedAt,
             priceSource: _priceSource,
+            googleDriveConnected: googleDriveVisuallyConnected,
+            googleDriveBackupUpdatedAt: googleDriveBackupUpdatedAt,
+            visualMode: visualMode,
+            themeStyle: themeStyle,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           _CommandSection(
-            title: 'Cuenta / nube',
+            title: 'CUENTA Y NUBE',
             children: <Widget>[
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.account_circle_outlined,
                 title: 'Cuenta en la nube',
                 subtitle: firebaseAuthConnected
-                    ? 'Conectado: $firebaseAuthAccountLabel · Perfil cloud: $cloudProfileStatus'
-                    : 'Conecta Google para habilitar acciones manuales de nube.',
+                    ? '$firebaseAuthAccountLabel · Perfil $cloudProfileStatus'
+                    : 'Google opcional para nube manual.',
                 badge: firebaseAuthConnected ? 'Conectado' : 'Sin cuenta',
                 loading:
                     isFirebaseAuthBusy ||
@@ -10399,44 +18770,66 @@ class MoreTab extends StatelessWidget {
             ],
           ),
           _CommandSection(
-            title: 'Google Drive backup',
+            title: 'DATOS Y RESPALDOS',
             children: <Widget>[
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.cloud_done_outlined,
-                title: 'Google Drive',
-                subtitle: isGoogleConnecting
-                    ? 'Verificando autorización de Google Drive...'
+                title: googleDriveVisuallyConnected
+                    ? 'Google Drive conectado'
+                    : 'Google Drive no conectado',
+                subtitle: googleDriveSessionChecking
+                    ? googleDriveHasKnownAccount
+                          ? 'Restaurando Google Drive... Cuenta anterior: $googleDriveAccountLabel'
+                          : 'Comprobando sesion de Google Drive...'
+                    : googleDriveLocalPending
+                    ? googleDriveAccountStatusLabel
+                    : googleDriveAuthRequired
+                    ? 'Cuenta: $googleDriveAccountLabel - Falta autorizar Drive.'
+                    : googleDriveTemporaryError
+                    ? googleDriveHasKnownAccount
+                          ? 'Cuenta: $googleDriveAccountLabel - No se pudo verificar ahora; conexion local conservada.'
+                          : 'No se pudo comprobar la sesion. Reintenta al usar Drive.'
+                    : isGoogleDriveAuthorized
+                    ? '$googleDriveAccountLabel - $googleDriveBackupLabel'
                     : googleDriveConnected
-                    ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Última copia: $googleDriveBackupLabel'
-                    : 'Conecta Google Drive para crear y restaurar copias.',
-                badge: isGoogleConnecting
-                    ? 'Verificando'
-                    : googleDriveConnected
+                    ? '$googleDriveAccountLabel - Falta autorizar Drive'
+                    : 'Crea y restaura copias manuales.',
+                badge: googleDriveSessionChecking
+                    ? googleDriveHasKnownAccount
+                          ? 'Restaurando'
+                          : 'Comprobando'
+                    : isGoogleDriveAuthorized
                     ? 'Conectado'
+                    : googleDriveLocalPending
+                    ? 'Conectado'
+                    : googleDriveConnected || googleDriveAuthRequired
+                    ? 'Autorizar'
+                    : googleDriveTemporaryError
+                    ? googleDriveHasKnownAccount
+                          ? 'Conectado'
+                          : 'Revisar'
                     : 'Sin conectar',
                 loading: googleDriveBusy,
                 onTap: () => _showGoogleDriveActions(context),
               ),
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.backup_outlined,
                 title: 'Copia local',
-                subtitle:
-                    'Exporta movimientos, precios, comisión y snapshots antes de restaurar o restablecer.',
+                subtitle: 'Backup local de movimientos, precios y snapshots.',
                 onTap: onExportBackup,
               ),
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.upload_file_outlined,
                 title: 'Restaurar copia',
-                subtitle:
-                    'Recupera datos desde una copia guardada. Requiere confirmación.',
+                subtitle: 'Importar backup con confirmación previa.',
                 onTap: () => _showImportActions(context),
               ),
             ],
           ),
           _CommandSection(
-            title: 'Snapshots',
+            title: 'INSTANTÁNEAS',
             children: <Widget>[
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.photo_library_outlined,
                 title: 'Instantáneas',
                 subtitle: snapshotCount == 1
@@ -10447,40 +18840,42 @@ class MoreTab extends StatelessWidget {
             ],
           ),
           _CommandSection(
-            title: 'Exportaciones',
+            title: 'EXPORTAR',
             children: <Widget>[
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.receipt_long_outlined,
                 title: 'Historial de movimientos',
                 subtitle: movementCount == 1
-                    ? '1 movimiento registrado para auditoría, edición y borrado'
-                    : '$movementCount movimientos registrados para auditoría, '
-                          'edición y borrado',
+                    ? '1 movimiento · OCR editable, auditoría y edición'
+                    : '$movementCount movimientos · OCR editable, auditoría y edición',
                 badge: 'Clave',
                 onTap: onOpenMovements,
               ),
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.table_chart_outlined,
                 title: 'Reportes',
-                subtitle:
-                    'CSV para hojas de cálculo, JSON para respaldo, PDF/XLSX para reporte.',
+                subtitle: 'CSV, JSON, PDF y XLSX para respaldo o reporte.',
                 badge: 'CSV/JSON',
                 onTap: () => _showDataActions(context),
               ),
             ],
           ),
           _CommandSection(
-            title: 'Diagnóstico',
+            title: 'DIAGNÓSTICO',
             children: <Widget>[
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.health_and_safety_outlined,
                 title: 'Estado del sistema',
-                subtitle:
-                    'Datos locales, Drive/Firebase manuales, alertas y fuente de precios.',
+                subtitle: 'Datos locales, nube manual, alertas y precios.',
                 badge: pricesUpdatedAt == null ? 'Sin precios' : 'OK',
                 onTap: () => _showDiagnostics(context),
               ),
-              PremiumActionTile(
+            ],
+          ),
+          _CommandSection(
+            title: 'ACERCA DE',
+            children: <Widget>[
+              _MoreActionTile(
                 icon: Icons.info_outline,
                 title: 'Acerca de CriptoControlMx',
                 subtitle: 'Información, privacidad local y aviso financiero.',
@@ -10490,21 +18885,21 @@ class MoreTab extends StatelessWidget {
             ],
           ),
           _CommandSection(
-            title: 'Configuración visual',
+            title: 'PERSONALIZACIÓN',
             children: <Widget>[
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.palette_outlined,
                 title: 'Tema',
                 subtitle: 'Modo ${visualMode.label} · ${themeStyle.label}',
                 onTap: onOpenThemeSettings,
               ),
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.sync_outlined,
                 title: 'Actualización de precios',
                 subtitle: 'Apertura, movimientos e intervalo en pantalla',
                 onTap: onOpenPriceSettings,
               ),
-              PremiumActionTile(
+              _MoreActionTile(
                 icon: Icons.view_agenda_outlined,
                 title: 'Resumen de cartera',
                 subtitle: 'Posiciones visibles y orden del portafolio',
@@ -10513,7 +18908,7 @@ class MoreTab extends StatelessWidget {
             ],
           ),
           _CommandSection(
-            title: 'Seguridad / reset',
+            title: 'PRIVACIDAD',
             children: <Widget>[
               _PrivacyMonitoringCard(
                 analyticsEnabled: analyticsEnabled,
@@ -10521,11 +18916,16 @@ class MoreTab extends StatelessWidget {
                 onAnalyticsChanged: onAnalyticsConsentChanged,
                 onCrashlyticsChanged: onCrashlyticsConsentChanged,
               ),
-              PremiumActionTile(
+            ],
+          ),
+          _CommandSection(
+            title: 'ZONA DE RIESGO',
+            children: <Widget>[
+              _MoreActionTile(
                 icon: Icons.restart_alt_outlined,
                 title: 'Restablecer datos financieros',
                 subtitle:
-                    'Borra cartera, precios, instantáneas y alertas. Requiere copia previa y confirmación.',
+                    'Borra datos financieros con copia previa y confirmación.',
                 badge: 'Peligroso',
                 onTap: onOpenFinancialReset,
               ),
@@ -10671,28 +19071,62 @@ class MoreTab extends StatelessWidget {
       useSafeArea: true,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => _CommandActionSheet(
-        title: 'Google Drive',
+        title: googleDriveVisuallyConnected
+            ? 'Google Drive conectado'
+            : 'Google Drive',
         actions: <_SheetAction>[
           _SheetAction(
-            icon: googleDriveConnected
+            icon: isGoogleDriveAuthorized
                 ? Icons.link_off_outlined
                 : Icons.cloud_sync_outlined,
-            title: isGoogleConnecting
-                ? 'Verificando conexión'
-                : googleDriveConnected
+            title: googleDriveSessionChecking
+                ? googleDriveHasKnownAccount
+                      ? 'Restaurando sesion'
+                      : 'Comprobando sesion'
+                : isGoogleConnecting
+                ? 'Verificando conexion'
+                : isGoogleDriveAuthorized
                 ? 'Desconectar'
-                : 'Conectar Google Drive',
-            subtitle: isGoogleConnecting
-                ? 'Comprobando autorización de Google Drive sin abrir el inicio de sesión.'
+                : googleDriveLocalPending
+                ? 'Verificar conexion'
+                : googleDriveTemporaryError
+                ? 'Reconectar Google Drive'
                 : googleDriveConnected
-                ? 'Cuenta: ${googleAccountEmail ?? 'cuenta Google'} · Estado: conectado'
+                ? 'Autorizar Google Drive'
+                : 'Conectar Google Drive',
+            subtitle: googleDriveSessionChecking
+                ? googleDriveHasKnownAccount
+                      ? 'Cuenta anterior: $googleDriveAccountLabel. Ultima conexion: $googleDriveLastConnectionLabel.'
+                      : 'Comprobando Google Drive sin abrir el selector de cuenta.'
+                : googleDriveAuthRequired
+                ? 'Cuenta detectada. Drive requiere autorizacion al continuar.'
+                : googleDriveLocalPending
+                ? googleDriveAccountStatusLabel
+                : googleDriveTemporaryError
+                ? googleDriveHasKnownAccount
+                      ? 'No se pudo verificar Google Drive ahora. La sesion anterior se conserva.'
+                      : 'Error temporal al comprobar Google. No se cerro la sesion.'
+                : isGoogleConnecting
+                ? 'Comprobando autorizacion de Google Drive.'
+                : isGoogleDriveAuthorized
+                ? 'Cuenta: $googleDriveAccountLabel - Estado: conectado'
+                : googleDriveConnected
+                ? '$googleDriveAccountLabel - Falta autorizar Drive'
                 : 'Conecta Google Drive para crear y restaurar copias.',
             onTap: googleDriveBusy
                 ? null
-                : googleDriveConnected
+                : isGoogleDriveAuthorized
                 ? onDisconnectGoogleDrive
                 : onConnectGoogleDrive,
           ),
+          if (googleDriveActionRequiresVerification)
+            _SheetAction(
+              icon: Icons.refresh_outlined,
+              title: 'Reconectar Google Drive',
+              subtitle:
+                  'Abre Google solo por esta accion manual para renovar la cuenta.',
+              onTap: googleDriveBusy ? null : onReconnectGoogleDrive,
+            ),
           const _SheetAction(
             icon: Icons.privacy_tip_outlined,
             title: 'Privacidad de Drive',
@@ -10713,10 +19147,18 @@ class MoreTab extends StatelessWidget {
             title: isGoogleDriveCreating
                 ? 'Creando copia...'
                 : 'Crear copia en Google Drive',
-            subtitle: googleDriveConnected
+            subtitle: isGoogleDriveAuthorized
                 ? 'Actualiza la copia guardada en Google Drive'
+                : googleDriveLocalPending
+                ? 'Verifica la conexion antes de crear una copia'
+                : googleDriveConnected
+                ? 'Autoriza Google Drive primero'
                 : 'Conecta Google Drive primero',
-            onTap: googleDriveBusy ? null : onCreateGoogleDriveBackup,
+            onTap:
+                googleDriveBusy ||
+                    (!isGoogleDriveAuthorized && !googleDriveHasKnownAccount)
+                ? null
+                : onCreateGoogleDriveBackup,
           ),
           _SheetAction(
             icon: isGoogleDriveRestoring
@@ -10725,11 +19167,27 @@ class MoreTab extends StatelessWidget {
             title: isGoogleDriveRestoring
                 ? 'Restaurando copia...'
                 : 'Restaurar desde Google Drive',
-            subtitle: googleDriveConnected
-                ? 'Descarga la copia y pide confirmación antes de restaurar'
+            subtitle: isGoogleDriveAuthorized
+                ? 'Descarga la copia y pide confirmacion antes de restaurar'
+                : googleDriveLocalPending
+                ? 'Verifica la conexion antes de restaurar'
+                : googleDriveConnected
+                ? 'Autoriza Google Drive primero'
                 : 'Conecta Google Drive primero',
-            onTap: googleDriveBusy ? null : onRestoreGoogleDriveBackup,
+            onTap:
+                googleDriveBusy ||
+                    (!isGoogleDriveAuthorized && !googleDriveHasKnownAccount)
+                ? null
+                : onRestoreGoogleDriveBackup,
           ),
+          if (googleDriveVisuallyConnected && !isGoogleDriveAuthorized)
+            _SheetAction(
+              icon: Icons.link_off_outlined,
+              title: 'Cerrar sesion de Drive',
+              subtitle:
+                  'Olvida la vinculacion local y vuelve al estado sin conectar.',
+              onTap: googleDriveBusy ? null : onDisconnectGoogleDrive,
+            ),
         ],
       ),
     );
@@ -11842,35 +20300,50 @@ class _MotorVerificationItem {
 }
 
 class _CommandCenterHeader extends StatelessWidget {
-  final PortfolioTotals totals;
-  final Color pnlColor;
   final DateTime? pricesUpdatedAt;
   final String priceSource;
+  final bool googleDriveConnected;
+  final DateTime? googleDriveBackupUpdatedAt;
+  final AppVisualMode visualMode;
+  final AppThemeStyle themeStyle;
 
   const _CommandCenterHeader({
-    required this.totals,
-    required this.pnlColor,
     required this.pricesUpdatedAt,
     required this.priceSource,
+    required this.googleDriveConnected,
+    required this.googleDriveBackupUpdatedAt,
+    required this.visualMode,
+    required this.themeStyle,
   });
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final String backupValue = googleDriveConnected ? 'Drive activo' : 'Local';
+    final String backupSubtitle = googleDriveBackupUpdatedAt == null
+        ? 'Sin copia Drive'
+        : longDate(googleDriveBackupUpdatedAt!.toLocal());
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            colors.primaryContainer.withValues(alpha: 0.92),
-            colors.surfaceContainerHighest.withValues(alpha: 0.88),
+            colors.primaryContainer.withValues(alpha: 0.52),
+            colors.surface.withValues(alpha: 0.98),
           ],
         ),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.18)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -11883,54 +20356,94 @@ class _CommandCenterHeader extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Centro de control',
+                      'Más',
                       style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                          ?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            height: 1,
+                          ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Herramientas, datos y configuración',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      'Configuración, respaldo y herramientas de CriptoControlMx.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFFCBD5E1),
+                        height: 1.25,
+                      ),
                     ),
                   ],
                 ),
               ),
-              Icon(
-                Icons.dashboard_customize_outlined,
-                color: colors.primary,
-                size: 30,
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: colors.primary.withValues(alpha: 0.18),
+                  border: Border.all(
+                    color: colors.primary.withValues(alpha: 0.26),
+                  ),
+                ),
+                child: Icon(
+                  Icons.tune_outlined,
+                  color: colors.primary,
+                  size: 25,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: <Widget>[
-              _HeaderMetric(
-                label: 'Cartera',
-                value: moneyShort(totals.currentValue),
-                icon: Icons.account_balance_wallet_outlined,
-              ),
-              _HeaderMetric(
-                label: 'P&L no realizado',
-                value: moneyShort(totals.unrealizedPL),
-                color: pnlColor,
-                icon: totals.unrealizedPL >= 0
-                    ? Icons.trending_up
-                    : Icons.trending_down,
-              ),
-              _HeaderMetric(
-                label: 'Precios',
-                value: priceUpdatedLabel(pricesUpdatedAt),
-                icon: Icons.schedule_outlined,
-              ),
-              _HeaderMetric(
-                label: 'Fuente',
-                value: priceSource,
-                icon: Icons.cloud_outlined,
-              ),
-            ],
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              const double gap = 8;
+              final bool wide = constraints.maxWidth >= 520;
+              final double width = wide
+                  ? (constraints.maxWidth - gap * 3) / 4
+                  : (constraints.maxWidth - gap) / 2;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: <Widget>[
+                  SizedBox(
+                    width: width,
+                    child: _HeaderMetric(
+                      label: 'Respaldos',
+                      value: backupValue,
+                      subtitle: backupSubtitle,
+                      icon: Icons.backup_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: const _HeaderMetric(
+                      label: 'Exportaciones',
+                      value: 'CSV/JSON',
+                      subtitle: 'PDF y XLSX',
+                      icon: Icons.file_download_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _HeaderMetric(
+                      label: 'Precios',
+                      value: priceSource,
+                      subtitle: priceUpdatedLabel(pricesUpdatedAt),
+                      icon: Icons.cloud_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _HeaderMetric(
+                      label: 'Modo visual',
+                      value: visualMode.label,
+                      subtitle: themeStyle.label,
+                      icon: Icons.palette_outlined,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -11943,12 +20456,14 @@ class _HeaderMetric extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color? color;
+  final String? subtitle;
 
   const _HeaderMetric({
     required this.label,
     required this.value,
     required this.icon,
     this.color,
+    this.subtitle,
   });
 
   @override
@@ -11956,31 +20471,181 @@ class _HeaderMetric extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
-      constraints: const BoxConstraints(minWidth: 142, maxWidth: 190),
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 76),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: colors.surface.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(16),
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.58),
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: 0.42),
+        ),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, size: 18, color: color ?? colors.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(label, style: Theme.of(context).textTheme.labelSmall),
-                const SizedBox(height: 3),
-                Text(
-                  value,
-                  style: TextStyle(fontWeight: FontWeight.w800, color: color),
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 17, color: color ?? colors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color ?? colors.onSurface,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
             ),
           ),
+          if (subtitle != null) ...<Widget>[
+            const SizedBox(height: 2),
+            Text(
+              subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colors.onSurfaceVariant.withValues(alpha: 0.82),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _MoreActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final bool loading;
+  final VoidCallback? onTap;
+
+  const _MoreActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    this.loading = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool destructive =
+        title.toLowerCase().contains('restablecer') ||
+        title.toLowerCase().contains('borrar') ||
+        (badge?.toLowerCase().contains('peligro') ?? false);
+    final Color accent = destructive ? colors.error : colors.primary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        splashColor: colors.primary.withValues(alpha: 0.08),
+        highlightColor: colors.primary.withValues(alpha: 0.05),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 190),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(minHeight: 74),
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHighest.withValues(alpha: 0.82),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: colors.outlineVariant.withValues(alpha: 0.42),
+            ),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: accent.withValues(alpha: 0.12),
+                  border: Border.all(color: accent.withValues(alpha: 0.16)),
+                ),
+                child: loading
+                    ? const Padding(
+                        padding: EdgeInsets.all(11),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(icon, color: accent, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              height: 1.12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (badge != null) ...<Widget>[
+                          const SizedBox(width: 8),
+                          PremiumStatusBadge(
+                            label: badge!,
+                            tone: _premiumBadgeTone(badge!),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 13,
+                        height: 1.22,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: colors.onSurfaceVariant.withValues(alpha: 0.72),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -12004,6 +20669,13 @@ class _PrivacyMonitoringCard extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Card(
       margin: EdgeInsets.zero,
+      elevation: 0,
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.82),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.42)),
+      ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
         child: Column(
@@ -12066,14 +20738,93 @@ class _CommandSection extends StatelessWidget {
 
   const _CommandSection({required this.title, required this.children});
 
+  IconData get _icon {
+    final String normalized = title.toLowerCase();
+    if (normalized.contains('cuenta')) return Icons.cloud_outlined;
+    if (normalized.contains('riesgo'))
+      return Icons.report_gmailerrorred_outlined;
+    if (normalized.contains('general'))
+      return Icons.dashboard_customize_outlined;
+    if (normalized.contains('respaldo')) return Icons.backup_outlined;
+    if (normalized.contains('instant')) return Icons.photo_library_outlined;
+    if (normalized.contains('export')) return Icons.file_download_outlined;
+    if (normalized.contains('diagn')) return Icons.health_and_safety_outlined;
+    if (normalized.contains('acerca')) return Icons.info_outline;
+    if (normalized.contains('personal')) return Icons.palette_outlined;
+    if (normalized.contains('privacidad')) return Icons.privacy_tip_outlined;
+    return Icons.tune_outlined;
+  }
+
+  String? get _description {
+    final String normalized = title.toLowerCase();
+    if (normalized.contains('cuenta')) {
+      return 'Estado de cuenta, nube manual y conexión de Google Drive.';
+    }
+    if (normalized.contains('riesgo')) {
+      return 'Acciones sensibles que pueden afectar datos locales.';
+    }
+    if (normalized.contains('respaldo')) {
+      return 'Copias manuales, restauración y estado de nube.';
+    }
+    if (normalized.contains('privacidad')) {
+      return 'Preferencias locales, monitoreo opcional y acciones sensibles.';
+    }
+    if (normalized.contains('personal')) {
+      return 'Apariencia, lectura de cartera y actualización de precios.';
+    }
+    if (normalized.contains('export')) {
+      return 'Acceso a historial, reportes y formatos existentes.';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool riskSection = title.toLowerCase().contains('riesgo');
+    final Color sectionColor = riskSection ? colors.error : colors.primary;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          PremiumSectionHeader(title: title),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(_icon, size: 17, color: sectionColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant.withValues(alpha: 0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      if (_description != null) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          _description!,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                height: 1.2,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
               final bool twoColumns = constraints.maxWidth >= 560;
@@ -12084,7 +20835,7 @@ class _CommandSection extends StatelessWidget {
 
               return Wrap(
                 spacing: spacing,
-                runSpacing: 12,
+                runSpacing: 10,
                 children: children
                     .map(
                       (Widget child) =>
@@ -12229,7 +20980,7 @@ class PremiumActionTile extends StatelessWidget {
 
     return PremiumCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -12237,11 +20988,11 @@ class PremiumActionTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Container(
-                width: 42,
-                height: 42,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: colors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  color: colors.primary.withValues(alpha: 0.10),
                 ),
                 child: loading
                     ? const Padding(
@@ -12250,7 +21001,7 @@ class PremiumActionTile extends StatelessWidget {
                       )
                     : Icon(icon, color: colors.primary),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -12258,12 +21009,12 @@ class PremiumActionTile extends StatelessWidget {
                     Text(
                       title,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                     if (badge != null) ...<Widget>[
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: PremiumStatusBadge(
@@ -12272,30 +21023,33 @@ class PremiumActionTile extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
               if (showChevron) ...<Widget>[
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
                 Icon(
                   Icons.chevron_right,
                   color: colors.onSurfaceVariant.withValues(alpha: 0.72),
+                  size: 20,
                 ),
               ],
             ],
           ),
           if (_hasEmptyState) ...<Widget>[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
               ),
               child: Column(
@@ -12390,6 +21144,7 @@ class _CommandActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final double bottomPadding = MediaQuery.viewPaddingOf(context).bottom + 20;
     final List<_SheetAction> visibleActions = actions
         .where((_SheetAction action) => !action.title.startsWith('Sin sincron'))
@@ -12418,6 +21173,14 @@ class _CommandActionSheet extends StatelessWidget {
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
+            const SizedBox(height: 4),
+            Text(
+              'Acciones disponibles para esta sección. Las operaciones sensibles conservan su confirmación existente.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                height: 1.25,
+              ),
+            ),
             const SizedBox(height: 10),
             ConstrainedBox(
               constraints: BoxConstraints(
@@ -12429,13 +21192,46 @@ class _CommandActionSheet extends StatelessWidget {
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (BuildContext context, int index) {
                   final _SheetAction action = visibleActions[index];
+                  final bool destructive =
+                      action.title.toLowerCase().contains('restaurar') ||
+                      action.title.toLowerCase().contains('desconectar') ||
+                      action.title.toLowerCase().contains('cerrar sesión');
+                  final Color accent = destructive
+                      ? colors.error
+                      : colors.primary;
                   return Card(
                     margin: EdgeInsets.zero,
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.78,
+                    ),
+                    surfaceTintColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      side: BorderSide(
+                        color: destructive
+                            ? colors.error.withValues(alpha: 0.28)
+                            : colors.outlineVariant.withValues(alpha: 0.42),
+                      ),
+                    ),
                     child: ListTile(
-                      leading: Icon(action.icon),
+                      minLeadingWidth: 36,
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(action.icon, color: accent, size: 20),
+                      ),
                       title: Text(action.title),
                       subtitle: Text(action.subtitle),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: action.onTap == null
+                          ? null
+                          : Icon(
+                              Icons.chevron_right,
+                              color: colors.onSurfaceVariant,
+                            ),
                       enabled: action.onTap != null,
                       onTap: action.onTap == null
                           ? null
@@ -12548,282 +21344,287 @@ class SettingsTab extends StatelessWidget {
         view == SettingsView.all || view == SettingsView.prices;
     final bool showAdvanced = view == SettingsView.all;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: <Widget>[
-        if (showTheme)
-          CardPanel(
-            title: 'Tema',
-            subtitle:
-                'Paletas premium completas, sin alterar colores '
-                'semánticos financieros.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Modo visual',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SegmentedButton<AppVisualMode>(
-                    segments: AppVisualMode.values
-                        .map(
-                          (AppVisualMode mode) => ButtonSegment<AppVisualMode>(
-                            value: mode,
-                            label: Text(mode.label),
-                          ),
-                        )
-                        .toList(),
-                    selected: <AppVisualMode>{visualMode},
-                    onSelectionChanged: (Set<AppVisualMode> value) {
-                      onVisualModeChanged(value.first);
-                    },
+    return PremiumScaffoldSurface(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: <Widget>[
+          if (showTheme)
+            CardPanel(
+              title: 'Tema',
+              subtitle:
+                  'Paletas premium completas, sin alterar colores '
+                  'semánticos financieros.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Modo visual',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  'Estilo visual',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                ...AppThemeStyle.values.map(
-                  (AppThemeStyle option) => _ThemePaletteTile(
-                    option: option,
-                    selected: themeStyle == option,
-                    onTap: () => onThemeStyleChanged(option),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SegmentedButton<AppVisualMode>(
+                      segments: AppVisualMode.values
+                          .map(
+                            (AppVisualMode mode) =>
+                                ButtonSegment<AppVisualMode>(
+                                  value: mode,
+                                  label: Text(mode.label),
+                                ),
+                          )
+                          .toList(),
+                      selected: <AppVisualMode>{visualMode},
+                      onSelectionChanged: (Set<AppVisualMode> value) {
+                        onVisualModeChanged(value.first);
+                      },
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 18),
+                  Text(
+                    'Estilo visual',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...AppThemeStyle.values.map(
+                    (AppThemeStyle option) => _ThemePaletteTile(
+                      option: option,
+                      selected: themeStyle == option,
+                      onTap: () => onThemeStyleChanged(option),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        if (showPortfolio)
-          CardPanel(
-            title: 'Resumen de cartera',
-            subtitle:
-                'Configura cuántas posiciones aparecen en resumen y '
-                'cómo se ordenan.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Posiciones visibles',
-                  style: Theme.of(context).textTheme.titleSmall,
+          if (showPortfolio)
+            CardPanel(
+              title: 'Resumen de cartera',
+              subtitle:
+                  'Configura cuántas posiciones aparecen en resumen y '
+                  'cómo se ordenan.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Posiciones visibles',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: VisiblePositions.values.map((
+                      VisiblePositions option,
+                    ) {
+                      return ChoiceChip(
+                        selected: visiblePositions == option,
+                        label: Text(option.label),
+                        onSelected: (_) => onVisiblePositionsChanged(option),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Orden', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  ...PositionSortMode.values.map(
+                    (PositionSortMode option) =>
+                        RadioListTile<PositionSortMode>(
+                          contentPadding: EdgeInsets.zero,
+                          value: option,
+                          groupValue: positionSortMode,
+                          title: Text(option.label),
+                          onChanged: (PositionSortMode? value) {
+                            if (value != null) onPositionSortModeChanged(value);
+                          },
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          if (showAdvanced)
+            CardPanel(
+              title: 'Cálculo',
+              subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonal(
+                  onPressed: onEditSellFee,
+                  child: const Text('Editar comisión'),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: VisiblePositions.values.map((
-                    VisiblePositions option,
-                  ) {
-                    return ChoiceChip(
-                      selected: visiblePositions == option,
-                      label: Text(option.label),
-                      onSelected: (_) => onVisiblePositionsChanged(option),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 16),
-                Text('Orden', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 8),
-                ...PositionSortMode.values.map(
-                  (PositionSortMode option) => RadioListTile<PositionSortMode>(
+              ),
+            ),
+          if (showPrices)
+            CardPanel(
+              title: 'Precios',
+              subtitle: 'Preferencias de actualización de precios.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SwitchListTile(
+                    dense: true,
+                    value: refreshPricesOnOpen,
+                    onChanged: onRefreshPricesOnOpenChanged,
+                    title: const Text('Actualizar al abrir app'),
                     contentPadding: EdgeInsets.zero,
-                    value: option,
-                    groupValue: positionSortMode,
-                    title: Text(option.label),
-                    onChanged: (PositionSortMode? value) {
-                      if (value != null) onPositionSortModeChanged(value);
-                    },
                   ),
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Cálculo',
-            subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonal(
-                onPressed: onEditSellFee,
-                child: const Text('Editar comisión'),
+                  SwitchListTile(
+                    dense: true,
+                    value: refreshPricesAfterMovement,
+                    onChanged: onRefreshPricesAfterMovementChanged,
+                    title: const Text(
+                      'Actualizar después de registrar movimiento',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Actualización mientras la app está abierta:',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: PriceRefreshForegroundMode.values.map((
+                      PriceRefreshForegroundMode option,
+                    ) {
+                      return ChoiceChip(
+                        selected: priceRefreshForegroundMode == option,
+                        label: Text(option.label),
+                        onSelected: (_) =>
+                            onPriceRefreshForegroundModeChanged(option),
+                      );
+                    }).toList(),
+                  ),
+                ],
               ),
             ),
-          ),
-        if (showPrices)
-          CardPanel(
-            title: 'Precios',
-            subtitle: 'Preferencias de actualización de precios.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                SwitchListTile(
-                  dense: true,
-                  value: refreshPricesOnOpen,
-                  onChanged: onRefreshPricesOnOpenChanged,
-                  title: const Text('Actualizar al abrir app'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                SwitchListTile(
-                  dense: true,
-                  value: refreshPricesAfterMovement,
-                  onChanged: onRefreshPricesAfterMovementChanged,
-                  title: const Text(
-                    'Actualizar después de registrar movimiento',
+          if (showAdvanced)
+            CardPanel(
+              title: 'Instantáneas',
+              subtitle:
+                  'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Automatización',
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Actualización mientras la app está abierta:',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: PriceRefreshForegroundMode.values.map((
-                    PriceRefreshForegroundMode option,
-                  ) {
-                    return ChoiceChip(
-                      selected: priceRefreshForegroundMode == option,
-                      label: Text(option.label),
-                      onSelected: (_) =>
-                          onPriceRefreshForegroundModeChanged(option),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Instantáneas',
-            subtitle:
-                'Instantáneas guardadas: $snapshotCount. Configura automatización y retención.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Automatización',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                ...SnapshotAutomationMode.values.map(
-                  (SnapshotAutomationMode option) =>
-                      RadioListTile<SnapshotAutomationMode>(
-                        contentPadding: EdgeInsets.zero,
-                        value: option,
-                        groupValue: snapshotAutomationMode,
-                        title: Text(option.label),
-                        onChanged: (SnapshotAutomationMode? value) {
-                          if (value != null)
-                            onSnapshotAutomationModeChanged(value);
-                        },
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Retención',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: SnapshotRetention.values.map((
-                    SnapshotRetention option,
-                  ) {
-                    return ChoiceChip(
-                      selected: snapshotRetention == option,
-                      label: Text(option.label),
-                      onSelected: (_) => onSnapshotRetentionChanged(option),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Las acciones principales de instantáneas viven en '
-                  'Más → Instantáneas. '
-                  'Aquí solo se configura automatización y retención.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Notificaciones',
-            subtitle:
-                'Configura comportamiento; la gestión completa vive en Alertas.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const Text(
-                  'Alertas internas: al abrir app / actualizar precios.',
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  dense: true,
-                  value: automaticLocalAlertsEnabled,
-                  onChanged: onAutomaticLocalAlertsChanged,
-                  title: const Text('Alertas automáticas locales'),
-                  subtitle: Text(
-                    notificationsAllowed
-                        ? 'Revisión en segundo plano de Android.'
-                        : 'Permiso no autorizado en Android.',
+                  ...SnapshotAutomationMode.values.map(
+                    (SnapshotAutomationMode option) =>
+                        RadioListTile<SnapshotAutomationMode>(
+                          contentPadding: EdgeInsets.zero,
+                          value: option,
+                          groupValue: snapshotAutomationMode,
+                          title: Text(option.label),
+                          onChanged: (SnapshotAutomationMode? value) {
+                            if (value != null)
+                              onSnapshotAutomationModeChanged(value);
+                          },
+                        ),
                   ),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                const Text(
-                  'Android puede agrupar o retrasar revisiones para ahorrar batería. '
-                  'No son notificaciones push en la nube.',
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: PriceAlertService.automaticIntervalOptions.map((
-                    int minutes,
-                  ) {
-                    return ChoiceChip(
-                      selected: automaticLocalAlertsIntervalMinutes == minutes,
-                      label: Text(intervalLabel(minutes)),
-                      onSelected: (_) =>
-                          onAutomaticLocalAlertIntervalChanged(minutes),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed: onOpenAlerts,
-                  icon: const Icon(Icons.notifications_active_outlined),
-                  label: const Text('Ir a Alertas'),
-                ),
-              ],
-            ),
-          ),
-        if (showAdvanced)
-          CardPanel(
-            title: 'Copia de seguridad',
-            subtitle:
-                'Copia manual local para exportar o restaurar datos financieros.',
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                onPressed: onExportBackup,
-                icon: const Icon(Icons.data_object_outlined),
-                label: const Text('Crear copia manual'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Retención',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: SnapshotRetention.values.map((
+                      SnapshotRetention option,
+                    ) {
+                      return ChoiceChip(
+                        selected: snapshotRetention == option,
+                        label: Text(option.label),
+                        onSelected: (_) => onSnapshotRetentionChanged(option),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Las acciones principales de instantáneas viven en '
+                    'Más → Instantáneas. '
+                    'Aquí solo se configura automatización y retención.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
-          ),
-      ],
+          if (showAdvanced)
+            CardPanel(
+              title: 'Notificaciones',
+              subtitle:
+                  'Configura comportamiento; la gestión completa vive en Alertas.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'Alertas internas: al abrir app / actualizar precios.',
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    dense: true,
+                    value: automaticLocalAlertsEnabled,
+                    onChanged: onAutomaticLocalAlertsChanged,
+                    title: const Text('Alertas automáticas locales'),
+                    subtitle: Text(
+                      notificationsAllowed
+                          ? 'Revisión en segundo plano de Android.'
+                          : 'Permiso no autorizado en Android.',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Text(
+                    'Android puede agrupar o retrasar revisiones para ahorrar batería. '
+                    'No son notificaciones push en la nube.',
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: PriceAlertService.automaticIntervalOptions.map((
+                      int minutes,
+                    ) {
+                      return ChoiceChip(
+                        selected:
+                            automaticLocalAlertsIntervalMinutes == minutes,
+                        label: Text(intervalLabel(minutes)),
+                        onSelected: (_) =>
+                            onAutomaticLocalAlertIntervalChanged(minutes),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: onOpenAlerts,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Ir a Alertas'),
+                  ),
+                ],
+              ),
+            ),
+          if (showAdvanced)
+            CardPanel(
+              title: 'Copia de seguridad',
+              subtitle:
+                  'Copia manual local para exportar o restaurar datos financieros.',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  onPressed: onExportBackup,
+                  icon: const Icon(Icons.data_object_outlined),
+                  label: const Text('Crear copia manual'),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -12842,27 +21643,60 @@ class _ThemePaletteTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppPalette palette = option.palette;
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: selected
                 ? palette.primarySoft.withValues(alpha: 0.75)
-                : Theme.of(context).colorScheme.surfaceContainerHighest,
+                : colors.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: selected
-                  ? palette.primary
-                  : Theme.of(context).colorScheme.outlineVariant,
+              color: selected ? palette.primary : colors.outlineVariant,
               width: selected ? 2 : 1,
             ),
+            boxShadow: selected
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: palette.primary.withValues(alpha: 0.18),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 34,
+                height: 34,
+                margin: const EdgeInsets.only(right: 12, top: 2),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? palette.primary
+                      : colors.surface.withValues(alpha: 0.76),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: selected ? palette.primary : colors.outlineVariant,
+                  ),
+                ),
+                child: Icon(
+                  selected ? Icons.check_rounded : Icons.palette_outlined,
+                  size: 19,
+                  color: selected
+                      ? _bestOnColor(palette.primary)
+                      : colors.onSurfaceVariant,
+                ),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -12873,32 +21707,34 @@ class _ThemePaletteTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(option.description),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 5,
+                      children:
+                          <Color>[
+                                palette.background,
+                                palette.surfaceAlt,
+                                palette.primary,
+                                palette.positive,
+                                palette.negative,
+                                palette.warning,
+                              ]
+                              .map(
+                                (Color color) => Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: palette.border),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                    ),
                   ],
                 ),
-              ),
-              Row(
-                children:
-                    <Color>[
-                          palette.background,
-                          palette.surfaceAlt,
-                          palette.primary,
-                          palette.positive,
-                          palette.negative,
-                          palette.warning,
-                        ]
-                        .map(
-                          (Color color) => Container(
-                            width: 18,
-                            height: 18,
-                            margin: const EdgeInsets.only(left: 4),
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: palette.border),
-                            ),
-                          ),
-                        )
-                        .toList(),
               ),
             ],
           ),
@@ -12910,8 +21746,13 @@ class _ThemePaletteTile extends StatelessWidget {
 
 class SnapshotTrendPanel extends StatelessWidget {
   final List<PortfolioSnapshot> snapshots;
+  final SummaryChartType chartType;
 
-  const SnapshotTrendPanel({super.key, required this.snapshots});
+  const SnapshotTrendPanel({
+    super.key,
+    required this.snapshots,
+    this.chartType = SummaryChartType.line,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -12951,6 +21792,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               snapshots: ordered,
               height: 220,
               includeZero: true,
+              chartType: chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'Valor actual',
@@ -12973,6 +21815,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               snapshots: ordered,
               height: 180,
               includeZero: true,
+              chartType: chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'P&L flotante',
@@ -12995,6 +21838,7 @@ class SnapshotTrendPanel extends StatelessWidget {
               snapshots: ordered,
               height: 170,
               includeZero: false,
+              chartType: chartType,
               series: <SnapshotChartSeries>[
                 SnapshotChartSeries(
                   label: 'Dominancia BTC',
@@ -13057,6 +21901,7 @@ class SnapshotLineChart extends StatelessWidget {
   final List<SnapshotChartSeries> series;
   final double height;
   final bool includeZero;
+  final SummaryChartType chartType;
 
   const SnapshotLineChart({
     super.key,
@@ -13064,10 +21909,23 @@ class SnapshotLineChart extends StatelessWidget {
     required this.series,
     required this.height,
     required this.includeZero,
+    this.chartType = SummaryChartType.line,
   });
 
   @override
   Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    if (chartType == SummaryChartType.candles) {
+      return SizedBox(
+        height: height,
+        child: const Center(
+          child: Text(
+            'Velas requiere una serie OHLC.',
+            style: TextStyle(color: Color(0xFF98A2B5)),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       height: height,
       width: double.infinity,
@@ -13076,8 +21934,11 @@ class SnapshotLineChart extends StatelessWidget {
           snapshots: snapshots,
           series: series,
           includeZero: includeZero,
-          axisColor: Theme.of(context).colorScheme.outlineVariant,
+          chartType: chartType,
+          axisColor: tokens.chartGrid,
           labelColor: Theme.of(context).colorScheme.onSurfaceVariant,
+          fillColor: tokens.chartFill,
+          tooltipColor: tokens.chartTooltip,
         ),
       ),
     );
@@ -13102,15 +21963,21 @@ class SnapshotLineChartPainter extends CustomPainter {
   final List<PortfolioSnapshot> snapshots;
   final List<SnapshotChartSeries> series;
   final bool includeZero;
+  final SummaryChartType chartType;
   final Color axisColor;
   final Color labelColor;
+  final Color fillColor;
+  final Color tooltipColor;
 
   SnapshotLineChartPainter({
     required this.snapshots,
     required this.series,
     required this.includeZero,
+    required this.chartType,
     required this.axisColor,
     required this.labelColor,
+    required this.fillColor,
+    required this.tooltipColor,
   });
 
   @override
@@ -13120,7 +21987,7 @@ class SnapshotLineChartPainter extends CustomPainter {
     final Rect chart = Rect.fromLTWH(
       54,
       12,
-      math.max(1, size.width - 66),
+      math.max(1, size.width - 74),
       math.max(1, size.height - 42),
     );
 
@@ -13179,14 +22046,14 @@ class SnapshotLineChartPainter extends CustomPainter {
       final SnapshotChartSeries item = series[seriesIndex];
       if (item.values.length != pointCount) continue;
 
+      final List<Offset> points = List<Offset>.generate(
+        pointCount,
+        (int index) => Offset(xFor(index), yFor(item.values[index])),
+      );
       final Path path = Path();
-      for (int i = 0; i < pointCount; i++) {
-        final Offset point = Offset(xFor(i), yFor(item.values[i]));
-        if (i == 0) {
-          path.moveTo(point.dx, point.dy);
-        } else {
-          path.lineTo(point.dx, point.dy);
-        }
+      path.moveTo(points.first.dx, points.first.dy);
+      for (final Offset point in points.skip(1)) {
+        path.lineTo(point.dx, point.dy);
       }
 
       final Paint linePaint = Paint()
@@ -13195,23 +22062,62 @@ class SnapshotLineChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
-      canvas.drawPath(path, linePaint);
-
       final Paint dotPaint = Paint()..color = item.color;
-      for (int i = 0; i < pointCount; i++) {
-        canvas.drawCircle(Offset(xFor(i), yFor(item.values[i])), 3.5, dotPaint);
+
+      if (chartType == SummaryChartType.columns) {
+        final double slotWidth = chart.width / math.max(1, pointCount);
+        final double groupWidth = math.min(22.0, slotWidth * 0.66);
+        final double barWidth = math.max(2.0, groupWidth / series.length);
+        final double baseline = includeZero ? yFor(0) : chart.bottom;
+        for (int i = 0; i < pointCount; i++) {
+          final double top = math.min(points[i].dy, baseline);
+          final double barHeight = math.max(
+            1.0,
+            (points[i].dy - baseline).abs(),
+          );
+          final double left =
+              points[i].dx - groupWidth / 2 + seriesIndex * barWidth;
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(left, top, math.max(1, barWidth - 1), barHeight),
+              const Radius.circular(2),
+            ),
+            Paint()..color = item.color.withValues(alpha: 0.82),
+          );
+        }
+      } else {
+        if (chartType == SummaryChartType.area) {
+          final Path areaPath = Path.from(path)
+            ..lineTo(points.last.dx, chart.bottom)
+            ..lineTo(points.first.dx, chart.bottom)
+            ..close();
+          canvas.drawPath(
+            areaPath,
+            Paint()
+              ..shader = LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[fillColor, fillColor.withValues(alpha: 0.03)],
+              ).createShader(chart),
+          );
+        }
+        canvas.drawPath(path, linePaint);
+        if (chartType == SummaryChartType.lineMarkers) {
+          for (final Offset point in points) {
+            canvas.drawCircle(point, 3.5, dotPaint);
+          }
+        }
       }
 
-      final Offset lastPoint = Offset(
-        xFor(pointCount - 1),
-        yFor(item.values.last),
-      );
-      canvas.drawCircle(
-        lastPoint,
-        7.0,
-        Paint()..color = item.color.withValues(alpha: 0.16),
-      );
-      canvas.drawCircle(lastPoint, 4.8, dotPaint);
+      final Offset lastPoint = points.last;
+      if (chartType != SummaryChartType.columns) {
+        canvas.drawCircle(
+          lastPoint,
+          7.0,
+          Paint()..color = item.color.withValues(alpha: 0.16),
+        );
+        canvas.drawCircle(lastPoint, 4.8, dotPaint);
+      }
       _drawValueTag(
         canvas,
         item.valueFormatter?.call(item.values.last) ??
@@ -13240,7 +22146,7 @@ class SnapshotLineChartPainter extends CustomPainter {
     final TextPainter painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: 10),
+        style: TextStyle(color: color, fontSize: 13),
       ),
       textDirection: TextDirection.ltr,
       maxLines: 1,
@@ -13260,7 +22166,7 @@ class SnapshotLineChartPainter extends CustomPainter {
         text: text,
         style: TextStyle(
           color: labelColor,
-          fontSize: 10,
+          fontSize: 13,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -13287,7 +22193,8 @@ class SnapshotLineChartPainter extends CustomPainter {
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(background, const Radius.circular(6)),
-      Paint()..color = color.withValues(alpha: 0.14),
+      Paint()
+        ..color = Color.alphaBlend(color.withValues(alpha: 0.08), tooltipColor),
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(background, const Radius.circular(6)),
@@ -13305,6 +22212,9 @@ class SnapshotLineChartPainter extends CustomPainter {
         oldDelegate.series != series ||
         oldDelegate.axisColor != axisColor ||
         oldDelegate.labelColor != labelColor ||
+        oldDelegate.fillColor != fillColor ||
+        oldDelegate.tooltipColor != tooltipColor ||
+        oldDelegate.chartType != chartType ||
         oldDelegate.includeZero != includeZero;
   }
 }
@@ -13326,7 +22236,13 @@ class ChartLegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            fontSize: 14,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }
@@ -13351,19 +22267,16 @@ class PremiumScaffoldSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[
-            colors.surface,
-            Color.alphaBlend(
-              colors.primary.withValues(alpha: 0.035),
-              colors.surface,
-            ),
-            colors.surface,
+            tokens.gradientStart,
+            tokens.backgroundSecondary,
+            tokens.gradientEnd,
           ],
           stops: const <double>[0, 0.46, 1],
         ),
@@ -13394,10 +22307,10 @@ class PremiumSectionHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: <Widget>[
           Container(
-            width: 4,
+            width: 3,
             height: subtitle == null ? 22 : 38,
             decoration: BoxDecoration(
-              color: colors.primary,
+              color: colors.primary.withValues(alpha: 0.82),
               borderRadius: BorderRadius.circular(99),
             ),
           ),
@@ -13409,8 +22322,8 @@ class PremiumSectionHeader extends StatelessWidget {
                 Text(
                   title,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.2,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
                   ),
                 ),
                 if (subtitle != null) ...<Widget>[
@@ -13446,8 +22359,8 @@ class PremiumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final BorderRadius borderRadius = BorderRadius.circular(22);
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final BorderRadius borderRadius = BorderRadius.circular(tokens.cardRadius);
     final Widget content = Padding(padding: padding, child: child);
 
     return Container(
@@ -13456,19 +22369,14 @@ class PremiumCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[
-            colors.surfaceContainerHigh.withValues(alpha: 0.96),
-            colors.surfaceContainer.withValues(alpha: 0.92),
-          ],
+          colors: <Color>[tokens.surfaceElevated, tokens.cardBackground],
         ),
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.55),
-        ),
+        border: Border.all(color: tokens.cardBorder, width: tokens.borderWidth),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+            color: tokens.shadow.withValues(alpha: tokens.shadowOpacity),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -13494,11 +22402,12 @@ class PremiumStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     final Color color = switch (tone) {
-      PremiumStatusTone.positive => const Color(0xFF22C55E),
+      PremiumStatusTone.positive => tokens.secondaryAccent,
       PremiumStatusTone.negative => colors.error,
-      PremiumStatusTone.warning => const Color(0xFFF59E0B),
-      PremiumStatusTone.accent => colors.primary,
+      PremiumStatusTone.warning => tokens.tertiaryAccent,
+      PremiumStatusTone.accent => tokens.primaryAccent,
       PremiumStatusTone.neutral => colors.onSurfaceVariant,
     };
     return Container(
@@ -13538,19 +22447,32 @@ class PremiumEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
     return PremiumCard(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Column(
           children: <Widget>[
-            Container(
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
               width: 58,
               height: 58,
               decoration: BoxDecoration(
-                color: colors.primary.withValues(alpha: 0.12),
+                color: tokens.primaryAccent.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: tokens.selectedBorder.withValues(alpha: 0.42),
+                ),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: tokens.glowColor,
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-              child: Icon(icon, color: colors.primary, size: 30),
+              child: Icon(icon, color: tokens.primaryAccent, size: 30),
             ),
             const SizedBox(height: 14),
             Text(
@@ -13564,9 +22486,11 @@ class PremiumEmptyState extends StatelessWidget {
             Text(
               description,
               textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
             ),
             if (actionLabel != null && onAction != null) ...<Widget>[
               const SizedBox(height: 14),
@@ -13578,6 +22502,36 @@ class PremiumEmptyState extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PopupActionLabel extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  const _PopupActionLabel({
+    required this.icon,
+    required this.label,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color resolvedColor =
+        color ?? Theme.of(context).colorScheme.onSurface;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: 18, color: resolvedColor),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: TextStyle(color: resolvedColor, fontWeight: FontWeight.w800),
+        ),
+      ],
     );
   }
 }
@@ -13615,18 +22569,18 @@ class PremiumDashboardHero extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: <Color>[
-            colors.primaryContainer.withValues(alpha: 0.92),
-            colors.surfaceContainerHighest.withValues(alpha: 0.88),
+            colors.primaryContainer.withValues(alpha: 0.72),
+            colors.surfaceContainerHighest.withValues(alpha: 0.82),
           ],
         ),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.16)),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.13)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -13641,12 +22595,14 @@ class PremiumDashboardHero extends StatelessWidget {
                     Text(
                       title,
                       style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                          ?.copyWith(fontWeight: FontWeight.w800, height: 1.05),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -14325,17 +23281,17 @@ extension AppThemeStyleDetails on AppThemeStyle {
   String get description {
     switch (this) {
       case AppThemeStyle.proDark:
-        return 'Negro profundo con acentos violeta premium.';
+        return 'OLED de lujo con violeta profundo y superficies elevadas.';
       case AppThemeStyle.graphite:
-        return 'Neutros sobrios para lectura prolongada.';
+        return 'Grafito ejecutivo, mínimo y editorial.';
       case AppThemeStyle.institutionalBlue:
-        return 'Azules financieros con contraste limpio.';
+        return 'Banca profesional con azul Bloomberg sobrio.';
       case AppThemeStyle.bitcoinDark:
-        return 'Carbón y naranja BTC en paleta completa.';
+        return 'Carbón premium con cobre y naranja Bitcoin.';
       case AppThemeStyle.terminalGreen:
-        return 'Oscuro técnico con energía terminal.';
+        return 'Trading terminal, verde técnico y alto foco.';
       case AppThemeStyle.highContrast:
-        return 'Máxima legibilidad y bordes marcados.';
+        return 'Accesibilidad premium con contraste limpio.';
     }
   }
 
@@ -14343,87 +23299,87 @@ extension AppThemeStyleDetails on AppThemeStyle {
     switch (this) {
       case AppThemeStyle.proDark:
         return const AppPalette(
-          background: Color(0xFF090B12),
-          surface: Color(0xFF111520),
-          surfaceAlt: Color(0xFF1B2233),
-          primary: Color(0xFF9B8CFF),
-          primarySoft: Color(0xFF28234F),
-          border: Color(0xFF30384C),
-          positive: Color(0xFF22C55E),
-          negative: Color(0xFFEF4444),
-          warning: Color(0xFFF59E0B),
-          textMain: Color(0xFFF8FAFC),
-          textMuted: Color(0xFF94A3B8),
+          background: Color(0xFF02030A),
+          surface: Color(0xFF0A0D18),
+          surfaceAlt: Color(0xFF151A2B),
+          primary: Color(0xFFA78BFA),
+          primarySoft: Color(0xFF241B4A),
+          border: Color(0xFF2B3150),
+          positive: Color(0xFF2DD4BF),
+          negative: Color(0xFFFB7185),
+          warning: Color(0xFFFBBF24),
+          textMain: Color(0xFFFAFBFF),
+          textMuted: Color(0xFF9AA6C1),
         );
       case AppThemeStyle.graphite:
         return const AppPalette(
-          background: Color(0xFF111315),
-          surface: Color(0xFF1B1F23),
-          surfaceAlt: Color(0xFF272C31),
-          primary: Color(0xFFCBD5E1),
-          primarySoft: Color(0xFF334155),
-          border: Color(0xFF3B424A),
-          positive: Color(0xFF16A34A),
-          negative: Color(0xFFDC2626),
-          warning: Color(0xFFD97706),
-          textMain: Color(0xFFF1F5F9),
-          textMuted: Color(0xFFA1A1AA),
+          background: Color(0xFF0F1012),
+          surface: Color(0xFF181A1D),
+          surfaceAlt: Color(0xFF24272B),
+          primary: Color(0xFFE5E7EB),
+          primarySoft: Color(0xFF30343A),
+          border: Color(0xFF3A3F46),
+          positive: Color(0xFF34D399),
+          negative: Color(0xFFF87171),
+          warning: Color(0xFFF59E0B),
+          textMain: Color(0xFFF8FAFC),
+          textMuted: Color(0xFFA7ADB7),
         );
       case AppThemeStyle.institutionalBlue:
         return const AppPalette(
-          background: Color(0xFF07111F),
-          surface: Color(0xFF0E1B2E),
-          surfaceAlt: Color(0xFF162A46),
-          primary: Color(0xFF60A5FA),
-          primarySoft: Color(0xFF12345C),
-          border: Color(0xFF25496F),
-          positive: Color(0xFF10B981),
-          negative: Color(0xFFF43F5E),
-          warning: Color(0xFFFBBF24),
-          textMain: Color(0xFFF8FAFC),
-          textMuted: Color(0xFF93A8C2),
+          background: Color(0xFF03101F),
+          surface: Color(0xFF071A31),
+          surfaceAlt: Color(0xFF102B4E),
+          primary: Color(0xFF38BDF8),
+          primarySoft: Color(0xFF0D3A68),
+          border: Color(0xFF1F5A89),
+          positive: Color(0xFF22C55E),
+          negative: Color(0xFFEF4444),
+          warning: Color(0xFFEAB308),
+          textMain: Color(0xFFF8FBFF),
+          textMuted: Color(0xFF9CB7D6),
         );
       case AppThemeStyle.bitcoinDark:
         return const AppPalette(
-          background: Color(0xFF0D0A06),
-          surface: Color(0xFF17110A),
-          surfaceAlt: Color(0xFF2A1B0D),
-          primary: Color(0xFFF7931A),
-          primarySoft: Color(0xFF3A220C),
-          border: Color(0xFF5C3A16),
-          positive: Color(0xFF22C55E),
+          background: Color(0xFF080604),
+          surface: Color(0xFF14100B),
+          surfaceAlt: Color(0xFF281A0E),
+          primary: Color(0xFFF59E0B),
+          primarySoft: Color(0xFF43270B),
+          border: Color(0xFF6B4518),
+          positive: Color(0xFF84CC16),
           negative: Color(0xFFEF4444),
-          warning: Color(0xFFF59E0B),
-          textMain: Color(0xFFFFFBEB),
-          textMuted: Color(0xFFD6B98A),
+          warning: Color(0xFFF97316),
+          textMain: Color(0xFFFFF7ED),
+          textMuted: Color(0xFFD4B483),
         );
       case AppThemeStyle.terminalGreen:
         return const AppPalette(
-          background: Color(0xFF020A06),
-          surface: Color(0xFF07140D),
-          surfaceAlt: Color(0xFF0E2618),
-          primary: Color(0xFF39FF88),
-          primarySoft: Color(0xFF073D20),
-          border: Color(0xFF176B3A),
+          background: Color(0xFF010805),
+          surface: Color(0xFF06120B),
+          surfaceAlt: Color(0xFF0C2616),
+          primary: Color(0xFF4ADE80),
+          primarySoft: Color(0xFF0B3B21),
+          border: Color(0xFF14532D),
           positive: Color(0xFF22C55E),
-          negative: Color(0xFFF87171),
+          negative: Color(0xFFFB7185),
           warning: Color(0xFFFACC15),
-          textMain: Color(0xFFEFFFF5),
-          textMuted: Color(0xFF88B99C),
+          textMain: Color(0xFFF0FFF7),
+          textMuted: Color(0xFF8BC7A2),
         );
       case AppThemeStyle.highContrast:
         return const AppPalette(
           background: Color(0xFF000000),
-          surface: Color(0xFF0B0B0B),
-          surfaceAlt: Color(0xFF1F1F1F),
+          surface: Color(0xFF080808),
+          surfaceAlt: Color(0xFF171717),
           primary: Color(0xFFFFFFFF),
-          primarySoft: Color(0xFF2C2C2C),
+          primarySoft: Color(0xFF262626),
           border: Color(0xFFFFFFFF),
-          positive: Color(0xFF00E676),
-          negative: Color(0xFFFF1744),
+          positive: Color(0xFF00F57A),
+          negative: Color(0xFFFF3355),
           warning: Color(0xFFFFD600),
           textMain: Color(0xFFFFFFFF),
-          textMuted: Color(0xFFE0E0E0),
+          textMuted: Color(0xFFE6E6E6),
         );
     }
   }
