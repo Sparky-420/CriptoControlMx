@@ -9,6 +9,7 @@ import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sig
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -3087,40 +3088,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   }
 
   CoinAudit _auditCoin(String coin) {
-    double buys = 0.0;
-    double sells = 0.0;
-    double transferIns = 0.0;
-    double transferOuts = 0.0;
-    double fees = 0.0;
-
-    for (final Movement movement in _movements.where(
-      (Movement m) => m.coin == coin,
-    )) {
-      final double total = movement.quantity * movement.unitPrice;
-      fees += movement.fee;
-
-      switch (movement.type) {
-        case MovementType.buy:
-          buys += total + movement.fee;
-          break;
-        case MovementType.sell:
-          sells += total - movement.fee;
-          break;
-        case MovementType.transferIn:
-          transferIns += total + movement.fee;
-          break;
-        case MovementType.transferOut:
-          transferOuts += total + movement.fee;
-          break;
-      }
-    }
-
-    return CoinAudit(
-      buys: buys,
-      sells: sells,
-      transferIns: transferIns,
-      transferOuts: transferOuts,
-      fees: fees,
+    return FinancialEngine.computeAudit(
+      coin: coin,
+      movements: _movements,
+      debugLedger: kDebugMode && coin.toUpperCase() == 'UNI',
     );
   }
 
@@ -3816,6 +3787,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   void _showCoinDetails(BuildContext pageContext, CoinStats stats) {
     final CoinAudit audit = _auditCoin(stats.coin);
+    final double estimatedExitFee = stats.estimatedExitFee(_sellFeePercent);
+    final double estimatedNetValue = stats.estimatedNetValue(_sellFeePercent);
+    final double estimatedNetPnl = stats.estimatedNetPnl(_sellFeePercent);
 
     showModalBottomSheet<void>(
       context: pageContext,
@@ -3848,35 +3822,82 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                     emphasized: true,
                   ),
                   _SummaryDetailLine(
-                    'P&L no realizado',
+                    'P&L no realizado bruto',
                     _coinsMoney(stats.unrealizedPL),
                     valueColor: pnlColor(stats.unrealizedPL),
                     emphasized: true,
+                    tooltip:
+                        'Diferencia entre el valor actual y el costo base, antes de una posible comisión de venta.',
+                  ),
+                  _SummaryDetailLine(
+                    'P&L neto estimado',
+                    _coinsMoney(estimatedNetPnl),
+                    valueColor: pnlColor(estimatedNetPnl),
+                    tooltip:
+                        'Resultado aproximado después de descontar la comisión configurada de salida.',
                   ),
                   _SummaryDetailLine(
                     'Precio recuperación',
                     _coinsMoney(stats.netBreakEvenPrice(_sellFeePercent)),
+                    tooltip:
+                        'Precio requerido para recuperar el costo base después de la comisión estimada de salida.',
                   ),
                 ],
               ),
             ),
             CardPanel(
-              title: 'Auditoría',
-              subtitle: 'Desglose de movimientos.',
+              title: 'Auditoría del costo base',
+              subtitle: 'Conciliación por costo promedio ponderado.',
               child: Column(
                 children: <Widget>[
-                  _SummaryDetailLine('Compras', _coinsMoney(audit.buys)),
-                  _SummaryDetailLine('Ventas', _coinsMoney(audit.sells)),
                   _SummaryDetailLine(
-                    'Entradas',
-                    _coinsMoney(audit.transferIns),
+                    'Costo base incorporado por compras',
+                    _coinsMoney(audit.costBaseFromBuys),
                   ),
                   _SummaryDetailLine(
-                    'Salidas',
-                    _coinsMoney(audit.transferOuts),
+                    'Costo base incorporado por entradas',
+                    _coinsMoney(audit.costBaseFromTransferIns),
                   ),
-                  _SummaryDetailLine('Comisiones', _coinsMoney(audit.fees)),
-                  _SummaryDetailLine('Promedio', _coinsMoney(stats.avgPrice)),
+                  _SummaryDetailLine(
+                    'Costo base vendido',
+                    '-${_coinsMoney(audit.costBaseSold)}',
+                  ),
+                  _SummaryDetailLine(
+                    'Costo base retirado por salidas',
+                    '-${_coinsMoney(audit.costBaseTransferredOut)}',
+                  ),
+                  _SummaryDetailLine(
+                    'Ajustes de costo base',
+                    _coinsMoney(audit.accountingAdjustments),
+                  ),
+                  if (audit.undeterminedTransferInCount > 0)
+                    _SummaryDetailLine(
+                      'Entradas sin costo base',
+                      '${audit.undeterminedTransferInCount}',
+                    ),
+                  _SummaryDetailLine(
+                    'Costo base actual',
+                    _coinsMoney(audit.reconciledCostBase),
+                    emphasized: true,
+                  ),
+                  if (audit.saleGrossProceeds > 0)
+                    _SummaryDetailLine(
+                      'Ingreso bruto por ventas',
+                      _coinsMoney(audit.saleGrossProceeds),
+                    ),
+                  if (audit.transferOutMarketValue > 0)
+                    _SummaryDetailLine(
+                      'Valor de mercado enviado',
+                      _coinsMoney(audit.transferOutMarketValue),
+                    ),
+                  _SummaryDetailLine(
+                    'Comisiones registradas',
+                    _coinsMoney(audit.fees),
+                  ),
+                  _SummaryDetailLine(
+                    'Comisiones capitalizadas incluidas',
+                    _coinsMoney(audit.capitalizedFees),
+                  ),
                   _SummaryDetailLine(
                     'P&L realizado',
                     _coinsMoney(stats.realizedPL),
@@ -3886,18 +3907,48 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               ),
             ),
             CardPanel(
-              title: 'Fórmulas claras',
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              title: 'Resultado actual',
+              subtitle: 'Bruto y neto estimado separados.',
+              child: Column(
                 children: <Widget>[
-                  Text('Promedio = invertido actual / cantidad actual'),
-                  SizedBox(height: 6),
-                  Text(
-                    'P&L no realizado = valor de cartera - invertido actual',
+                  _SummaryDetailLine(
+                    'Valor actual bruto',
+                    _coinsMoney(stats.currentValue),
+                    emphasized: true,
                   ),
-                  SizedBox(height: 6),
-                  Text(
-                    'Precio recuperación = promedio / (1 - comisión de salida)',
+                  _SummaryDetailLine(
+                    'P&L no realizado bruto',
+                    _coinsMoney(stats.unrealizedPL),
+                    valueColor: pnlColor(stats.unrealizedPL),
+                    tooltip:
+                        'Diferencia entre el valor actual y el costo base, antes de una posible comisión de venta.',
+                  ),
+                  _SummaryDetailLine(
+                    'Comisión estimada de salida',
+                    _coinsMoney(estimatedExitFee),
+                  ),
+                  _SummaryDetailLine(
+                    'Valor neto estimado',
+                    _coinsMoney(estimatedNetValue),
+                  ),
+                  _SummaryDetailLine(
+                    'P&L neto estimado',
+                    _coinsMoney(estimatedNetPnl),
+                    valueColor: pnlColor(estimatedNetPnl),
+                    tooltip:
+                        'Resultado aproximado después de descontar la comisión configurada de salida.',
+                  ),
+                  _SummaryDetailLine(
+                    'Precio promedio',
+                    _coinsMoney(stats.avgPrice),
+                    tooltip:
+                        'Costo base actual dividido entre las unidades disponibles.',
+                  ),
+                  _SummaryDetailLine(
+                    'Precio recuperación neto',
+                    _coinsMoney(stats.netBreakEvenPrice(_sellFeePercent)),
+                    tooltip:
+                        'Precio requerido para recuperar el costo base después de la comisión estimada de salida.',
                   ),
                 ],
               ),
@@ -7252,12 +7303,14 @@ class _SummaryDetailLine extends StatelessWidget {
   final String value;
   final bool emphasized;
   final Color? valueColor;
+  final String? tooltip;
 
   const _SummaryDetailLine(
     this.label,
     this.value, {
     this.emphasized = false,
     this.valueColor,
+    this.tooltip,
   });
 
   @override
@@ -7274,6 +7327,23 @@ class _SummaryDetailLine extends StatelessWidget {
       fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
       height: 1.2,
     );
+    final Widget labelWidget = tooltip == null
+        ? Text(label, style: labelStyle)
+        : Tooltip(
+            message: tooltip!,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Flexible(child: Text(label, style: labelStyle)),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: colors.onSurfaceVariant,
+                ),
+              ],
+            ),
+          );
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -7286,7 +7356,7 @@ class _SummaryDetailLine extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(label, style: labelStyle),
+                labelWidget,
                 const SizedBox(height: 3),
                 Text(value, style: valueStyle),
               ],
@@ -7295,10 +7365,7 @@ class _SummaryDetailLine extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              Expanded(
-                flex: 5,
-                child: Text(label, maxLines: 2, style: labelStyle),
-              ),
+              Expanded(flex: 5, child: labelWidget),
               const SizedBox(width: 12),
               Expanded(
                 flex: 6,
@@ -23642,6 +23709,7 @@ class FinancialEngine {
     required List<String> coins,
     required List<Movement> movements,
     required Map<String, double> currentPrices,
+    bool debugLedger = false,
   }) {
     final Map<String, CoinStats> stats = <String, CoinStats>{
       for (final String coin in coins)
@@ -23660,13 +23728,18 @@ class FinancialEngine {
       final Movement movement = entry.value;
       final CoinStats? stat = stats[movement.coin];
       if (stat == null) continue;
+      final double quantityBefore = stat.quantity;
+      final double costBaseBefore = stat.costBase;
+      double costBaseAdded = 0.0;
+      double costBaseRemoved = 0.0;
 
       switch (movement.type) {
         case MovementType.buy:
         case MovementType.transferIn:
           stat.quantity += movement.quantity;
-          stat.costBase += movement.grossTotal + movement.fee;
-          stat.totalInvested += movement.grossTotal + movement.fee;
+          costBaseAdded = movement.grossTotal + movement.fee;
+          stat.costBase += costBaseAdded;
+          stat.totalInvested += costBaseAdded;
           stat.feesPaid += movement.fee;
           break;
 
@@ -23683,6 +23756,7 @@ class FinancialEngine {
           stat.realizedPL += proceeds - removedCost;
           stat.quantity -= quantityToRemove;
           stat.costBase -= removedCost;
+          costBaseRemoved = removedCost;
           stat.feesPaid += movement.fee;
           break;
 
@@ -23697,8 +23771,21 @@ class FinancialEngine {
 
           stat.quantity -= quantityToRemove;
           stat.costBase -= removedCost;
+          costBaseRemoved = removedCost;
           stat.feesPaid += movement.fee;
           break;
+      }
+
+      if (debugLedger && kDebugMode) {
+        debugPrint(
+          'LEDGER ${movement.coin} id=${movement.id} date=${movement.date.toIso8601String()} '
+          'type=${movement.type.name} qty=${movement.quantity.toStringAsFixed(8)} '
+          'price=${movement.unitPrice.toStringAsFixed(8)} total=${movement.grossTotal.toStringAsFixed(8)} '
+          'fee=${movement.fee.toStringAsFixed(8)} qtyBefore=${quantityBefore.toStringAsFixed(8)} '
+          'qtyAfter=${stat.quantity.toStringAsFixed(8)} costBefore=${costBaseBefore.toStringAsFixed(8)} '
+          'costAdded=${costBaseAdded.toStringAsFixed(8)} costRemoved=${costBaseRemoved.toStringAsFixed(8)} '
+          'costAfter=${stat.costBase.toStringAsFixed(8)}',
+        );
       }
 
       if (stat.quantity.abs() < 0.0000000001) {
@@ -23716,6 +23803,142 @@ class FinancialEngine {
     }
 
     return stats;
+  }
+
+  static CoinAudit computeAudit({
+    required String coin,
+    required List<Movement> movements,
+    bool debugLedger = false,
+  }) {
+    double buyGrossCost = 0.0;
+    double transferInGrossCost = 0.0;
+    double costBaseFromBuys = 0.0;
+    double costBaseFromTransferIns = 0.0;
+    double capitalizedFees = 0.0;
+    double costBaseSold = 0.0;
+    double costBaseTransferredOut = 0.0;
+    double saleGrossProceeds = 0.0;
+    double transferOutMarketValue = 0.0;
+    double totalFees = 0.0;
+    double realizedPL = 0.0;
+    int undeterminedTransferInCount = 0;
+    double quantity = 0.0;
+    double costBase = 0.0;
+
+    final List<MapEntry<int, Movement>> indexed =
+        movements
+            .asMap()
+            .entries
+            .where((MapEntry<int, Movement> entry) => entry.value.coin == coin)
+            .toList()
+          ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
+            final int dateCompare = a.value.date.compareTo(b.value.date);
+            if (dateCompare != 0) return dateCompare;
+            return a.key.compareTo(b.key);
+          });
+
+    for (final MapEntry<int, Movement> entry in indexed) {
+      final Movement movement = entry.value;
+      final double quantityBefore = quantity;
+      final double costBaseBefore = costBase;
+      double costBaseAdded = 0.0;
+      double costBaseRemoved = 0.0;
+      totalFees += movement.fee;
+
+      switch (movement.type) {
+        case MovementType.buy:
+          buyGrossCost += movement.grossTotal;
+          capitalizedFees += movement.fee;
+          costBaseAdded = movement.grossTotal + movement.fee;
+          costBaseFromBuys += costBaseAdded;
+          quantity += movement.quantity;
+          costBase += costBaseAdded;
+          break;
+        case MovementType.transferIn:
+          if (movement.grossTotal <= 0.0) {
+            undeterminedTransferInCount++;
+          }
+          transferInGrossCost += movement.grossTotal;
+          capitalizedFees += movement.fee;
+          costBaseAdded = movement.grossTotal + movement.fee;
+          costBaseFromTransferIns += costBaseAdded;
+          quantity += movement.quantity;
+          costBase += costBaseAdded;
+          break;
+        case MovementType.sell:
+          final double average = quantity > 0 ? costBase / quantity : 0.0;
+          final double quantityToRemove = movement.quantity > quantity
+              ? quantity
+              : movement.quantity;
+          costBaseRemoved = average * quantityToRemove;
+          saleGrossProceeds += movement.grossTotal;
+          costBaseSold += costBaseRemoved;
+          realizedPL += movement.grossTotal - movement.fee - costBaseRemoved;
+          quantity -= quantityToRemove;
+          costBase -= costBaseRemoved;
+          break;
+        case MovementType.transferOut:
+          final double average = quantity > 0 ? costBase / quantity : 0.0;
+          final double quantityToRemove = movement.quantity > quantity
+              ? quantity
+              : movement.quantity;
+          costBaseRemoved = average * quantityToRemove;
+          transferOutMarketValue += movement.grossTotal;
+          costBaseTransferredOut += costBaseRemoved;
+          quantity -= quantityToRemove;
+          costBase -= costBaseRemoved;
+          break;
+      }
+
+      if (debugLedger && kDebugMode) {
+        debugPrint(
+          'AUDIT $coin id=${movement.id} date=${movement.date.toIso8601String()} '
+          'type=${movement.type.name} qty=${movement.quantity.toStringAsFixed(8)} '
+          'price=${movement.unitPrice.toStringAsFixed(8)} total=${movement.grossTotal.toStringAsFixed(8)} '
+          'fee=${movement.fee.toStringAsFixed(8)} qtyBefore=${quantityBefore.toStringAsFixed(8)} '
+          'qtyAfter=${quantity.toStringAsFixed(8)} costBefore=${costBaseBefore.toStringAsFixed(8)} '
+          'costAdded=${costBaseAdded.toStringAsFixed(8)} costRemoved=${costBaseRemoved.toStringAsFixed(8)} '
+          'costAfter=${costBase.toStringAsFixed(8)}',
+        );
+      }
+
+      if (quantity.abs() < 0.0000000001) {
+        quantity = 0.0;
+        costBase = 0.0;
+      }
+
+      if (costBase.abs() < 0.00000001) {
+        costBase = 0.0;
+      }
+    }
+
+    final double reconciledCostBase =
+        costBaseFromBuys +
+        costBaseFromTransferIns -
+        costBaseSold -
+        costBaseTransferredOut;
+    final double accountingAdjustments = costBase - reconciledCostBase;
+
+    return CoinAudit(
+      buys: buyGrossCost + capitalizedFees,
+      sells: saleGrossProceeds,
+      transferIns: transferInGrossCost,
+      transferOuts: transferOutMarketValue,
+      fees: totalFees,
+      buyGrossCost: buyGrossCost,
+      transferInGrossCost: transferInGrossCost,
+      costBaseFromBuys: costBaseFromBuys,
+      costBaseFromTransferIns: costBaseFromTransferIns,
+      capitalizedFees: capitalizedFees,
+      costBaseSold: costBaseSold,
+      costBaseTransferredOut: costBaseTransferredOut,
+      saleGrossProceeds: saleGrossProceeds,
+      transferOutMarketValue: transferOutMarketValue,
+      accountingAdjustments: accountingAdjustments,
+      currentCostBase: costBase,
+      realizedPL: realizedPL,
+      undeterminedTransferInCount: undeterminedTransferInCount,
+    );
   }
 
   static PortfolioTotals totals(Map<String, CoinStats> stats) {
@@ -24119,6 +24342,12 @@ class CoinStats {
   double get currentValue => quantity * currentPrice;
   double get unrealizedPL => currentValue - costBase;
   double get breakEvenReal => avgPrice;
+  double estimatedExitFee(double sellFeePercent) =>
+      currentValue * (sellFeePercent / 100).clamp(0.0, 1.0);
+  double estimatedNetValue(double sellFeePercent) =>
+      currentValue - estimatedExitFee(sellFeePercent);
+  double estimatedNetPnl(double sellFeePercent) =>
+      estimatedNetValue(sellFeePercent) - costBase;
   double breakEvenWithExitFee([
     double sellFeePercent = FinancialEngine.defaultExitFeePercent,
   ]) => netBreakEvenPrice(sellFeePercent);
@@ -24156,6 +24385,19 @@ class CoinAudit {
   final double transferIns;
   final double transferOuts;
   final double fees;
+  final double buyGrossCost;
+  final double transferInGrossCost;
+  final double costBaseFromBuys;
+  final double costBaseFromTransferIns;
+  final double capitalizedFees;
+  final double costBaseSold;
+  final double costBaseTransferredOut;
+  final double saleGrossProceeds;
+  final double transferOutMarketValue;
+  final double accountingAdjustments;
+  final double currentCostBase;
+  final double realizedPL;
+  final int undeterminedTransferInCount;
 
   CoinAudit({
     required this.buys,
@@ -24163,7 +24405,27 @@ class CoinAudit {
     required this.transferIns,
     required this.transferOuts,
     required this.fees,
+    required this.buyGrossCost,
+    required this.transferInGrossCost,
+    required this.costBaseFromBuys,
+    required this.costBaseFromTransferIns,
+    required this.capitalizedFees,
+    required this.costBaseSold,
+    required this.costBaseTransferredOut,
+    required this.saleGrossProceeds,
+    required this.transferOutMarketValue,
+    required this.accountingAdjustments,
+    required this.currentCostBase,
+    required this.realizedPL,
+    this.undeterminedTransferInCount = 0,
   });
+
+  double get reconciledCostBase =>
+      costBaseFromBuys +
+      costBaseFromTransferIns +
+      accountingAdjustments -
+      costBaseSold -
+      costBaseTransferredOut;
 }
 
 class PortfolioTotals {
