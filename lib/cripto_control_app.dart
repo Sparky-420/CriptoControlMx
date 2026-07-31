@@ -3399,17 +3399,52 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     );
     final TextEditingController feeController = TextEditingController(
       text: existing != null
-          ? compact(existing.fee)
-          : compact(ocrCandidate?.fee ?? 0),
+          ? compact(existing.effectiveFeeFiatValue)
+          : compact(ocrCandidate?.feeFiatValue ?? ocrCandidate?.fee ?? 0),
     );
+    final TextEditingController receivedController = TextEditingController(
+      text: existing?.receivedAmount != null
+          ? compact(existing!.receivedAmount!)
+          : ocrCandidate?.receivedAmount != null
+          ? compact(ocrCandidate!.receivedAmount!)
+          : selectedType == MovementType.transferOut
+          ? qtyController.text
+          : '',
+    );
+    final TextEditingController cryptoFeeController = TextEditingController(
+      text: existing?.cryptoFeeAmount != null
+          ? compact(existing!.cryptoFeeAmount!)
+          : ocrCandidate?.cryptoFeeAmount != null
+          ? compact(ocrCandidate!.cryptoFeeAmount!)
+          : '',
+    );
+    final TextEditingController totalDebitedController = TextEditingController(
+      text: existing?.totalDebitedAmount != null
+          ? compact(existing!.totalDebitedAmount!)
+          : ocrCandidate?.totalDebitedAmount != null
+          ? compact(ocrCandidate!.totalDebitedAmount!)
+          : '',
+    );
+    String selectedFeeAsset = existing?.cryptoFeeAsset.isNotEmpty == true
+        ? existing!.cryptoFeeAsset
+        : ocrCandidate?.cryptoFeeAsset.isNotEmpty == true
+        ? ocrCandidate!.cryptoFeeAsset
+        : selectedCoin;
     final TextEditingController sourceController = TextEditingController(
-      text: existing?.source ?? ocrCandidate?.source ?? '',
+      text:
+          existing?.effectiveSourcePlatform ??
+          ocrCandidate?.sourcePlatform ??
+          ocrCandidate?.source ??
+          '',
     );
     final TextEditingController walletController = TextEditingController(
-      text: existing?.wallet ?? '',
+      text:
+          existing?.effectiveDestinationPlatform ??
+          ocrCandidate?.destinationPlatform ??
+          '',
     );
     final TextEditingController networkController = TextEditingController(
-      text: existing?.network ?? '',
+      text: existing?.network ?? ocrCandidate?.network ?? '',
     );
     final TextEditingController noteController = TextEditingController(
       text: existing?.note ?? ocrCandidate?.note ?? '',
@@ -3492,7 +3527,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                           .toList(),
                       onChanged: (String? value) {
                         if (value != null) {
-                          setModalState(() => selectedCoin = value);
+                          setModalState(() {
+                            if (selectedFeeAsset == selectedCoin) {
+                              selectedFeeAsset = value;
+                            }
+                            selectedCoin = value;
+                          });
                         }
                       },
                     ),
@@ -3550,25 +3590,124 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: qtyController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
+                    if (selectedType == MovementType.transferOut) ...<Widget>[
+                      TextField(
+                        controller: receivedController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (_) => setModalState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'Cantidad recibida',
+                          suffixText: selectedCoin,
+                          prefixIcon: const Icon(Icons.call_received_rounded),
+                        ),
                       ),
-                      decoration: const InputDecoration(
-                        labelText: 'Cantidad cripto',
-                        prefixIcon: Icon(Icons.token_outlined),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: cryptoFeeController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (_) => setModalState(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'Comisión en cripto',
+                          prefixIcon: Icon(Icons.toll_outlined),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _coins.contains(selectedFeeAsset)
+                            ? selectedFeeAsset
+                            : selectedCoin,
+                        decoration: const InputDecoration(
+                          labelText: 'Activo de la comisión',
+                          prefixIcon: Icon(Icons.currency_exchange_rounded),
+                        ),
+                        items: _coins
+                            .map(
+                              (String coin) => DropdownMenuItem<String>(
+                                value: coin,
+                                child: Text(coin),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (String? value) {
+                          if (value != null) {
+                            setModalState(() => selectedFeeAsset = value);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: totalDebitedController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (_) => setModalState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'Total descontado',
+                          suffixText: selectedCoin,
+                          prefixIcon: const Icon(Icons.output_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Builder(
+                        builder: (BuildContext context) {
+                          final TransferAmounts amounts =
+                              reconcileTransferAmounts(
+                                primaryAsset: selectedCoin,
+                                receivedAmount: parseFlexibleDecimal(
+                                  receivedController.text,
+                                ),
+                                cryptoFeeAmount: parseFlexibleDecimal(
+                                  cryptoFeeController.text,
+                                ),
+                                cryptoFeeAsset: selectedFeeAsset,
+                                totalDebitedAmount: parseFlexibleDecimal(
+                                  totalDebitedController.text,
+                                ),
+                              );
+                          final bool valid =
+                              amounts.isComplete &&
+                              amounts.isConsistent(selectedCoin);
+                          return Text(
+                            valid
+                                ? 'Cuadra: recibido + comisión = total descontado.'
+                                : amounts.warnings.last,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: valid
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(context).colorScheme.error,
+                                ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ] else ...<Widget>[
+                      TextField(
+                        controller: qtyController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Cantidad cripto',
+                          prefixIcon: Icon(Icons.token_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     TextField(
                       controller: priceController,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: 'Precio unitario MXN',
-                        prefixIcon: Icon(Icons.attach_money_rounded),
+                      decoration: InputDecoration(
+                        labelText: selectedType == MovementType.transferOut
+                            ? 'Precio de referencia MXN (opcional)'
+                            : 'Precio unitario MXN',
+                        prefixIcon: const Icon(Icons.attach_money_rounded),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -3578,32 +3717,33 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                         decimal: true,
                       ),
                       decoration: const InputDecoration(
-                        labelText: 'Comisión MXN',
+                        labelText: 'Valor de la comisión en MXN',
                         prefixIcon: Icon(Icons.receipt_long_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: sourceController,
-                      decoration: const InputDecoration(
-                        labelText: 'Plataforma',
-                        prefixIcon: Icon(Icons.account_balance_outlined),
+                      decoration: InputDecoration(
+                        labelText: selectedType == MovementType.transferOut
+                            ? 'Plataforma de origen'
+                            : 'Plataforma',
+                        prefixIcon: const Icon(Icons.account_balance_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: walletController,
                       decoration: InputDecoration(
-                        labelText:
-                            useOcr && selectedType == MovementType.transferIn
+                        labelText: selectedType == MovementType.transferOut
+                            ? 'Plataforma de destino'
+                            : useOcr && selectedType == MovementType.transferIn
                             ? 'Procedencia'
-                            : useOcr && selectedType == MovementType.transferOut
-                            ? 'Destino'
                             : 'Cartera',
                         helperText:
-                            useOcr &&
-                                (selectedType == MovementType.transferIn ||
-                                    selectedType == MovementType.transferOut)
+                            selectedType == MovementType.transferOut ||
+                                (useOcr &&
+                                    selectedType == MovementType.transferIn)
                             ? 'Ej.: Bitso, MetaMask, Binance, Coinbase u otra'
                             : null,
                         prefixIcon: const Icon(
@@ -3632,26 +3772,83 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                       width: double.infinity,
                       child: FilledButton.icon(
                         onPressed: () async {
-                          final double? quantity = double.tryParse(
-                            qtyController.text.trim(),
+                          TransferAmounts? transferAmounts;
+                          double? quantity = parseFlexibleDecimal(
+                            qtyController.text,
                           );
-                          final double? unitPrice = double.tryParse(
-                            priceController.text.trim(),
+                          final double? parsedUnitPrice = parseFlexibleDecimal(
+                            priceController.text,
                           );
-                          final double fee =
-                              double.tryParse(feeController.text.trim()) ?? 0.0;
+                          double fee =
+                              parseFlexibleDecimal(feeController.text) ?? 0.0;
+
+                          if (selectedType == MovementType.transferOut) {
+                            transferAmounts = reconcileTransferAmounts(
+                              primaryAsset: selectedCoin,
+                              receivedAmount: parseFlexibleDecimal(
+                                receivedController.text,
+                              ),
+                              cryptoFeeAmount: parseFlexibleDecimal(
+                                cryptoFeeController.text,
+                              ),
+                              cryptoFeeAsset: selectedFeeAsset,
+                              totalDebitedAmount: parseFlexibleDecimal(
+                                totalDebitedController.text,
+                              ),
+                              sourcePlatform: sourceController.text,
+                              destinationPlatform: walletController.text,
+                              network: networkController.text,
+                            );
+                            if (!transferAmounts.isComplete ||
+                                !transferAmounts.isConsistent(selectedCoin)) {
+                              _snack(
+                                pageContext,
+                                transferAmounts.warnings.last,
+                              );
+                              return;
+                            }
+                            if (transferAmounts.sourcePlatform.isEmpty ||
+                                transferAmounts.destinationPlatform.isEmpty) {
+                              _snack(
+                                pageContext,
+                                'Indica plataforma de origen y destino',
+                              );
+                              return;
+                            }
+                            if (transferAmounts.sourcePlatform.toLowerCase() ==
+                                transferAmounts.destinationPlatform
+                                    .toLowerCase()) {
+                              _snack(
+                                pageContext,
+                                'Origen y destino deben ser distintos',
+                              );
+                              return;
+                            }
+                            quantity = transferAmounts.receivedAmount;
+                            if (fee == 0 &&
+                                selectedFeeAsset == selectedCoin &&
+                                parsedUnitPrice != null &&
+                                parsedUnitPrice > 0) {
+                              fee =
+                                  transferAmounts.cryptoFeeAmount! *
+                                  parsedUnitPrice;
+                            }
+                          }
 
                           if (quantity == null || quantity <= 0) {
                             _snack(pageContext, 'Pon una cantidad válida');
                             return;
                           }
 
-                          if (unitPrice == null || unitPrice <= 0) {
+                          if (selectedType != MovementType.transferOut &&
+                              (parsedUnitPrice == null ||
+                                  parsedUnitPrice <= 0)) {
                             _snack(pageContext, 'Pon un precio mayor a cero');
                             return;
                           }
 
-                          if (quantity * unitPrice <= 0) {
+                          if (selectedType != MovementType.transferOut &&
+                              quantity * parsedUnitPrice! <= 0) {
                             _snack(
                               pageContext,
                               'El total MXN debe ser mayor a cero',
@@ -3677,22 +3874,36 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                             return;
                           }
 
-                          final Movement movement =
-                              await _movementWithCurrentSyncMetadata(
-                                Movement(
-                                  type: selectedType,
-                                  coin: selectedCoin,
-                                  date: selectedDate,
-                                  quantity: quantity,
-                                  unitPrice: unitPrice,
-                                  fee: fee,
-                                  source: sourceController.text.trim(),
-                                  wallet: walletController.text.trim(),
-                                  network: networkController.text.trim(),
-                                  note: noteController.text.trim(),
-                                ),
-                                existing: existing,
-                              );
+                          final Movement
+                          movement = await _movementWithCurrentSyncMetadata(
+                            Movement(
+                              type: selectedType,
+                              coin: selectedCoin,
+                              date: selectedDate,
+                              quantity: quantity,
+                              unitPrice: parsedUnitPrice ?? 0.0,
+                              fee: fee,
+                              receivedAmount: transferAmounts?.receivedAmount,
+                              cryptoFeeAmount: transferAmounts?.cryptoFeeAmount,
+                              cryptoFeeAsset:
+                                  transferAmounts?.cryptoFeeAsset ?? '',
+                              totalDebitedAmount:
+                                  transferAmounts?.totalDebitedAmount,
+                              feeFiatValue:
+                                  selectedType == MovementType.transferOut
+                                  ? fee
+                                  : null,
+                              sourcePlatform:
+                                  transferAmounts?.sourcePlatform ?? '',
+                              destinationPlatform:
+                                  transferAmounts?.destinationPlatform ?? '',
+                              source: sourceController.text.trim(),
+                              wallet: walletController.text.trim(),
+                              network: networkController.text.trim(),
+                              note: noteController.text.trim(),
+                            ),
+                            existing: existing,
+                          );
 
                           if (_wouldCreateInvalidPosition(
                             movement,
@@ -4115,6 +4326,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         'cartera',
         'red',
         'nota',
+        'cantidad_recibida',
+        'comision_cripto',
+        'activo_comision',
+        'total_descontado',
+        'valor_comision_mxn',
+        'plataforma_origen',
+        'plataforma_destino',
       ],
       ..._movements.map((Movement m) {
         return <Object?>[
@@ -4130,6 +4348,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           m.wallet,
           m.network,
           m.note,
+          m.receivedAmount == null ? '' : fixed(m.receivedAmount!, 8),
+          m.cryptoFeeAmount == null ? '' : fixed(m.cryptoFeeAmount!, 8),
+          m.cryptoFeeAsset,
+          m.totalDebitedAmount == null ? '' : fixed(m.totalDebitedAmount!, 8),
+          m.feeFiatValue == null ? '' : fixed(m.feeFiatValue!, 2),
+          m.sourcePlatform,
+          m.destinationPlatform,
         ];
       }),
     ];
@@ -4330,6 +4555,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'Cartera',
       'Red',
       'Nota',
+      'Cantidad recibida',
+      'Comisión cripto',
+      'Activo comisión',
+      'Total descontado',
+      'Valor comisión MXN',
+      'Plataforma origen',
+      'Plataforma destino',
     ]);
 
     for (final Movement movement in _movements) {
@@ -4346,6 +4578,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         movement.wallet,
         movement.network,
         movement.note,
+        movement.receivedAmount,
+        movement.cryptoFeeAmount,
+        movement.cryptoFeeAsset,
+        movement.totalDebitedAmount,
+        movement.feeFiatValue,
+        movement.sourcePlatform,
+        movement.destinationPlatform,
       ]);
     }
 
@@ -4729,25 +4968,29 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       hasField = true;
       final dynamic value = json[key];
       if (value == null && key != keys.last) continue;
-      if (value is num || double.tryParse(value?.toString() ?? '') != null)
+      if (value is num || double.tryParse(value?.toString() ?? '') != null) {
         return;
+      }
       throw FormatException('Movimiento #$number tiene $label no numérico');
     }
-    if (hasField)
+    if (hasField) {
       throw FormatException('Movimiento #$number tiene $label no numérico');
+    }
   }
 
   Map<String, dynamic> _validatedImportMovement(dynamic raw, int index) {
     final int number = index + 1;
-    if (raw is! Map)
+    if (raw is! Map) {
       throw FormatException('Movimiento #$number no es un objeto válido');
+    }
     final Map<String, dynamic> json = Map<String, dynamic>.from(raw);
     if (json.containsKey('type') && !_isKnownImportMovementType(json['type'])) {
       throw FormatException('Movimiento #$number tiene tipo desconocido');
     }
     final dynamic coin = json['coin'] ?? json['crypto'];
-    if (coin == null || coin.toString().trim().isEmpty)
+    if (coin == null || coin.toString().trim().isEmpty) {
       throw FormatException('Movimiento #$number no tiene moneda');
+    }
     _requireImportNumber(json, <String>['quantity'], 'cantidad', number);
     _requireImportNumber(
       json,
@@ -4761,9 +5004,54 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'comisión',
       number,
     );
+    _requireImportNumber(
+      json,
+      <String>['receivedAmount', 'received_amount'],
+      'cantidad recibida',
+      number,
+    );
+    _requireImportNumber(
+      json,
+      <String>['cryptoFeeAmount', 'crypto_fee_amount'],
+      'comisión cripto',
+      number,
+    );
+    _requireImportNumber(
+      json,
+      <String>['totalDebitedAmount', 'total_debited_amount'],
+      'total descontado',
+      number,
+    );
+    _requireImportNumber(
+      json,
+      <String>['feeFiatValue', 'fee_fiat_value'],
+      'valor fiat de comisión',
+      number,
+    );
     if (json.containsKey('date') &&
         DateTime.tryParse(json['date']?.toString() ?? '') == null) {
       throw FormatException('Movimiento #$number tiene fecha inválida');
+    }
+    final bool hasStructuredTransfer = <String>[
+      'receivedAmount',
+      'received_amount',
+      'cryptoFeeAmount',
+      'crypto_fee_amount',
+      'totalDebitedAmount',
+      'total_debited_amount',
+    ].any(json.containsKey);
+    if (hasStructuredTransfer) {
+      final Movement movement = Movement.fromJson(json);
+      if (movement.type != MovementType.transferOut) {
+        throw FormatException(
+          'Movimiento #$number usa campos de transferencia en un tipo incompatible',
+        );
+      }
+      if (!movement.hasConsistentTransferAmounts) {
+        throw FormatException(
+          'Movimiento #$number no cuadra recibido + comisión con total descontado',
+        );
+      }
     }
     return json;
   }
@@ -4775,8 +5063,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
   Future<_ImportResult> _applyBackupJson(String rawJson) async {
     final dynamic decoded = jsonDecode(rawJson.trim());
-    if (decoded is! Map)
+    if (decoded is! Map) {
       throw const FormatException('La raíz de la copia no es un objeto válido');
+    }
     final Map<String, dynamic> backup = Map<String, dynamic>.from(decoded);
 
     final dynamic movementsRaw = backup['movements'];
@@ -4785,14 +5074,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     final bool hasSnapshots = backup.containsKey('snapshots');
     final dynamic snapshotsRaw = backup['snapshots'];
 
-    if (movementsRaw is! List)
+    if (movementsRaw is! List) {
       throw const FormatException('La copia no contiene movimientos válidos');
-    if (pricesRaw is! Map)
+    }
+    if (pricesRaw is! Map) {
       throw const FormatException('La copia no contiene precios válidos');
-    if (hasSnapshots && snapshotsRaw is! List)
+    }
+    if (hasSnapshots && snapshotsRaw is! List) {
       throw const FormatException(
         'Las instantáneas de la copia no son válidas',
       );
+    }
 
     var importedMovementMetadataWarning = false;
     final List<Movement> imported = <Movement>[];
@@ -7977,6 +8269,14 @@ class _OcrMovementCandidate {
   final double? amountMxn;
   final double? unitPrice;
   final double fee;
+  final double? receivedAmount;
+  final double? cryptoFeeAmount;
+  final String cryptoFeeAsset;
+  final double? totalDebitedAmount;
+  final double? feeFiatValue;
+  final String sourcePlatform;
+  final String destinationPlatform;
+  final String network;
   final DateTime date;
   final String source;
   final String note;
@@ -7990,6 +8290,14 @@ class _OcrMovementCandidate {
     required this.amountMxn,
     required this.unitPrice,
     required this.fee,
+    this.receivedAmount,
+    this.cryptoFeeAmount,
+    this.cryptoFeeAsset = '',
+    this.totalDebitedAmount,
+    this.feeFiatValue,
+    this.sourcePlatform = '',
+    this.destinationPlatform = '',
+    this.network = '',
     required this.date,
     required this.source,
     required this.note,
@@ -8002,7 +8310,10 @@ class _OcrMovementCandidate {
       coin != null ||
       quantity != null ||
       amountMxn != null ||
-      unitPrice != null;
+      unitPrice != null ||
+      receivedAmount != null ||
+      cryptoFeeAmount != null ||
+      totalDebitedAmount != null;
 }
 
 enum _OcrReadQuality { complete, partial, weak }
@@ -8183,7 +8494,13 @@ class _MovementsTabState extends State<MovementsTab> {
 
   _OcrMovementCandidate _parseOcrMovementText(String rawText) {
     late final _OcrMovementCandidate parsed;
-    if (_looksLikeBitsoCapture(rawText)) {
+    final String folded = _foldOcrText(rawText);
+    final bool hasStructuredTransferLabels = RegExp(
+      r'\b(la persona recibe|cantidad recibida|vas a transferir|comision de red|total a descontar|total descontado)\b',
+    ).hasMatch(folded);
+    if (hasStructuredTransferLabels) {
+      parsed = _parseMercadoPagoOcrText(rawText);
+    } else if (_looksLikeBitsoCapture(rawText)) {
       parsed = _parseBitsoOcrText(rawText);
     } else {
       parsed = _parseMercadoPagoOcrText(rawText);
@@ -8202,11 +8519,14 @@ class _MovementsTabState extends State<MovementsTab> {
       r'\b(transferencia|envio|enviaste)\b',
     ).hasMatch(value);
     String? warning;
-    if (hasReceptionText ||
-        (hasTransferText && parsed.type == MovementType.transferIn)) {
+    if ((hasReceptionText ||
+            (hasTransferText && parsed.type == MovementType.transferIn)) &&
+        parsed.sourcePlatform.trim().isEmpty) {
       warning =
           'Recepción detectada: elige la procedencia (Bitso, MetaMask, Binance, Coinbase u otra) antes de guardar.';
-    } else if (hasTransferText && parsed.type == MovementType.transferOut) {
+    } else if (hasTransferText &&
+        parsed.type == MovementType.transferOut &&
+        parsed.destinationPlatform.trim().isEmpty) {
       warning =
           'Transferencia de salida detectada: elige el destino (Bitso, MetaMask, Binance, Coinbase u otro) antes de guardar.';
     } else if (hasTransferText) {
@@ -8222,6 +8542,14 @@ class _MovementsTabState extends State<MovementsTab> {
       amountMxn: parsed.amountMxn,
       unitPrice: parsed.unitPrice,
       fee: parsed.fee,
+      receivedAmount: parsed.receivedAmount,
+      cryptoFeeAmount: parsed.cryptoFeeAmount,
+      cryptoFeeAsset: parsed.cryptoFeeAsset,
+      totalDebitedAmount: parsed.totalDebitedAmount,
+      feeFiatValue: parsed.feeFiatValue,
+      sourcePlatform: parsed.sourcePlatform,
+      destinationPlatform: parsed.destinationPlatform,
+      network: parsed.network,
       date: parsed.date,
       source: parsed.source,
       note: parsed.note,
@@ -8551,6 +8879,9 @@ class _MovementsTabState extends State<MovementsTab> {
         coin = entry.value;
         break;
       }
+    }
+    if (type == MovementType.transferOut) {
+      coin = detectTransferPrimaryAsset(rawText) ?? coin;
     }
 
     double? quantity;
@@ -8897,18 +9228,63 @@ class _MovementsTabState extends State<MovementsTab> {
       }
     }
 
+    final bool hasStructuredTransferLabels =
+        type == MovementType.transferOut &&
+        RegExp(
+          r'\b(la persona recibe|cantidad recibida|vas a transferir|comision de red|total a descontar|total descontado)\b',
+        ).hasMatch(lower);
+    final TransferAmounts? transferAmounts =
+        hasStructuredTransferLabels && coin != null
+        ? parseTransferAmountsFromOcr(rawText, primaryAsset: coin)
+        : null;
+    if (transferAmounts != null) {
+      if (transferAmounts.cryptoFeeAmount != null) {
+        warnings.remove('Comisión no detectada; se usó 0.00 MXN.');
+      }
+      for (final String warning in transferAmounts.warnings) {
+        addWarning(warning);
+      }
+    }
+    final double? resolvedQuantity =
+        transferAmounts?.receivedAmount ?? quantity;
+    final double? feeFiatValue =
+        transferAmounts?.cryptoFeeAmount != null &&
+            unitPrice != null &&
+            transferAmounts!.cryptoFeeAsset == coin
+        ? transferAmounts.cryptoFeeAmount! * unitPrice
+        : null;
+
     if (coin == null) addWarning('Moneda no detectada.');
     if (type == null) addWarning('Tipo no detectado.');
-    if (quantity == null) addWarning('Cantidad cripto no detectada.');
-    if (amountMxn == null) addWarning('Monto MXN no detectado.');
+    if (resolvedQuantity == null) addWarning('Cantidad cripto no detectada.');
+    if (amountMxn == null && transferAmounts == null) {
+      addWarning('Monto MXN no detectado.');
+    }
 
     return _OcrMovementCandidate(
       type: type,
       coin: coin,
-      quantity: quantity,
+      quantity: resolvedQuantity,
       amountMxn: amountMxn,
       unitPrice: unitPrice,
-      fee: fee,
+      fee: feeFiatValue ?? fee,
+      receivedAmount: transferAmounts?.receivedAmount,
+      cryptoFeeAmount: transferAmounts?.cryptoFeeAmount,
+      cryptoFeeAsset: transferAmounts?.cryptoFeeAsset ?? '',
+      totalDebitedAmount: transferAmounts?.totalDebitedAmount,
+      feeFiatValue: feeFiatValue,
+      sourcePlatform: transferAmounts?.sourcePlatform.isNotEmpty == true
+          ? transferAmounts!.sourcePlatform
+          : looksLikeMercadoPago && type == MovementType.transferOut
+          ? 'Mercado Pago'
+          : '',
+      destinationPlatform:
+          transferAmounts?.destinationPlatform.isNotEmpty == true
+          ? transferAmounts!.destinationPlatform
+          : looksLikeMercadoPago && type == MovementType.transferIn
+          ? 'Mercado Pago'
+          : '',
+      network: transferAmounts?.network ?? '',
       date: date,
       source: looksLikeMercadoPago ? 'Mercado Pago' : '',
       note: looksLikeMercadoPago
@@ -8931,16 +9307,50 @@ class _MovementsTabState extends State<MovementsTab> {
       'amount': candidate.amountMxn,
       'unitPrice': candidate.unitPrice,
       'commission': candidate.fee,
+      'receivedAmount': candidate.receivedAmount,
+      'cryptoFeeAmount': candidate.cryptoFeeAmount,
+      'cryptoFeeAsset': candidate.cryptoFeeAsset,
+      'totalDebitedAmount': candidate.totalDebitedAmount,
+      'feeFiatValue': candidate.feeFiatValue,
+      'sourcePlatform': candidate.sourcePlatform,
+      'destinationPlatform': candidate.destinationPlatform,
+      'network': candidate.network,
+      'transferConsistent':
+          candidate.type == MovementType.transferOut &&
+              candidate.coin != null &&
+              candidate.receivedAmount != null
+          ? reconcileTransferAmounts(
+              primaryAsset: candidate.coin!,
+              receivedAmount: candidate.receivedAmount,
+              cryptoFeeAmount: candidate.cryptoFeeAmount,
+              cryptoFeeAsset: candidate.cryptoFeeAsset,
+              totalDebitedAmount: candidate.totalDebitedAmount,
+            ).isConsistent(candidate.coin!)
+          : null,
       'warnings': candidate.warnings,
     };
   }
 
   _OcrReadQuality _ocrReadQuality(_OcrMovementCandidate candidate) {
-    final bool hasCriticalData =
-        candidate.type != null &&
+    final bool hasCompleteTransfer =
+        candidate.type == MovementType.transferOut &&
         candidate.coin != null &&
-        candidate.quantity != null &&
-        candidate.unitPrice != null;
+        candidate.receivedAmount != null &&
+        candidate.cryptoFeeAmount != null &&
+        candidate.totalDebitedAmount != null &&
+        reconcileTransferAmounts(
+          primaryAsset: candidate.coin!,
+          receivedAmount: candidate.receivedAmount,
+          cryptoFeeAmount: candidate.cryptoFeeAmount,
+          cryptoFeeAsset: candidate.cryptoFeeAsset,
+          totalDebitedAmount: candidate.totalDebitedAmount,
+        ).isConsistent(candidate.coin!);
+    final bool hasCriticalData =
+        hasCompleteTransfer ||
+        (candidate.type != null &&
+            candidate.coin != null &&
+            candidate.quantity != null &&
+            candidate.unitPrice != null);
     if (hasCriticalData) return _OcrReadQuality.complete;
 
     final bool hasPartialData =
@@ -9103,6 +9513,35 @@ class _MovementsTabState extends State<MovementsTab> {
                     : money(candidate.unitPrice!),
               ),
               InfoLine('Comisión MXN', money(candidate.fee)),
+              if (candidate.type == MovementType.transferOut) ...<Widget>[
+                InfoLine(
+                  'Cantidad recibida',
+                  candidate.receivedAmount == null
+                      ? 'Revisión manual'
+                      : '${fixed(candidate.receivedAmount!, 8)} ${candidate.coin ?? ''}',
+                ),
+                InfoLine(
+                  'Comisión en cripto',
+                  candidate.cryptoFeeAmount == null
+                      ? 'Revisión manual'
+                      : '${fixed(candidate.cryptoFeeAmount!, 8)} ${candidate.cryptoFeeAsset}',
+                ),
+                InfoLine(
+                  'Total descontado',
+                  candidate.totalDebitedAmount == null
+                      ? 'Revisión manual'
+                      : '${fixed(candidate.totalDebitedAmount!, 8)} ${candidate.coin ?? ''}',
+                ),
+                if (candidate.sourcePlatform.isNotEmpty)
+                  InfoLine('Plataforma de origen', candidate.sourcePlatform),
+                if (candidate.destinationPlatform.isNotEmpty)
+                  InfoLine(
+                    'Plataforma de destino',
+                    candidate.destinationPlatform,
+                  ),
+                if (candidate.network.isNotEmpty)
+                  InfoLine('Red', candidate.network),
+              ],
               InfoLine('Fecha', shortDate(candidate.date)),
               InfoLine('Plataforma', candidate.source),
               const SizedBox(height: 16),
@@ -9228,18 +9667,46 @@ class _MovementsTabState extends State<MovementsTab> {
               InfoLine('Moneda', movement.coin),
               InfoLine('Tipo', movement.type.label),
               InfoLine('Fecha y hora', longDate(movement.date)),
-              InfoLine('Cantidad', crypto(movement.quantity)),
-              InfoLine('Precio', money(movement.unitPrice)),
-              InfoLine('Comisión', money(movement.fee)),
-              InfoLine(
-                'Total',
-                money(movement.quantity * movement.unitPrice),
-                emphasized: true,
-              ),
-              if (movement.source.isNotEmpty)
-                InfoLine('Plataforma', movement.source),
-              if (movement.wallet.isNotEmpty)
-                InfoLine('Cartera', movement.wallet),
+              if (movement.isStructuredOwnedTransfer) ...<Widget>[
+                InfoLine(
+                  'Cantidad recibida',
+                  '${crypto(movement.effectiveReceivedAmount)} ${movement.coin}',
+                ),
+                InfoLine(
+                  'Comisión en cripto',
+                  '${crypto(movement.effectiveCryptoFeeAmount)} ${movement.cryptoFeeAsset}',
+                ),
+                InfoLine(
+                  'Total descontado',
+                  '${crypto(movement.effectiveTotalDebitedAmount)} ${movement.coin}',
+                  emphasized: true,
+                ),
+                InfoLine(
+                  'Valor comisión MXN',
+                  money(movement.effectiveFeeFiatValue),
+                ),
+                InfoLine(
+                  'Plataforma de origen',
+                  movement.effectiveSourcePlatform,
+                ),
+                InfoLine(
+                  'Plataforma de destino',
+                  movement.effectiveDestinationPlatform,
+                ),
+              ] else ...<Widget>[
+                InfoLine('Cantidad', crypto(movement.quantity)),
+                InfoLine('Precio', money(movement.unitPrice)),
+                InfoLine('Comisión', money(movement.fee)),
+                InfoLine(
+                  'Total',
+                  money(movement.quantity * movement.unitPrice),
+                  emphasized: true,
+                ),
+                if (movement.source.isNotEmpty)
+                  InfoLine('Plataforma', movement.source),
+                if (movement.wallet.isNotEmpty)
+                  InfoLine('Cartera', movement.wallet),
+              ],
               if (movement.network.isNotEmpty)
                 InfoLine('Red', movement.network),
               if (movement.note.isNotEmpty) InfoLine('Nota', movement.note),
@@ -9543,18 +10010,38 @@ class _MovementsTabState extends State<MovementsTab> {
                     Expanded(
                       child: Column(
                         children: <Widget>[
-                          InfoLine('Cantidad', crypto(m.quantity)),
-                          InfoLine('Precio', money(m.unitPrice)),
-                          InfoLine('Comisión', money(m.fee)),
-                          InfoLine(
-                            'Total',
-                            money(m.quantity * m.unitPrice),
-                            emphasized: true,
-                          ),
-                          if (m.source.isNotEmpty)
-                            InfoLine('Plataforma', m.source),
-                          if (m.wallet.isNotEmpty)
-                            InfoLine('Cartera', m.wallet),
+                          if (m.isStructuredOwnedTransfer) ...<Widget>[
+                            InfoLine(
+                              'Cantidad recibida',
+                              '${crypto(m.effectiveReceivedAmount)} ${m.coin}',
+                            ),
+                            InfoLine(
+                              'Comisión cripto',
+                              '${crypto(m.effectiveCryptoFeeAmount)} ${m.cryptoFeeAsset}',
+                            ),
+                            InfoLine(
+                              'Total descontado',
+                              '${crypto(m.effectiveTotalDebitedAmount)} ${m.coin}',
+                              emphasized: true,
+                            ),
+                            InfoLine(
+                              'Ruta',
+                              '${m.effectiveSourcePlatform} → ${m.effectiveDestinationPlatform}',
+                            ),
+                          ] else ...<Widget>[
+                            InfoLine('Cantidad', crypto(m.quantity)),
+                            InfoLine('Precio', money(m.unitPrice)),
+                            InfoLine('Comisión', money(m.fee)),
+                            InfoLine(
+                              'Total',
+                              money(m.quantity * m.unitPrice),
+                              emphasized: true,
+                            ),
+                            if (m.source.isNotEmpty)
+                              InfoLine('Plataforma', m.source),
+                            if (m.wallet.isNotEmpty)
+                              InfoLine('Cartera', m.wallet),
+                          ],
                           if (m.network.isNotEmpty) InfoLine('Red', m.network),
                           if (m.note.isNotEmpty) InfoLine('Nota', m.note),
                         ],
@@ -23630,6 +24117,260 @@ SnapshotRetention snapshotRetentionFromName(String? value) {
 
 enum MovementType { buy, sell, transferIn, transferOut }
 
+const double transferAmountTolerance = 0.00000001;
+
+String foldOcrText(String value) => value
+    .toLowerCase()
+    .replaceAll('\u00e1', 'a')
+    .replaceAll('\u00e9', 'e')
+    .replaceAll('\u00ed', 'i')
+    .replaceAll('\u00f3', 'o')
+    .replaceAll('\u00fa', 'u')
+    .replaceAll('\u00fc', 'u');
+
+double? parseFlexibleDecimal(String raw) {
+  String value = raw.trim().replaceAll(RegExp(r'[^0-9,.-]'), '');
+  if (value.isEmpty) return null;
+  final int comma = value.lastIndexOf(',');
+  final int dot = value.lastIndexOf('.');
+  if (comma >= 0 && dot >= 0) {
+    value = comma > dot
+        ? value.replaceAll('.', '').replaceAll(',', '.')
+        : value.replaceAll(',', '');
+  } else if (comma >= 0 || dot >= 0) {
+    final String separator = comma >= 0 ? ',' : '.';
+    final int separatorIndex = value.lastIndexOf(separator);
+    final int decimalDigits = value.length - separatorIndex - 1;
+    final String integerPart = value.substring(0, separatorIndex);
+    final int separatorCount = separator.allMatches(value).length;
+    if (separatorCount > 1) {
+      final String leading = value
+          .substring(0, separatorIndex)
+          .replaceAll(separator, '');
+      value = '$leading.${value.substring(separatorIndex + 1)}';
+    } else if (decimalDigits == 3 && integerPart != '0') {
+      value = value.replaceAll(separator, '');
+    } else if (separator == ',') {
+      value = value.replaceAll(',', '.');
+    }
+  }
+  return double.tryParse(value);
+}
+
+class TransferAmounts {
+  final double? receivedAmount;
+  final double? cryptoFeeAmount;
+  final String cryptoFeeAsset;
+  final double? totalDebitedAmount;
+  final String sourcePlatform;
+  final String destinationPlatform;
+  final String network;
+  final List<String> warnings;
+
+  const TransferAmounts({
+    required this.receivedAmount,
+    required this.cryptoFeeAmount,
+    required this.cryptoFeeAsset,
+    required this.totalDebitedAmount,
+    this.sourcePlatform = '',
+    this.destinationPlatform = '',
+    this.network = '',
+    this.warnings = const <String>[],
+  });
+
+  bool get isComplete =>
+      receivedAmount != null &&
+      cryptoFeeAmount != null &&
+      totalDebitedAmount != null;
+
+  bool isConsistent(String primaryAsset) {
+    if (!isComplete) return false;
+    final String feeAsset = cryptoFeeAsset.trim().toUpperCase();
+    final double expected = feeAsset.isEmpty || feeAsset == primaryAsset
+        ? receivedAmount! + cryptoFeeAmount!
+        : receivedAmount!;
+    return (totalDebitedAmount! - expected).abs() <= transferAmountTolerance;
+  }
+}
+
+TransferAmounts reconcileTransferAmounts({
+  required String primaryAsset,
+  double? receivedAmount,
+  double? cryptoFeeAmount,
+  String? cryptoFeeAsset,
+  double? totalDebitedAmount,
+  String sourcePlatform = '',
+  String destinationPlatform = '',
+  String network = '',
+  List<String> warnings = const <String>[],
+}) {
+  final List<String> resolvedWarnings = <String>[...warnings];
+  final String normalizedAsset = primaryAsset.trim().toUpperCase();
+  String normalizedFeeAsset = cryptoFeeAsset?.trim().toUpperCase() ?? '';
+  if (cryptoFeeAmount != null && normalizedFeeAsset.isEmpty) {
+    normalizedFeeAsset = normalizedAsset;
+  }
+  final bool sameAsset =
+      normalizedFeeAsset.isEmpty || normalizedFeeAsset == normalizedAsset;
+
+  if (sameAsset) {
+    if (receivedAmount != null &&
+        cryptoFeeAmount != null &&
+        totalDebitedAmount == null) {
+      totalDebitedAmount = receivedAmount + cryptoFeeAmount;
+    } else if (totalDebitedAmount != null &&
+        cryptoFeeAmount != null &&
+        receivedAmount == null) {
+      receivedAmount = totalDebitedAmount - cryptoFeeAmount;
+    } else if (receivedAmount != null &&
+        totalDebitedAmount != null &&
+        cryptoFeeAmount == null) {
+      cryptoFeeAmount = totalDebitedAmount - receivedAmount;
+      normalizedFeeAsset = normalizedAsset;
+    }
+  } else {
+    totalDebitedAmount ??= receivedAmount;
+    receivedAmount ??= totalDebitedAmount;
+  }
+
+  final bool hasNegative = <double?>[
+    receivedAmount,
+    cryptoFeeAmount,
+    totalDebitedAmount,
+  ].whereType<double>().any((double value) => value < 0);
+  if (hasNegative) {
+    resolvedWarnings.add(
+      'Las cantidades de transferencia no pueden ser negativas.',
+    );
+  }
+
+  final TransferAmounts result = TransferAmounts(
+    receivedAmount: receivedAmount,
+    cryptoFeeAmount: cryptoFeeAmount,
+    cryptoFeeAsset: normalizedFeeAsset,
+    totalDebitedAmount: totalDebitedAmount,
+    sourcePlatform: sourcePlatform.trim(),
+    destinationPlatform: destinationPlatform.trim(),
+    network: network.trim(),
+    warnings: resolvedWarnings,
+  );
+  if (!result.isComplete) {
+    resolvedWarnings.add(
+      'Faltan datos para reconciliar cantidad recibida, comisión y total descontado.',
+    );
+  } else if (!result.isConsistent(normalizedAsset)) {
+    resolvedWarnings.add(
+      sameAsset
+          ? 'Las cifras no cuadran: recibido + comisión debe ser igual al total descontado.'
+          : 'La comisión usa otro activo: el total del activo transferido debe coincidir con la cantidad recibida.',
+    );
+  }
+  return TransferAmounts(
+    receivedAmount: result.receivedAmount,
+    cryptoFeeAmount: result.cryptoFeeAmount,
+    cryptoFeeAsset: result.cryptoFeeAsset,
+    totalDebitedAmount: result.totalDebitedAmount,
+    sourcePlatform: result.sourcePlatform,
+    destinationPlatform: result.destinationPlatform,
+    network: result.network,
+    warnings: resolvedWarnings.toSet().toList(),
+  );
+}
+
+TransferAmounts parseTransferAmountsFromOcr(
+  String rawText, {
+  required String primaryAsset,
+}) {
+  final String folded = foldOcrText(rawText).replaceAll(RegExp(r'\s+'), ' ');
+  const String numberPattern = r'([0-9][0-9.,]*)';
+  const String assetPattern = r'([a-z]{2,10})?';
+
+  ({double? amount, String asset}) valueAfter(List<String> labels) {
+    final String labelPattern = labels.map(RegExp.escape).join('|');
+    final RegExpMatch? match = RegExp(
+      '(?:$labelPattern)[^0-9]{0,32}$numberPattern\\s*$assetPattern',
+      caseSensitive: false,
+    ).firstMatch(folded);
+    return (
+      amount: match == null ? null : parseFlexibleDecimal(match.group(1) ?? ''),
+      asset: (match?.group(2) ?? '').toUpperCase(),
+    );
+  }
+
+  String lineValueAfter(List<String> labels) {
+    final List<String> lines = rawText
+        .split(RegExp(r'\r?\n'))
+        .map((String line) => line.trim())
+        .where((String line) => line.isNotEmpty)
+        .toList();
+    for (int index = 0; index < lines.length; index++) {
+      final String foldedLine = foldOcrText(lines[index]);
+      for (final String label in labels) {
+        final String foldedLabel = foldOcrText(label);
+        final bool isLabelLine =
+            foldedLine == foldedLabel ||
+            foldedLine.startsWith('$foldedLabel:') ||
+            foldedLine.startsWith('$foldedLabel -');
+        if (!isLabelLine) continue;
+        const int labelIndex = 0;
+        String value = lines[index]
+            .substring(labelIndex + label.length)
+            .replaceFirst(RegExp(r'^\s*[:\-]\s*'), '')
+            .trim();
+        if (value.isEmpty && index + 1 < lines.length) value = lines[index + 1];
+        return value.trim();
+      }
+    }
+    return '';
+  }
+
+  final ({double? amount, String asset}) received = valueAfter(<String>[
+    'la persona recibe',
+    'cantidad recibida',
+    'vas a transferir',
+  ]);
+  ({double? amount, String asset}) cryptoFee = valueAfter(<String>[
+    'comision de red',
+    'comision',
+  ]);
+  if (cryptoFee.amount == null &&
+      RegExp(r'\bsin comision\b').hasMatch(folded)) {
+    cryptoFee = (amount: 0, asset: primaryAsset.toUpperCase());
+  }
+  final ({double? amount, String asset}) total = valueAfter(<String>[
+    'total a descontar',
+    'total descontado',
+  ]);
+
+  return reconcileTransferAmounts(
+    primaryAsset: primaryAsset,
+    receivedAmount: received.amount,
+    cryptoFeeAmount: cryptoFee.amount,
+    cryptoFeeAsset: cryptoFee.asset.isNotEmpty
+        ? cryptoFee.asset
+        : received.asset.isNotEmpty
+        ? received.asset
+        : primaryAsset,
+    totalDebitedAmount: total.amount,
+    sourcePlatform: lineValueAfter(<String>['Plataforma de origen', 'Origen']),
+    destinationPlatform: lineValueAfter(<String>[
+      'Plataforma de destino',
+      'Destino',
+    ]),
+    network: lineValueAfter(<String>['Red']),
+  );
+}
+
+String? detectTransferPrimaryAsset(String rawText) {
+  final String folded = foldOcrText(rawText).replaceAll(RegExp(r'\s+'), ' ');
+  final RegExpMatch? match = RegExp(
+    r'(?:la persona recibe|cantidad recibida|vas a transferir)[^0-9]{0,32}[0-9][0-9.,]*\s*([a-z]{2,10})',
+    caseSensitive: false,
+  ).firstMatch(folded);
+  final String asset = (match?.group(1) ?? '').toUpperCase();
+  return asset.isEmpty ? null : asset;
+}
+
 enum SimulationMode { operation, rotation }
 
 enum OperationSimulationMode { buy, sell }
@@ -23728,6 +24469,36 @@ class FinancialEngine {
       final Movement movement = entry.value;
       final CoinStats? stat = stats[movement.coin];
       if (stat == null) continue;
+      if (movement.isStructuredOwnedTransfer) {
+        final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+            ? movement.coin
+            : movement.cryptoFeeAsset.trim().toUpperCase();
+        final CoinStats? feeStat = stats[feeAsset];
+        final double cryptoFee = movement.effectiveCryptoFeeAmount;
+        if (feeStat != null && cryptoFee > 0) {
+          final double average = feeStat.quantity > 0
+              ? feeStat.costBase / feeStat.quantity
+              : 0.0;
+          final double quantityToRemove = math.min(cryptoFee, feeStat.quantity);
+          feeStat.quantity -= quantityToRemove;
+          feeStat.costBase -= average * quantityToRemove;
+          if (feeStat.quantity.abs() < 0.0000000001) {
+            feeStat.quantity = 0.0;
+            feeStat.costBase = 0.0;
+          }
+        }
+        stat.feesPaid += movement.effectiveFeeFiatValue;
+        if (debugLedger && kDebugMode) {
+          debugPrint(
+            'LEDGER INTERNAL_TRANSFER ${movement.coin} id=${movement.id} '
+            'received=${movement.effectiveReceivedAmount.toStringAsFixed(8)} '
+            'cryptoFee=${cryptoFee.toStringAsFixed(8)} feeAsset=$feeAsset '
+            'totalDebited=${movement.effectiveTotalDebitedAmount.toStringAsFixed(8)} '
+            'realizedPL=0',
+          );
+        }
+        continue;
+      }
       final double quantityBefore = stat.quantity;
       final double costBaseBefore = stat.costBase;
       double costBaseAdded = 0.0;
@@ -23805,6 +24576,55 @@ class FinancialEngine {
     return stats;
   }
 
+  static Map<String, Map<String, double>> computePlatformBalances({
+    required List<Movement> movements,
+  }) {
+    final Map<String, Map<String, double>> balances =
+        <String, Map<String, double>>{};
+
+    void add(String platform, String asset, double delta) {
+      final String normalizedPlatform = platform.trim();
+      final String normalizedAsset = asset.trim().toUpperCase();
+      if (normalizedPlatform.isEmpty || normalizedAsset.isEmpty) return;
+      final Map<String, double> platformBalances = balances.putIfAbsent(
+        normalizedPlatform,
+        () => <String, double>{},
+      );
+      platformBalances[normalizedAsset] =
+          (platformBalances[normalizedAsset] ?? 0.0) + delta;
+    }
+
+    final List<Movement> ordered = <Movement>[
+      ...movements,
+    ]..sort((Movement left, Movement right) => left.date.compareTo(right.date));
+    for (final Movement movement in ordered) {
+      final String source = movement.effectiveSourcePlatform;
+      final String destination = movement.effectiveDestinationPlatform;
+      if (movement.isStructuredOwnedTransfer) {
+        add(source, movement.coin, -movement.effectiveTotalDebitedAmount);
+        add(destination, movement.coin, movement.effectiveReceivedAmount);
+        final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+            ? movement.coin
+            : movement.cryptoFeeAsset.trim().toUpperCase();
+        if (feeAsset != movement.coin) {
+          add(source, feeAsset, -movement.effectiveCryptoFeeAmount);
+        }
+        continue;
+      }
+      switch (movement.type) {
+        case MovementType.buy:
+        case MovementType.transferIn:
+          add(source, movement.coin, movement.quantity);
+          break;
+        case MovementType.sell:
+        case MovementType.transferOut:
+          add(source, movement.coin, -movement.quantity);
+          break;
+      }
+    }
+    return balances;
+  }
+
   static CoinAudit computeAudit({
     required String coin,
     required List<Movement> movements,
@@ -23826,11 +24646,14 @@ class FinancialEngine {
     double costBase = 0.0;
 
     final List<MapEntry<int, Movement>> indexed =
-        movements
-            .asMap()
-            .entries
-            .where((MapEntry<int, Movement> entry) => entry.value.coin == coin)
-            .toList()
+        movements.asMap().entries.where((MapEntry<int, Movement> entry) {
+            final Movement movement = entry.value;
+            final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+                ? movement.coin
+                : movement.cryptoFeeAsset.trim().toUpperCase();
+            return movement.coin == coin ||
+                (movement.isStructuredOwnedTransfer && feeAsset == coin);
+          }).toList()
           ..sort((MapEntry<int, Movement> a, MapEntry<int, Movement> b) {
             final int dateCompare = a.value.date.compareTo(b.value.date);
             if (dateCompare != 0) return dateCompare;
@@ -23843,7 +24666,38 @@ class FinancialEngine {
       final double costBaseBefore = costBase;
       double costBaseAdded = 0.0;
       double costBaseRemoved = 0.0;
-      totalFees += movement.fee;
+      if (movement.coin == coin) {
+        totalFees += movement.effectiveFeeFiatValue;
+      }
+
+      if (movement.isStructuredOwnedTransfer) {
+        final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+            ? movement.coin
+            : movement.cryptoFeeAsset.trim().toUpperCase();
+        if (feeAsset == coin && movement.effectiveCryptoFeeAmount > 0) {
+          final double average = quantity > 0 ? costBase / quantity : 0.0;
+          final double quantityToRemove = math.min(
+            movement.effectiveCryptoFeeAmount,
+            quantity,
+          );
+          costBaseRemoved = average * quantityToRemove;
+          quantity -= quantityToRemove;
+          costBase -= costBaseRemoved;
+          costBaseTransferredOut += costBaseRemoved;
+        }
+        if (debugLedger && kDebugMode) {
+          debugPrint(
+            'AUDIT INTERNAL_TRANSFER $coin id=${movement.id} '
+            'feeAsset=$feeAsset feeQty=${movement.effectiveCryptoFeeAmount.toStringAsFixed(8)} '
+            'costRemoved=${costBaseRemoved.toStringAsFixed(8)} realizedPL=0',
+          );
+        }
+        if (quantity.abs() < 0.0000000001) {
+          quantity = 0.0;
+          costBase = 0.0;
+        }
+        continue;
+      }
 
       switch (movement.type) {
         case MovementType.buy:
@@ -23996,6 +24850,19 @@ class FinancialEngine {
 
     for (final MapEntry<int, Movement> entry in indexed) {
       final Movement movement = entry.value;
+      if (movement.isStructuredOwnedTransfer) {
+        final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+            ? movement.coin
+            : movement.cryptoFeeAsset.trim().toUpperCase();
+        final double currentFeeBalance = balances[feeAsset] ?? 0.0;
+        if (movement.effectiveCryptoFeeAmount >
+            currentFeeBalance + transferAmountTolerance) {
+          return true;
+        }
+        balances[feeAsset] =
+            currentFeeBalance - movement.effectiveCryptoFeeAmount;
+        continue;
+      }
       final double current = balances[movement.coin] ?? 0.0;
 
       switch (movement.type) {
@@ -24043,14 +24910,35 @@ class FinancialEngine {
       if (movement.quantity <= 0) {
         errors.add('Movimiento #$number tiene cantidad en cero o negativa');
       }
-      if (movement.unitPrice <= 0) {
+      if (!movement.isStructuredOwnedTransfer && movement.unitPrice <= 0) {
         errors.add('Movimiento #$number tiene precio en cero o negativo');
       }
-      if (movement.grossTotal <= 0) {
+      if (!movement.isStructuredOwnedTransfer && movement.grossTotal <= 0) {
         errors.add('Movimiento #$number tiene total MXN en cero');
       }
-      if (movement.fee < 0) {
+      if (movement.effectiveFeeFiatValue < 0) {
         errors.add('Movimiento #$number tiene comisión negativa');
+      }
+      if (movement.isStructuredOwnedTransfer) {
+        if (!movement.hasConsistentTransferAmounts) {
+          errors.add(
+            'Movimiento #$number no reconcilia recibido + comisión con total descontado',
+          );
+        }
+        if (movement.effectiveSourcePlatform.isEmpty ||
+            movement.effectiveDestinationPlatform.isEmpty) {
+          errors.add(
+            'Movimiento #$number no tiene origen y destino de transferencia',
+          );
+        }
+        final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+            ? movement.coin
+            : movement.cryptoFeeAsset.trim().toUpperCase();
+        if (!coins.contains(feeAsset)) {
+          errors.add(
+            'Movimiento #$number tiene activo de comisión no soportado',
+          );
+        }
       }
       if (movement.date.isAfter(
         DateTime.now().add(const Duration(minutes: 5)),
@@ -24076,6 +24964,24 @@ class FinancialEngine {
           });
     for (final MapEntry<int, Movement> entry in orderedMovements) {
       final Movement movement = entry.value;
+      if (movement.isStructuredOwnedTransfer) {
+        final String feeAsset = movement.cryptoFeeAsset.trim().isEmpty
+            ? movement.coin
+            : movement.cryptoFeeAsset.trim().toUpperCase();
+        final double currentFeeBalance = historicalBalances[feeAsset] ?? 0.0;
+        if (movement.effectiveCryptoFeeAmount >
+            currentFeeBalance + transferAmountTolerance) {
+          final String warningKey = 'transferFee:$feeAsset';
+          if (balanceWarnings.add(warningKey)) {
+            errors.add(
+              'Comisión de transferencia excedida al saldo disponible en $feeAsset',
+            );
+          }
+        }
+        historicalBalances[feeAsset] =
+            currentFeeBalance - movement.effectiveCryptoFeeAmount;
+        continue;
+      }
       final double current = historicalBalances[movement.coin] ?? 0.0;
       switch (movement.type) {
         case MovementType.buy:
@@ -24149,13 +25055,18 @@ class FinancialEngine {
         }
       }
     }
-    if (hasFutureSnapshot) errors.add('Snapshot con fecha futura');
-    if (hasUnsupportedSnapshotCoin)
+    if (hasFutureSnapshot) {
+      errors.add('Snapshot con fecha futura');
+    }
+    if (hasUnsupportedSnapshotCoin) {
       errors.add('Snapshot desalineado: moneda no soportada');
-    if (hasSnapshotMovementMismatch)
+    }
+    if (hasSnapshotMovementMismatch) {
       errors.add('Snapshot desalineado: movimientos mayores al ledger actual');
-    if (hasSnapshotTotalsMismatch)
+    }
+    if (hasSnapshotTotalsMismatch) {
       errors.add('Snapshot desalineado: totales no coinciden con monedas');
+    }
 
     return errors;
   }
@@ -24187,6 +25098,13 @@ class Movement {
   final double quantity;
   final double unitPrice;
   final double fee;
+  final double? receivedAmount;
+  final double? cryptoFeeAmount;
+  final String cryptoFeeAsset;
+  final double? totalDebitedAmount;
+  final double? feeFiatValue;
+  final String sourcePlatform;
+  final String destinationPlatform;
   final String source;
   final String wallet;
   final String network;
@@ -24205,6 +25123,13 @@ class Movement {
     required this.quantity,
     required this.unitPrice,
     required this.fee,
+    this.receivedAmount,
+    this.cryptoFeeAmount,
+    this.cryptoFeeAsset = '',
+    this.totalDebitedAmount,
+    this.feeFiatValue,
+    this.sourcePlatform = '',
+    this.destinationPlatform = '',
     this.source = '',
     this.wallet = '',
     this.network = '',
@@ -24213,12 +25138,45 @@ class Movement {
     DateTime? updatedAt,
     this.deletedAt,
     this.deviceId,
-    this.schemaVersion = 1,
+    this.schemaVersion = 2,
   }) : id = id == null || id.trim().isEmpty ? _generateMovementId() : id,
        createdAt = createdAt ?? date,
        updatedAt = updatedAt ?? createdAt ?? date;
 
   double get grossTotal => quantity * unitPrice;
+
+  double get effectiveReceivedAmount => receivedAmount ?? quantity;
+
+  double get effectiveCryptoFeeAmount => cryptoFeeAmount ?? 0.0;
+
+  double get effectiveTotalDebitedAmount =>
+      totalDebitedAmount ?? effectiveReceivedAmount;
+
+  double get effectiveFeeFiatValue => feeFiatValue ?? fee;
+
+  String get effectiveSourcePlatform =>
+      sourcePlatform.trim().isNotEmpty ? sourcePlatform.trim() : source.trim();
+
+  String get effectiveDestinationPlatform =>
+      destinationPlatform.trim().isNotEmpty
+      ? destinationPlatform.trim()
+      : wallet.trim();
+
+  bool get isStructuredOwnedTransfer =>
+      type == MovementType.transferOut &&
+      (receivedAmount != null ||
+          cryptoFeeAmount != null ||
+          totalDebitedAmount != null) &&
+      effectiveSourcePlatform.isNotEmpty &&
+      effectiveDestinationPlatform.isNotEmpty;
+
+  bool get hasConsistentTransferAmounts => reconcileTransferAmounts(
+    primaryAsset: coin,
+    receivedAmount: receivedAmount,
+    cryptoFeeAmount: cryptoFeeAmount,
+    cryptoFeeAsset: cryptoFeeAsset,
+    totalDebitedAmount: totalDebitedAmount,
+  ).isConsistent(coin);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -24228,6 +25186,14 @@ class Movement {
     'quantity': quantity,
     'unitPrice': unitPrice,
     'fee': fee,
+    if (receivedAmount != null) 'receivedAmount': receivedAmount,
+    if (cryptoFeeAmount != null) 'cryptoFeeAmount': cryptoFeeAmount,
+    if (cryptoFeeAsset.isNotEmpty) 'cryptoFeeAsset': cryptoFeeAsset,
+    if (totalDebitedAmount != null) 'totalDebitedAmount': totalDebitedAmount,
+    if (feeFiatValue != null) 'feeFiatValue': feeFiatValue,
+    if (sourcePlatform.isNotEmpty) 'sourcePlatform': sourcePlatform,
+    if (destinationPlatform.isNotEmpty)
+      'destinationPlatform': destinationPlatform,
     'source': source,
     'wallet': wallet,
     'network': network,
@@ -24247,6 +25213,13 @@ class Movement {
     double? quantity,
     double? unitPrice,
     double? fee,
+    double? receivedAmount,
+    double? cryptoFeeAmount,
+    String? cryptoFeeAsset,
+    double? totalDebitedAmount,
+    double? feeFiatValue,
+    String? sourcePlatform,
+    String? destinationPlatform,
     String? source,
     String? wallet,
     String? network,
@@ -24265,6 +25238,13 @@ class Movement {
       quantity: quantity ?? this.quantity,
       unitPrice: unitPrice ?? this.unitPrice,
       fee: fee ?? this.fee,
+      receivedAmount: receivedAmount ?? this.receivedAmount,
+      cryptoFeeAmount: cryptoFeeAmount ?? this.cryptoFeeAmount,
+      cryptoFeeAsset: cryptoFeeAsset ?? this.cryptoFeeAsset,
+      totalDebitedAmount: totalDebitedAmount ?? this.totalDebitedAmount,
+      feeFiatValue: feeFiatValue ?? this.feeFiatValue,
+      sourcePlatform: sourcePlatform ?? this.sourcePlatform,
+      destinationPlatform: destinationPlatform ?? this.destinationPlatform,
       source: source ?? this.source,
       wallet: wallet ?? this.wallet,
       network: network ?? this.network,
@@ -24284,23 +25264,60 @@ class Movement {
         (quantity - other.quantity).abs() < 0.0000000001 &&
         (unitPrice - other.unitPrice).abs() < 0.00000001 &&
         (fee - other.fee).abs() < 0.00000001 &&
+        nullableDoubleEquals(receivedAmount, other.receivedAmount) &&
+        nullableDoubleEquals(cryptoFeeAmount, other.cryptoFeeAmount) &&
+        cryptoFeeAsset == other.cryptoFeeAsset &&
+        nullableDoubleEquals(totalDebitedAmount, other.totalDebitedAmount) &&
+        nullableDoubleEquals(feeFiatValue, other.feeFiatValue) &&
+        sourcePlatform.trim().toLowerCase() ==
+            other.sourcePlatform.trim().toLowerCase() &&
+        destinationPlatform.trim().toLowerCase() ==
+            other.destinationPlatform.trim().toLowerCase() &&
         source.trim().toLowerCase() == other.source.trim().toLowerCase() &&
         note.trim().toLowerCase() == other.note.trim().toLowerCase();
   }
 
   factory Movement.fromJson(Map<String, dynamic> json) {
+    final MovementType type = movementTypeFromAny(json['type']);
+    final String coin = (json['coin'] ?? json['crypto'] ?? 'BTC')
+        .toString()
+        .toUpperCase();
+    final double? receivedAmount = nullableNumberFromJson(
+      json['receivedAmount'] ?? json['received_amount'],
+    );
     final DateTime date =
         DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now();
     final DateTime createdAt =
         DateTime.tryParse(json['createdAt']?.toString() ?? '') ?? date;
     return Movement(
       id: json['id']?.toString(),
-      type: movementTypeFromAny(json['type']),
-      coin: (json['coin'] ?? json['crypto'] ?? 'BTC').toString().toUpperCase(),
+      type: type,
+      coin: coin,
       date: date,
-      quantity: numberFromJson(json['quantity']),
+      quantity:
+          receivedAmount ??
+          numberFromJson(json['quantity'] ?? json['cryptoAmount']),
       unitPrice: numberFromJson(json['unitPrice'] ?? json['unit_price']),
       fee: numberFromJson(json['fee'] ?? json['commission']),
+      receivedAmount: receivedAmount,
+      cryptoFeeAmount: nullableNumberFromJson(
+        json['cryptoFeeAmount'] ?? json['crypto_fee_amount'],
+      ),
+      cryptoFeeAsset: textFromJson(
+        json['cryptoFeeAsset'] ?? json['crypto_fee_asset'],
+      ).toUpperCase(),
+      totalDebitedAmount: nullableNumberFromJson(
+        json['totalDebitedAmount'] ?? json['total_debited_amount'],
+      ),
+      feeFiatValue: nullableNumberFromJson(
+        json['feeFiatValue'] ?? json['fee_fiat_value'],
+      ),
+      sourcePlatform: textFromJson(
+        json['sourcePlatform'] ?? json['source_platform'],
+      ),
+      destinationPlatform: textFromJson(
+        json['destinationPlatform'] ?? json['destination_platform'],
+      ),
       source: textFromJson(json['source'] ?? json['origin'] ?? json['origen']),
       wallet: textFromJson(json['wallet'] ?? json['cartera']),
       network: textFromJson(json['network'] ?? json['red']),
@@ -24317,6 +25334,11 @@ class Movement {
           : int.tryParse(json['schemaVersion']?.toString() ?? '') ?? 1,
     );
   }
+}
+
+bool nullableDoubleEquals(double? left, double? right) {
+  if (left == null || right == null) return left == right;
+  return (left - right).abs() < transferAmountTolerance;
 }
 
 class CoinStats {
@@ -24574,6 +25596,12 @@ class PortfolioSnapshot {
 double numberFromJson(dynamic value) {
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '') ?? 0.0;
+}
+
+double? nullableNumberFromJson(dynamic value) {
+  if (value == null || value.toString().trim().isEmpty) return null;
+  if (value is num) return value.toDouble();
+  return parseFlexibleDecimal(value.toString());
 }
 
 String textFromJson(dynamic value) => value?.toString().trim() ?? '';
