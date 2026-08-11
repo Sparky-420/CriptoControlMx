@@ -16,9 +16,14 @@ final class DefaultCustodyProjector implements CustodyProjector {
   CustodyProjection project(NormalizedLedger ledger) {
     final states = <WalletAssetKey, _CustodyState>{};
     final effects = <String, List<CustodyMovementEffect>>{};
-    final movementsById = <String, AccountingMovement>{
-      for (final movement in ledger.movements) movement.id: movement,
-    };
+    final legMovementIds = ledger.legs.map((leg) => leg.movementId).toSet();
+    final movementsById = <String, AccountingMovement>{};
+    for (final movement in ledger.movements) {
+      if (legMovementIds.contains(movement.id) &&
+          !movementsById.containsKey(movement.id)) {
+        movementsById[movement.id] = movement;
+      }
+    }
     final resolutions = _resolveLinks(ledger, movementsById);
 
     for (final leg in ledger.legs) {
@@ -58,7 +63,7 @@ final class DefaultCustodyProjector implements CustodyProjector {
         CustodyMovementEffect(
           key: key,
           before: before,
-          requested: rawRequested,
+          requested: requested,
           applied: applied,
           unapplied: requested - applied,
           after: state.quantity,
@@ -87,7 +92,7 @@ final class DefaultCustodyProjector implements CustodyProjector {
     Map<String, AccountingMovement> movementsById,
   ) {
     final adjustmentById = <String, AccountingMovement>{
-      for (final movement in ledger.movements)
+      for (final movement in movementsById.values)
         if (movement.type == MovementType.balanceAdjustment)
           movement.id: movement,
     };
@@ -103,7 +108,7 @@ final class DefaultCustodyProjector implements CustodyProjector {
           ProjectionIssue(code, movementId, message),
         );
 
-    for (final movement in ledger.movements) {
+    for (final movement in movementsById.values) {
       if (movement.type == MovementType.balanceAdjustment) continue;
       for (final link in movement.reconciliationLinks) {
         final adjustment = adjustmentById[link.adjustmentMovementId];
@@ -204,12 +209,21 @@ final class DifferenceReconciliationService {
         justifiedQuantity.compareTo(_absolute(adjustmentQuantity)) > 0) {
       throw ArgumentError('El vínculo de conciliación no es válido.');
     }
-    final direction = _directionFor(accountingMovement);
-    if (accountingMovement.asset != adjustment.asset ||
-        direction == null ||
-        direction.walletId != adjustment.adjustmentWalletId ||
-        _sameSign(direction.quantity, adjustmentQuantity) == false ||
-        justifiedQuantity.compareTo(_absolute(direction.quantity)) > 0) {
+    final normalized = const DefaultMovementNormalizer().normalize(
+      <AccountingMovement>[accountingMovement],
+    );
+    final compatibleLegs = normalized.legs
+        .where(
+          (leg) =>
+              leg.walletId == adjustment.adjustmentWalletId &&
+              leg.asset == adjustment.asset &&
+              _sameSign(_signedLegQuantity(leg), adjustmentQuantity),
+        )
+        .toList(growable: false);
+    if (accountingMovement.type == MovementType.balanceAdjustment ||
+        compatibleLegs.length != 1 ||
+        justifiedQuantity.compareTo(_absolute(compatibleLegs.single.quantity)) >
+            0) {
       throw ArgumentError(
         'El vínculo debe coincidir en cartera, activo y signo.',
       );
@@ -224,43 +238,6 @@ final class DifferenceReconciliationService {
       ],
     );
   }
-
-  _CustodyDirection? _directionFor(AccountingMovement movement) {
-    switch (movement.type) {
-      case MovementType.buy:
-      case MovementType.transferIn:
-        return movement.destinationWalletId == null || movement.quantity == null
-            ? null
-            : _CustodyDirection(
-                movement.destinationWalletId!,
-                movement.quantity!,
-              );
-      case MovementType.sell:
-        return movement.sourceWalletId == null || movement.quantity == null
-            ? null
-            : _CustodyDirection(
-                movement.sourceWalletId!,
-                AccountingAmount.zero - movement.quantity!,
-              );
-      case MovementType.transferOut:
-        return movement.sourceWalletId == null ||
-                movement.totalDebitedAmount == null
-            ? null
-            : _CustodyDirection(
-                movement.sourceWalletId!,
-                AccountingAmount.zero - movement.totalDebitedAmount!,
-              );
-      case MovementType.balanceAdjustment:
-        return null;
-    }
-  }
-}
-
-final class _CustodyDirection {
-  const _CustodyDirection(this.walletId, this.quantity);
-
-  final String walletId;
-  final AccountingAmount quantity;
 }
 
 AccountingAmount _absolute(AccountingAmount value) =>
