@@ -16,6 +16,7 @@ import 'accounting/adapters/legacy_financial_adapter.dart';
 import 'accounting/adapters/legacy_movement_adapter.dart';
 import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
+import 'accounting/domain/wallet.dart';
 export 'accounting/domain/movement_type.dart';
 
 import 'package:flutter_svg/flutter_svg.dart';
@@ -25389,21 +25390,28 @@ bool nullableDoubleEquals(double? left, double? right) {
 class CoinStats {
   final String coin;
   double quantity;
+  double custodyQuantity;
+  double unknownQuantity;
   double costBase;
   double currentPrice;
   double realizedPL;
   double feesPaid;
   double totalInvested;
+  final AccountingCompleteness completeness;
 
   CoinStats({
     required this.coin,
-    this.quantity = 0.0,
+    double quantity = 0.0,
+    double? custodyQuantity,
+    this.unknownQuantity = 0.0,
     this.costBase = 0.0,
     this.currentPrice = 0.0,
     this.realizedPL = 0.0,
     this.feesPaid = 0.0,
     this.totalInvested = 0.0,
-  });
+    this.completeness = AccountingCompleteness.complete,
+  }) : quantity = quantity,
+       custodyQuantity = custodyQuantity ?? quantity;
 
   factory CoinStats.fromLegacyData(
     LegacyCoinStatsData value, {
@@ -25411,21 +25419,40 @@ class CoinStats {
   }) => CoinStats(
     coin: value.coin,
     quantity: value.quantity,
+    custodyQuantity: value.custodyQuantity,
+    unknownQuantity: value.unknownQuantity,
     costBase: value.costBase,
     currentPrice: currentPrice,
     realizedPL: value.realizedProfit,
+    completeness: value.completeness,
   );
 
+  bool get hasDefinitivePerformance =>
+      completeness == AccountingCompleteness.complete;
+  double get knownQuantity => quantity;
   double get avgPrice => quantity > 0 ? costBase / quantity : 0.0;
-  double get currentValue => quantity * currentPrice;
-  double get unrealizedPL => currentValue - costBase;
+  double get knownCurrentValue => knownQuantity * currentPrice;
+  double get currentValue => knownCurrentValue;
+  double get knownUnrealizedPL => knownCurrentValue - costBase;
+  double get unrealizedPL => knownUnrealizedPL;
+  double get knownRealizedPL => realizedPL;
+  double? get definitiveCurrentValue =>
+      hasDefinitivePerformance ? knownCurrentValue : null;
+  double? get definitiveUnrealizedPL =>
+      hasDefinitivePerformance ? knownUnrealizedPL : null;
+  double? get definitiveRealizedPL =>
+      hasDefinitivePerformance ? knownRealizedPL : null;
   double get breakEvenReal => avgPrice;
   double estimatedExitFee(double sellFeePercent) =>
       currentValue * (sellFeePercent / 100).clamp(0.0, 1.0);
   double estimatedNetValue(double sellFeePercent) =>
       currentValue - estimatedExitFee(sellFeePercent);
-  double estimatedNetPnl(double sellFeePercent) =>
+  double knownEstimatedNetPnl(double sellFeePercent) =>
       estimatedNetValue(sellFeePercent) - costBase;
+  double estimatedNetPnl(double sellFeePercent) =>
+      knownEstimatedNetPnl(sellFeePercent);
+  double? definitiveEstimatedNetPnl(double sellFeePercent) =>
+      hasDefinitivePerformance ? knownEstimatedNetPnl(sellFeePercent) : null;
   double breakEvenWithExitFee([
     double sellFeePercent = FinancialEngine.defaultExitFeePercent,
   ]) => netBreakEvenPrice(sellFeePercent);
@@ -25532,6 +25559,7 @@ class PortfolioTotals {
   final double unrealizedPL;
   final double realizedPL;
   final double feesPaid;
+  final AccountingCompleteness completeness;
 
   PortfolioTotals({
     required this.costBase,
@@ -25539,6 +25567,7 @@ class PortfolioTotals {
     required this.unrealizedPL,
     required this.realizedPL,
     this.feesPaid = 0.0,
+    this.completeness = AccountingCompleteness.complete,
   });
 
   factory PortfolioTotals.fromLegacyData(LegacyPortfolioTotalsData value) =>
@@ -25547,7 +25576,20 @@ class PortfolioTotals {
         currentValue: value.currentValue,
         unrealizedPL: value.currentValue - value.costBase,
         realizedPL: value.realizedProfit,
+        completeness: value.completeness,
       );
+
+  bool get hasDefinitivePerformance =>
+      completeness == AccountingCompleteness.complete;
+  double get knownCurrentValue => currentValue;
+  double get knownUnrealizedPL => unrealizedPL;
+  double get knownRealizedPL => realizedPL;
+  double? get definitiveCurrentValue =>
+      hasDefinitivePerformance ? knownCurrentValue : null;
+  double? get definitiveUnrealizedPL =>
+      hasDefinitivePerformance ? knownUnrealizedPL : null;
+  double? get definitiveRealizedPL =>
+      hasDefinitivePerformance ? knownRealizedPL : null;
 }
 
 class CoinSnapshot {

@@ -4,8 +4,10 @@ import 'package:cripto_control_mx/accounting/domain/ledger_validation.dart';
 import 'package:cripto_control_mx/accounting/domain/movement_normalizer.dart';
 import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
-import 'package:cripto_control_mx/accounting/projection/fee_effect.dart';
+import 'package:cripto_control_mx/accounting/projection/custody_projection.dart';
 import 'package:cripto_control_mx/accounting/projection/custody_projector.dart';
+import 'package:cripto_control_mx/accounting/projection/fee_effect.dart';
+import 'package:cripto_control_mx/accounting/projection/ledger_projection.dart';
 import 'package:cripto_control_mx/accounting/projection/performance_projector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -82,6 +84,122 @@ void main() {
     expect(effect.assetCustodyDebit, AccountingAmount.zero);
     expect(effect.otherAssetCustodyDebit['ETH']!.toJson(), '0.2');
     expect(effect.fiatCostEffect.toJson(), '15');
+  });
+
+  test('R1-02 FeeEffect snapshots input and exposes immutable maps', () {
+    final one = AccountingAmount.fromInt(1);
+    final source = <String, AccountingAmount>{'ETH': one};
+    final effect = FeeEffect(
+      assetCustodyDebit: AccountingAmount.zero,
+      otherAssetCustodyDebit: source,
+      fiatCostEffect: AccountingAmount.zero,
+    );
+
+    source['ETH'] = AccountingAmount.fromInt(2);
+    source['BTC'] = one;
+
+    expect(effect.otherAssetCustodyDebit, <String, AccountingAmount>{
+      'ETH': one,
+    });
+    expect(
+      () => effect.otherAssetCustodyDebit['BTC'] = one,
+      throwsUnsupportedError,
+    );
+    expect(effect.otherAssetCustodyDebit, <String, AccountingAmount>{
+      'ETH': one,
+    });
+  });
+
+  test('R1-02 FeeEffect.zero has a const immutable empty map', () {
+    expect(FeeEffect.zero.otherAssetCustodyDebit, isEmpty);
+    expect(
+      () => FeeEffect.zero.otherAssetCustodyDebit['ETH'] =
+          AccountingAmount.fromInt(1),
+      throwsUnsupportedError,
+    );
+    expect(FeeEffect.zero.otherAssetCustodyDebit, isEmpty);
+  });
+
+  test('R1-02 MovementEffect snapshots every collection input', () {
+    final leg = MovementCustodyLegEffect(
+      key: const WalletAssetKey('wallet', 'UNI'),
+      kind: LedgerLegKind.custodyDebit,
+      before: AccountingAmount.fromInt(2),
+      requested: AccountingAmount.fromInt(-1),
+      applied: AccountingAmount.fromInt(-1),
+      unapplied: AccountingAmount.zero,
+      after: AccountingAmount.fromInt(1),
+    );
+    final issue = const ProjectionIssue(
+      ProjectionIssueCode.insufficientCustody,
+      'movement',
+      'Incidencia original',
+    );
+    final legs = <MovementCustodyLegEffect>[leg];
+    final deltas = <String, AccountingAmount>{
+      'UNI': AccountingAmount.fromInt(-1),
+    };
+    final issues = <ProjectionIssue>[issue];
+    final effect = MovementEffect(
+      movementId: 'movement',
+      requestedQuantity: AccountingAmount.fromInt(1),
+      appliedQuantity: AccountingAmount.fromInt(1),
+      unappliedQuantity: AccountingAmount.zero,
+      custodyLegs: legs,
+      globalDeltasByAsset: deltas,
+      feeEffect: FeeEffect.zero,
+      issues: issues,
+    );
+
+    legs.clear();
+    deltas['UNI'] = AccountingAmount.zero;
+    issues.clear();
+
+    expect(effect.custodyLegs, <MovementCustodyLegEffect>[leg]);
+    expect(effect.globalDeltasByAsset['UNI']!.toJson(), '-1');
+    expect(effect.issues, <ProjectionIssue>[issue]);
+  });
+
+  test('R1-02 MovementEffect exposed collections reject mutation', () {
+    final effect = MovementEffect(
+      movementId: 'movement',
+      requestedQuantity: AccountingAmount.zero,
+      appliedQuantity: AccountingAmount.zero,
+      unappliedQuantity: AccountingAmount.zero,
+      custodyLegs: <MovementCustodyLegEffect>[],
+      globalDeltasByAsset: <String, AccountingAmount>{},
+      feeEffect: FeeEffect.zero,
+      issues: <ProjectionIssue>[],
+    );
+
+    expect(
+      () => effect.custodyLegs.add(
+        MovementCustodyLegEffect(
+          key: const WalletAssetKey('wallet', 'UNI'),
+          kind: LedgerLegKind.custodyCredit,
+          before: AccountingAmount.zero,
+          requested: AccountingAmount.fromInt(1),
+          applied: AccountingAmount.fromInt(1),
+          unapplied: AccountingAmount.zero,
+          after: AccountingAmount.fromInt(1),
+        ),
+      ),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => effect.globalDeltasByAsset['UNI'] = AccountingAmount.zero,
+      throwsUnsupportedError,
+    );
+    expect(
+      () => effect.issues.add(
+        const ProjectionIssue(
+          ProjectionIssueCode.invalidAmount,
+          'movement',
+          'No debe agregarse',
+        ),
+      ),
+      throwsUnsupportedError,
+    );
   });
 
   test('normalizer rejects invalid fiat fee treatment matrix without legs', () {

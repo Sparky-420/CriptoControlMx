@@ -593,6 +593,13 @@ void main() {
     expect(data.completeness, AccountingCompleteness.partiallyKnown);
     expect(data.hasDefinitivePerformance, isFalse);
     expect(totals.currentValue, 500);
+    expectIncompleteLegacyBridge(
+      data: data,
+      totals: totals,
+      custodyQuantity: 12,
+      unknownQuantity: 2,
+      knownUnrealizedPnl: 400,
+    );
   });
 
   test('H1-06 legacy DTO exposes deficit without zero-cost inference', () {
@@ -613,9 +620,9 @@ void main() {
       ],
       <String, AccountingAmount>{'UNI': AccountingAmount.fromInt(50)},
     );
-    final data = const LegacyFinancialAdapter().coinStats(projection, const {
-      'UNI': 50,
-    })['UNI']!;
+    final adapter = const LegacyFinancialAdapter();
+    final data = adapter.coinStats(projection, const {'UNI': 50})['UNI']!;
+    final totals = adapter.totals(projection, const {'UNI': 50});
 
     expect(data.quantity, 10);
     expect(data.custodyQuantity, 8);
@@ -623,6 +630,13 @@ void main() {
     expect(data.costBase, 100);
     expect(data.completeness, AccountingCompleteness.partiallyKnown);
     expect(data.hasDefinitivePerformance, isFalse);
+    expectIncompleteLegacyBridge(
+      data: data,
+      totals: totals,
+      custodyQuantity: 8,
+      unknownQuantity: 0,
+      knownUnrealizedPnl: 400,
+    );
   });
 
   test('H1-06 fully unknown custody never creates performance value', () {
@@ -638,13 +652,21 @@ void main() {
     );
     final adapter = const LegacyFinancialAdapter();
     final data = adapter.coinStats(projection, const {'UNI': 50})['UNI']!;
+    final totals = adapter.totals(projection, const {'UNI': 50});
 
     expect(data.quantity, 0);
     expect(data.custodyQuantity, 2);
     expect(data.unknownQuantity, 2);
     expect(data.costBase, 0);
     expect(data.hasDefinitivePerformance, isFalse);
-    expect(adapter.totals(projection, const {'UNI': 50}).currentValue, 0);
+    expect(totals.currentValue, 0);
+    expectIncompleteLegacyBridge(
+      data: data,
+      totals: totals,
+      custodyQuantity: 2,
+      unknownQuantity: 2,
+      knownUnrealizedPnl: 0,
+    );
   });
 
   test('normalizes price lookup and treats a missing price as zero', () {
@@ -673,6 +695,35 @@ void main() {
       0,
     );
   });
+}
+
+void expectIncompleteLegacyBridge({
+  required LegacyCoinStatsData data,
+  required LegacyPortfolioTotalsData totals,
+  required double custodyQuantity,
+  required double unknownQuantity,
+  required double knownUnrealizedPnl,
+}) {
+  final bridgedStats = legacy.CoinStats.fromLegacyData(data, currentPrice: 50);
+  final bridgedTotals = legacy.PortfolioTotals.fromLegacyData(totals);
+
+  expect(bridgedStats.completeness, AccountingCompleteness.partiallyKnown);
+  expect(bridgedStats.hasDefinitivePerformance, isFalse);
+  expect(bridgedStats.knownQuantity, data.quantity);
+  expect(bridgedStats.custodyQuantity, custodyQuantity);
+  expect(bridgedStats.unknownQuantity, unknownQuantity);
+  expect(bridgedStats.knownUnrealizedPL, knownUnrealizedPnl);
+  expect(bridgedStats.definitiveUnrealizedPL, isNull);
+  expect(bridgedStats.definitiveEstimatedNetPnl(1.5), isNull);
+
+  expect(totals.completeness, AccountingCompleteness.partiallyKnown);
+  expect(totals.hasDefinitivePerformance, isFalse);
+  expect(totals.knownUnrealizedProfit, knownUnrealizedPnl);
+  expect(totals.definitiveUnrealizedProfit, isNull);
+  expect(bridgedTotals.completeness, AccountingCompleteness.partiallyKnown);
+  expect(bridgedTotals.hasDefinitivePerformance, isFalse);
+  expect(bridgedTotals.knownUnrealizedPL, knownUnrealizedPnl);
+  expect(bridgedTotals.definitiveUnrealizedPL, isNull);
 }
 
 const String walletA = '11111111-1111-4111-8111-111111111111';

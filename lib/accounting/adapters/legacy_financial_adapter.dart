@@ -31,11 +31,22 @@ final class LegacyPortfolioTotalsData {
     required this.costBase,
     required this.currentValue,
     required this.realizedProfit,
+    required this.completeness,
   });
 
   final double costBase;
   final double currentValue;
   final double realizedProfit;
+  final AccountingCompleteness completeness;
+
+  bool get hasDefinitivePerformance =>
+      completeness == AccountingCompleteness.complete;
+
+  double get knownCurrentValue => currentValue;
+  double get knownUnrealizedProfit => knownCurrentValue - costBase;
+  double get knownRealizedProfit => realizedProfit;
+  double? get definitiveUnrealizedProfit =>
+      hasDefinitivePerformance ? knownUnrealizedProfit : null;
 }
 
 final class LegacyCoinAuditData {
@@ -103,6 +114,9 @@ final class LegacyFinancialAdapter {
       realizedProfit: stats.values.fold<double>(
         0,
         (total, value) => total + value.realizedProfit,
+      ),
+      completeness: _aggregateCompleteness(
+        stats.values.map((value) => value.completeness),
       ),
     );
   }

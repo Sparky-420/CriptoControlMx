@@ -110,7 +110,37 @@ final class MovementCustodyLegEffect {
 }
 
 final class MovementEffect {
-  const MovementEffect({
+  factory MovementEffect({
+    required String movementId,
+    required AccountingAmount requestedQuantity,
+    required AccountingAmount appliedQuantity,
+    required AccountingAmount unappliedQuantity,
+    required List<MovementCustodyLegEffect> custodyLegs,
+    required Map<String, AccountingAmount> globalDeltasByAsset,
+    required FeeEffect feeEffect,
+    required List<ProjectionIssue> issues,
+    TransferAllocation? transferAllocation,
+    SaleResult? sale,
+  }) => MovementEffect._(
+    movementId: movementId,
+    requestedQuantity: requestedQuantity,
+    appliedQuantity: appliedQuantity,
+    unappliedQuantity: unappliedQuantity,
+    custodyLegs: List<MovementCustodyLegEffect>.unmodifiable(
+      List<MovementCustodyLegEffect>.of(custodyLegs),
+    ),
+    globalDeltasByAsset: Map<String, AccountingAmount>.unmodifiable(
+      Map<String, AccountingAmount>.of(globalDeltasByAsset),
+    ),
+    feeEffect: feeEffect,
+    issues: List<ProjectionIssue>.unmodifiable(
+      List<ProjectionIssue>.of(issues),
+    ),
+    transferAllocation: transferAllocation,
+    sale: sale,
+  );
+
+  const MovementEffect._({
     required this.movementId,
     required this.requestedQuantity,
     required this.appliedQuantity,

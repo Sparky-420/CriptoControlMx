@@ -3,7 +3,19 @@ import '../domain/accounting_movement.dart';
 import '../domain/wallet.dart';
 
 final class FeeEffect {
-  const FeeEffect({
+  factory FeeEffect({
+    required AccountingAmount assetCustodyDebit,
+    required Map<String, AccountingAmount> otherAssetCustodyDebit,
+    required AccountingAmount fiatCostEffect,
+  }) => FeeEffect._(
+    assetCustodyDebit: assetCustodyDebit,
+    otherAssetCustodyDebit: Map<String, AccountingAmount>.unmodifiable(
+      Map<String, AccountingAmount>.of(otherAssetCustodyDebit),
+    ),
+    fiatCostEffect: fiatCostEffect,
+  );
+
+  const FeeEffect._({
     required this.assetCustodyDebit,
     required this.otherAssetCustodyDebit,
     required this.fiatCostEffect,
@@ -13,9 +25,9 @@ final class FeeEffect {
   final Map<String, AccountingAmount> otherAssetCustodyDebit;
   final AccountingAmount fiatCostEffect;
 
-  static final FeeEffect zero = FeeEffect(
+  static final FeeEffect zero = FeeEffect._(
     assetCustodyDebit: AccountingAmount.zero,
-    otherAssetCustodyDebit: <String, AccountingAmount>{},
+    otherAssetCustodyDebit: const <String, AccountingAmount>{},
     fiatCostEffect: AccountingAmount.zero,
   );
 }

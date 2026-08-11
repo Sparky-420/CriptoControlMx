@@ -336,6 +336,26 @@ void main() {
     expect(effect.feeEffect.otherAssetCustodyDebit['ETH']!.toJson(), '0.5');
     expect(effect.transferAllocation!.knownQuantity.toJson(), '4');
     expect(effect.transferAllocation!.transferredCostBasis.toJson(), '40');
+    expect(() => effect.custodyLegs.clear(), throwsUnsupportedError);
+    expect(
+      () => effect.globalDeltasByAsset['BTC'] = AccountingAmount.zero,
+      throwsUnsupportedError,
+    );
+    expect(
+      () => effect.feeEffect.otherAssetCustodyDebit['BTC'] =
+          AccountingAmount.zero,
+      throwsUnsupportedError,
+    );
+    expect(
+      () => effect.issues.add(
+        const ProjectionIssue(
+          ProjectionIssueCode.invalidAmount,
+          'c-cross-asset-transfer',
+          'No debe agregarse',
+        ),
+      ),
+      throwsUnsupportedError,
+    );
   });
 
   test('H1-07 partial transfer effect retains every requested remainder', () {
