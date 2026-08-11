@@ -128,7 +128,9 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
       );
     }
     if (!_missing(movement.sourceWalletId) ||
-        movement.destinationType != null) {
+        movement.destinationType != null ||
+        !_missing(movement.externalRecipientName) ||
+        !_missing(movement.externalDestinationPlatform)) {
       return _malformed(
         movement,
         'Una entrada externa no puede tener origen ni tipo de destino.',
@@ -272,8 +274,25 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
         'El saldo observado no puede ser negativo.',
       );
     }
+    if (_hasForbiddenAdjustmentFields(movement)) {
+      return _malformed(
+        movement,
+        'Un ajuste no admite roles ni cantidades de compra, venta o transferencia.',
+      );
+    }
     return null;
   }
+
+  bool _hasForbiddenAdjustmentFields(AccountingMovement movement) =>
+      movement.quantity != null ||
+      movement.unitPriceFiat != null ||
+      !_missing(movement.sourceWalletId) ||
+      !_missing(movement.destinationWalletId) ||
+      movement.destinationType != null ||
+      !_missing(movement.externalRecipientName) ||
+      !_missing(movement.externalDestinationPlatform) ||
+      movement.receivedAmount != null ||
+      movement.totalDebitedAmount != null;
 
   List<LedgerLeg> _legsFor(AccountingMovement movement) {
     final occurredAt = movement.occurredAt.toUtc();
@@ -318,6 +337,16 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
               LedgerLegKind.custodyCredit,
               movement.receivedAmount!,
               occurredAt,
+            ),
+          if (movement.cryptoFeeAmount.compareTo(AccountingAmount.zero) > 0 &&
+              movement.cryptoFeeAsset != movement.asset)
+            LedgerLeg(
+              movementId: movement.id,
+              walletId: movement.sourceWalletId!,
+              asset: movement.cryptoFeeAsset!,
+              kind: LedgerLegKind.custodyDebit,
+              quantity: movement.cryptoFeeAmount,
+              occurredAt: occurredAt,
             ),
         ];
       case MovementType.balanceAdjustment:

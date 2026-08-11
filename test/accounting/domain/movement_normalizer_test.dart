@@ -249,6 +249,101 @@ void main() {
       ProjectionIssueCode.invalidAmount,
     ]);
   });
+
+  test(
+    'derives separate other-asset fee debits for external and internal transfers',
+    () {
+      final at = DateTime.utc(2026, 7, 30, 20, 54);
+      final result = const DefaultMovementNormalizer()
+          .normalize(<AccountingMovement>[
+            movement(
+              id: 'external-other-asset-fee',
+              occurredAt: at,
+              type: MovementType.transferOut,
+              sourceWalletId: 'external-source',
+              destinationType: DestinationType.external,
+              quantity: AccountingAmount.fromInt(1),
+              receivedAmount: AccountingAmount.fromInt(1),
+              cryptoFeeAmount: AccountingAmount.parse('0.5'),
+              cryptoFeeAsset: 'BTC',
+              totalDebitedAmount: AccountingAmount.fromInt(1),
+              externalRecipientName: 'Tercero',
+              externalDestinationPlatform: 'Bitso',
+            ),
+            movement(
+              id: 'internal-other-asset-fee',
+              occurredAt: at.add(const Duration(minutes: 1)),
+              type: MovementType.transferOut,
+              sourceWalletId: 'internal-source',
+              destinationWalletId: 'internal-destination',
+              destinationType: DestinationType.ownWallet,
+              quantity: AccountingAmount.fromInt(1),
+              receivedAmount: AccountingAmount.fromInt(1),
+              cryptoFeeAmount: AccountingAmount.parse('0.5'),
+              cryptoFeeAsset: 'BTC',
+              totalDebitedAmount: AccountingAmount.fromInt(1),
+            ),
+          ]);
+
+      expect(result.issues, isEmpty);
+      expect(result.legs, hasLength(5));
+      expect(
+        result.legs.map(
+          (leg) =>
+              '${leg.movementId}:${leg.kind.name}:${leg.walletId}:${leg.asset}:${leg.quantity.toJson()}',
+        ),
+        <String>[
+          'external-other-asset-fee:custodyDebit:external-source:UNI:1',
+          'external-other-asset-fee:custodyDebit:external-source:BTC:0.5',
+          'internal-other-asset-fee:custodyDebit:internal-source:UNI:1',
+          'internal-other-asset-fee:custodyCredit:internal-destination:UNI:1',
+          'internal-other-asset-fee:custodyDebit:internal-source:BTC:0.5',
+        ],
+      );
+    },
+  );
+
+  test(
+    'rejects external and transfer role fields on incoming transfers and adjustments',
+    () {
+      final at = DateTime.utc(2026, 7, 30, 20, 54);
+      final result = const DefaultMovementNormalizer()
+          .normalize(<AccountingMovement>[
+            movement(
+              id: 'adjustment-with-transfer-fields',
+              occurredAt: at,
+              type: MovementType.balanceAdjustment,
+              quantity: AccountingAmount.fromInt(1),
+              unitPriceFiat: AccountingAmount.fromInt(100),
+              sourceWalletId: 'source-wallet',
+              destinationWalletId: 'destination-wallet',
+              destinationType: DestinationType.external,
+              receivedAmount: AccountingAmount.fromInt(1),
+              totalDebitedAmount: AccountingAmount.fromInt(1),
+              externalRecipientName: 'Tercero',
+              externalDestinationPlatform: 'Bitso',
+              adjustmentWalletId: 'adjustment-wallet',
+              adjustmentQuantity: AccountingAmount.fromInt(1),
+              observedBalance: AccountingAmount.fromInt(10),
+              adjustmentReason: 'Corte de saldo',
+            ),
+            movement(
+              id: 'incoming-with-external-fields',
+              occurredAt: at,
+              type: MovementType.transferIn,
+              destinationWalletId: 'incoming-wallet',
+              externalRecipientName: 'Tercero',
+              externalDestinationPlatform: 'Bitso',
+            ),
+          ]);
+
+      expect(result.legs, isEmpty);
+      expect(result.issues.map((issue) => issue.code), <ProjectionIssueCode>[
+        ProjectionIssueCode.malformedHistoricalMovement,
+        ProjectionIssueCode.malformedHistoricalMovement,
+      ]);
+    },
+  );
 }
 
 AccountingMovement movement({
@@ -256,6 +351,7 @@ AccountingMovement movement({
   required DateTime occurredAt,
   MovementType type = MovementType.buy,
   AccountingAmount? quantity,
+  AccountingAmount? unitPriceFiat,
   String? sourceWalletId,
   String? destinationWalletId,
   DestinationType? destinationType,
@@ -282,6 +378,7 @@ AccountingMovement movement({
       (type == MovementType.balanceAdjustment
           ? null
           : AccountingAmount.fromInt(1)),
+  unitPriceFiat: unitPriceFiat,
   sourceWalletId: sourceWalletId,
   destinationWalletId:
       destinationWalletId ?? (type == MovementType.buy ? 'wallet-1' : null),
