@@ -89,6 +89,10 @@ final class AccountingMovement {
   final DateTime createdAt;
   final DateTime updatedAt;
   final int schemaVersion;
+
+  bool get isLegacyUnassigned =>
+      walletAssignmentStatus == WalletAssignmentStatus.legacyUnassigned;
+
   AccountingMovement copyWith({
     String? id,
     MovementType? type,
