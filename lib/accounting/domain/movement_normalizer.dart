@@ -268,7 +268,7 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
       FiatFeeTreatment.none => !hasFiatFee && !hasFiatValue,
       FiatFeeTreatment.valuationOfCryptoFee => hasCryptoFee && !hasFiatFee,
       FiatFeeTreatment.paidSeparately =>
-        hasCryptoFee && hasFiatFee && !hasFiatValue,
+        !hasCryptoFee && hasFiatFee && !hasFiatValue,
       FiatFeeTreatment.combined => hasCryptoFee && hasFiatFee,
     };
     return hasNegativeFiat || !isValid

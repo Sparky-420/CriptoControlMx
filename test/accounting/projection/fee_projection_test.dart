@@ -5,6 +5,8 @@ import 'package:cripto_control_mx/accounting/domain/movement_normalizer.dart';
 import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
 import 'package:cripto_control_mx/accounting/projection/fee_effect.dart';
+import 'package:cripto_control_mx/accounting/projection/custody_projector.dart';
+import 'package:cripto_control_mx/accounting/projection/performance_projector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -23,19 +25,34 @@ void main() {
     expect(effect.otherAssetCustodyDebit['ETH']!.toJson(), '0.2');
   });
 
-  test('fiat paid separately records one fiat cost effect', () {
-    final effect = resolveFeeEffect(
-      transfer(
-        fee: '0.1',
-        feeAsset: 'UNI',
-        fiatFee: '15',
-        treatment: FiatFeeTreatment.paidSeparately,
-      ),
+  test('fiat-only paid separately is valid with no crypto custody or pnl', () {
+    final movement = transfer(
+      fiatFee: '15',
+      treatment: FiatFeeTreatment.paidSeparately,
     );
+    final ledger = const DefaultMovementNormalizer().normalize(
+      <AccountingMovement>[movement],
+    );
+    final custody = const DefaultCustodyProjector().project(ledger);
+    final performance = const DefaultPerformanceProjector().project(
+      ledger,
+      custody,
+      const <String, AccountingAmount>{},
+      salePolicy: SaleCostConsumptionPolicy.knownFirst,
+      transferPolicy: TransferCostAllocationPolicy.proportional,
+    );
+    final effect = resolveFeeEffect(movement);
 
-    expect(effect.assetCustodyDebit.toJson(), '0.1');
+    expect(ledger.isValid, isTrue);
+    expect(ledger.legs, hasLength(1));
+    expect(effect.assetCustodyDebit, AccountingAmount.zero);
     expect(effect.otherAssetCustodyDebit, isEmpty);
     expect(effect.fiatCostEffect.toJson(), '15');
+    expect(custody.effectsFor(movement.id), hasLength(1));
+    expect(
+      performance.positions.values.map((position) => position.realizedPnlKnown),
+      everyElement(AccountingAmount.zero),
+    );
   });
 
   test('fiat valuation is informational and creates no second debit', () {
@@ -83,7 +100,12 @@ void main() {
         feeFiatValue: '1',
         treatment: FiatFeeTreatment.paidSeparately,
       ),
-      transfer(fiatFee: '1', treatment: FiatFeeTreatment.paidSeparately),
+      transfer(
+        fee: '0.1',
+        feeAsset: 'UNI',
+        fiatFee: '1',
+        treatment: FiatFeeTreatment.paidSeparately,
+      ),
       transfer(
         fee: '0.1',
         feeAsset: 'UNI',
