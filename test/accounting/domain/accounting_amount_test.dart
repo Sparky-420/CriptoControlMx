@@ -34,4 +34,34 @@ void main() {
     expect(() => AccountingAmount.parse('1e3'), throwsFormatException);
     expect(() => AccountingAmount.parse('--1'), throwsFormatException);
   });
+
+  test(
+    'divides decimal amounts across mixed scales with truncation toward zero',
+    () {
+      expect(
+        AccountingAmount.parse(
+          '0.5',
+        ).divide(AccountingAmount.parse('2')).toJson(),
+        '0.25',
+      );
+      expect(
+        AccountingAmount.parse(
+          '1.25',
+        ).divide(AccountingAmount.parse('0.5')).toJson(),
+        '2.5',
+      );
+      expect(
+        AccountingAmount.parse(
+          '-0.5',
+        ).divide(AccountingAmount.parse('2')).toJson(),
+        '-0.25',
+      );
+      expect(
+        AccountingAmount.parse(
+          '0.00000000000000000001',
+        ).divide(AccountingAmount.parse('2')).toJson(),
+        '0',
+      );
+    },
+  );
 }

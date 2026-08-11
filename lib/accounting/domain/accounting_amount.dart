@@ -52,9 +52,17 @@ final class AccountingAmount implements Comparable<AccountingAmount> {
     if (scale < 0) {
       throw ArgumentError.value(scale, 'scale', 'Must not be negative');
     }
-    final BigInt numerator =
-        coefficient * BigInt.from(10).pow(other.scale + scale);
-    return _normalize(numerator ~/ other.coefficient, scale);
+    final exponent = other.scale + scale - this.scale;
+    final BigInt numerator;
+    final BigInt denominator;
+    if (exponent >= 0) {
+      numerator = coefficient * BigInt.from(10).pow(exponent);
+      denominator = other.coefficient;
+    } else {
+      numerator = coefficient;
+      denominator = other.coefficient * BigInt.from(10).pow(-exponent);
+    }
+    return _normalize(numerator ~/ denominator, scale);
   }
 
   AccountingAmount min(AccountingAmount other) =>
