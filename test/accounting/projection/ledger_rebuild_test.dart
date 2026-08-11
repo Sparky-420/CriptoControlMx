@@ -232,32 +232,25 @@ void main() {
     expect(result.resolvedAdjustmentQuantity.toJson(), '0.5');
   });
 
-  test(
-    'uses first adjustment metadata when a later duplicate has no leg',
-    () {
-      final first = adjustment(
-        id: 'adj-duplicate',
-        quantity: '1',
-        observed: '1',
-      );
-      final duplicate = adjustment(
-        id: 'adj-duplicate',
-        quantity: '-1',
-        observed: '0',
-      ).copyWith(occurredAt: DateTime.utc(2026, 7, 30, 20, 57));
+  test('uses first adjustment metadata when a later duplicate has no leg', () {
+    final first = adjustment(id: 'adj-duplicate', quantity: '1', observed: '1');
+    final duplicate = adjustment(
+      id: 'adj-duplicate',
+      quantity: '-1',
+      observed: '0',
+    ).copyWith(occurredAt: DateTime.utc(2026, 7, 30, 20, 57));
 
-      final result = position(
-        const LedgerRebuilder().rebuild(<AccountingMovement>[first, duplicate]),
-      );
+    final result = position(
+      const LedgerRebuilder().rebuild(<AccountingMovement>[first, duplicate]),
+    );
 
-      expect(result.reconciledQuantity.toJson(), '1');
-      expect(result.lastObservedBalance!.toJson(), '1');
-      expect(
-        result.issues.map((issue) => issue.code),
-        isNot(contains(ProjectionIssueCode.observedBalanceMismatch)),
-      );
-    },
-  );
+    expect(result.reconciledQuantity.toJson(), '1');
+    expect(result.lastObservedBalance!.toJson(), '1');
+    expect(
+      result.issues.map((issue) => issue.code),
+      isNot(contains(ProjectionIssueCode.observedBalanceMismatch)),
+    );
+  });
 }
 
 const String walletId = '11111111-1111-4111-8111-111111111111';
