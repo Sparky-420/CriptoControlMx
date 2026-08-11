@@ -12,6 +12,9 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'accounting/adapters/legacy_financial_adapter.dart';
+import 'accounting/adapters/legacy_movement_adapter.dart';
+import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
 export 'accounting/domain/movement_type.dart';
 
@@ -25173,6 +25176,18 @@ class Movement {
        createdAt = createdAt ?? date,
        updatedAt = updatedAt ?? createdAt ?? date;
 
+  factory Movement.fromAccountingMovement(
+    AccountingMovement value, {
+    Map<String, Object?> preservedFields = const <String, Object?>{},
+  }) => Movement.fromJson(
+    Map<String, dynamic>.from(
+      const LegacyMovementAdapter().toLegacyJson(
+        value,
+        preservedFields: preservedFields,
+      ),
+    ),
+  );
+
   double get grossTotal => quantity * unitPrice;
 
   double get effectiveReceivedAmount => receivedAmount ?? quantity;
@@ -25390,6 +25405,17 @@ class CoinStats {
     this.totalInvested = 0.0,
   });
 
+  factory CoinStats.fromLegacyData(
+    LegacyCoinStatsData value, {
+    required double currentPrice,
+  }) => CoinStats(
+    coin: value.coin,
+    quantity: value.quantity,
+    costBase: value.costBase,
+    currentPrice: currentPrice,
+    realizedPL: value.realizedProfit,
+  );
+
   double get avgPrice => quantity > 0 ? costBase / quantity : 0.0;
   double get currentValue => quantity * currentPrice;
   double get unrealizedPL => currentValue - costBase;
@@ -25472,6 +25498,26 @@ class CoinAudit {
     this.undeterminedTransferInCount = 0,
   });
 
+  factory CoinAudit.fromLegacyData(LegacyCoinAuditData value) => CoinAudit(
+    buys: 0,
+    sells: 0,
+    transferIns: 0,
+    transferOuts: 0,
+    fees: 0,
+    buyGrossCost: 0,
+    transferInGrossCost: 0,
+    costBaseFromBuys: 0,
+    costBaseFromTransferIns: 0,
+    capitalizedFees: 0,
+    costBaseSold: 0,
+    costBaseTransferredOut: 0,
+    saleGrossProceeds: 0,
+    transferOutMarketValue: 0,
+    accountingAdjustments: value.reconciledCostBase,
+    currentCostBase: value.reconciledCostBase,
+    realizedPL: 0,
+  );
+
   double get reconciledCostBase =>
       costBaseFromBuys +
       costBaseFromTransferIns +
@@ -25494,6 +25540,14 @@ class PortfolioTotals {
     required this.realizedPL,
     this.feesPaid = 0.0,
   });
+
+  factory PortfolioTotals.fromLegacyData(LegacyPortfolioTotalsData value) =>
+      PortfolioTotals(
+        costBase: value.costBase,
+        currentValue: value.currentValue,
+        unrealizedPL: value.currentValue - value.costBase,
+        realizedPL: value.realizedProfit,
+      );
 }
 
 class CoinSnapshot {

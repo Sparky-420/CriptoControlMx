@@ -1,0 +1,474 @@
+import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
+import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
+import 'package:cripto_control_mx/accounting/domain/ledger_validation.dart';
+import 'package:cripto_control_mx/accounting/domain/movement_normalizer.dart';
+import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
+import 'package:cripto_control_mx/accounting/domain/wallet.dart';
+import 'package:cripto_control_mx/accounting/projection/accounting_ledger_engine.dart';
+import 'package:cripto_control_mx/accounting/projection/custody_projection.dart';
+import 'package:cripto_control_mx/accounting/projection/custody_projector.dart';
+import 'package:cripto_control_mx/accounting/projection/performance_projector.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('reports all four accounting completeness states', () {
+    final projection = project(
+      <AccountingMovement>[
+        buy(
+          id: 'complete-buy',
+          asset: 'UNI',
+          quantity: '2',
+          price: '10',
+          destinationWalletId: completeWalletId,
+        ),
+        buy(
+          id: 'partial-buy',
+          asset: 'UNI',
+          quantity: '2',
+          price: '10',
+          destinationWalletId: partialWalletId,
+        ),
+        adjustment(
+          id: 'partial-adjustment',
+          walletId: partialWalletId,
+          asset: 'UNI',
+          quantity: '1',
+          observed: '3',
+        ),
+        buy(
+          id: 'pending-buy',
+          asset: 'BTC',
+          quantity: '4',
+          price: '10',
+          assignment: WalletAssignmentStatus.pending,
+        ),
+        transferIn(
+          id: 'legacy-in',
+          asset: 'ETH',
+          quantity: '5',
+          assignment: WalletAssignmentStatus.legacyUnassigned,
+        ),
+      ],
+      prices: <String, AccountingAmount>{
+        'UNI': amount('5'),
+        'BTC': amount('100'),
+        'ETH': amount('2'),
+      },
+    );
+
+    expect(
+      projection.positions.values
+          .map((value) => value.completeness.state)
+          .toSet(),
+      <AccountingCompleteness>{
+        AccountingCompleteness.complete,
+        AccountingCompleteness.partiallyKnown,
+        AccountingCompleteness.pendingAssignment,
+        AccountingCompleteness.unassignedLegacy,
+      },
+    );
+
+    final complete =
+        projection.positions[const WalletAssetKey(completeWalletId, 'UNI')]!;
+    expect(complete.reconciliationDifference, AccountingAmount.zero);
+    expect(complete.knownAvailable.toJson(), '2');
+    expect(complete.unknownAvailable, AccountingAmount.zero);
+    expect(complete.custodyDeficit, AccountingAmount.zero);
+    expect(complete.custodyMarketValue.toJson(), '10');
+    expect(complete.knownPositionMarketValue.toJson(), '10');
+    expect(complete.completeness.cause, isNull);
+    expect(complete.completeness.causingMovementIds, isEmpty);
+
+    final partial =
+        projection.positions[const WalletAssetKey(partialWalletId, 'UNI')]!;
+    expect(partial.reconciliationDifference.toJson(), '1');
+    expect(partial.knownAvailable.toJson(), '2');
+    expect(partial.unknownAvailable.toJson(), '1');
+    expect(partial.custodyDeficit, AccountingAmount.zero);
+    expect(partial.completeness.cause, ProjectionIssueCode.unknownCostBasis);
+    expect(
+      partial.completeness.causingMovementIds,
+      contains('partial-adjustment'),
+    );
+
+    final pending = projection
+        .positions[const WalletAssetKey(virtualPendingWalletId, 'BTC')]!;
+    expect(pending.completeness.totalQuantity.toJson(), '4');
+    expect(pending.completeness.knownQuantity.toJson(), '4');
+    expect(pending.completeness.unknownQuantity, AccountingAmount.zero);
+    expect(
+      pending.completeness.cause,
+      ProjectionIssueCode.missingWalletAssignment,
+    );
+    expect(pending.completeness.causingMovementIds, <String>['pending-buy']);
+
+    final legacy = projection
+        .positions[const WalletAssetKey(virtualUnassignedWalletId, 'ETH')]!;
+    expect(legacy.completeness.totalQuantity.toJson(), '5');
+    expect(legacy.completeness.knownQuantity, AccountingAmount.zero);
+    expect(legacy.completeness.unknownQuantity.toJson(), '5');
+    expect(
+      legacy.completeness.cause,
+      ProjectionIssueCode.legacyAccountingSemantics,
+    );
+    expect(legacy.completeness.causingMovementIds, <String>['legacy-in']);
+
+    expect(
+      projection.positions.keys.map((key) => key.walletId),
+      isNot(contains('Bitso')),
+    );
+    expect(projection.totals.custodyMarketValue.toJson(), '435');
+    expect(projection.totals.knownPositionMarketValue.toJson(), '420');
+    expect(projection.totals.knownCostBasis.toJson(), '80');
+    expect(projection.totals.realizedPnlKnown, AccountingAmount.zero);
+    expect(projection.totals.unrealizedPnlKnown.toJson(), '340');
+    expect(projection.migrationProgress.assigned, 3);
+    expect(projection.migrationProgress.total, 5);
+    expect(
+      projection.issues.map((issue) => issue.movementId),
+      containsAll(<String>['pending-buy', 'legacy-in']),
+    );
+  });
+
+  test('exposes custody deficit and its typed unknown-cost issue', () {
+    final projection = project(
+      <AccountingMovement>[
+        buy(
+          id: 'deficit-buy',
+          asset: 'UNI',
+          quantity: '10',
+          price: '10',
+          destinationWalletId: completeWalletId,
+        ),
+        adjustment(
+          id: 'deficit-adjustment',
+          walletId: completeWalletId,
+          asset: 'UNI',
+          quantity: '-2',
+          observed: '8',
+        ),
+      ],
+      prices: <String, AccountingAmount>{'UNI': amount('5')},
+    );
+    final position =
+        projection.positions[const WalletAssetKey(completeWalletId, 'UNI')]!;
+
+    expect(position.reconciliationDifference.toJson(), '-2');
+    expect(position.knownAvailable.toJson(), '8');
+    expect(position.unknownAvailable, AccountingAmount.zero);
+    expect(position.custodyDeficit.toJson(), '2');
+    expect(position.completeness.totalQuantity.toJson(), '8');
+    expect(position.completeness.knownQuantity.toJson(), '8');
+    expect(position.completeness.unknownQuantity, AccountingAmount.zero);
+    expect(position.completeness.causingMovementIds, <String>[
+      'deficit-adjustment',
+    ]);
+    expect(position.custodyMarketValue.toJson(), '40');
+    expect(position.knownPositionMarketValue.toJson(), '50');
+    expect(
+      projection.issues
+          .where(
+            (issue) =>
+                issue.code == ProjectionIssueCode.unknownCostBasis &&
+                issue.movementId == 'deficit-adjustment',
+          )
+          .length,
+      1,
+    );
+  });
+
+  test('counts one internal transfer debit and its fee exactly once', () {
+    final projection = project(
+      <AccountingMovement>[
+        buy(
+          id: 'internal-buy',
+          asset: 'UNI',
+          quantity: '10',
+          price: '10',
+          destinationWalletId: completeWalletId,
+        ),
+        transferOut(
+          id: 'internal-transfer',
+          asset: 'UNI',
+          received: '4',
+          fee: '1',
+          sourceWalletId: completeWalletId,
+          destinationWalletId: partialWalletId,
+          destinationType: DestinationType.ownWallet,
+        ),
+      ],
+      prices: <String, AccountingAmount>{'UNI': amount('5')},
+    );
+    final effect = projection.effects['internal-transfer']!;
+
+    expect(effect.requestedQuantity.toJson(), '5');
+    expect(effect.appliedQuantity.toJson(), '5');
+    expect(effect.unappliedQuantity, AccountingAmount.zero);
+    expect(effect.issues, isEmpty);
+    expect(effect.sale, isNull);
+    expect(projection.totals.custodyMarketValue.toJson(), '45');
+    expect(projection.totals.knownPositionMarketValue.toJson(), '45');
+    expect(projection.totals.knownCostBasis.toJson(), '90');
+    expect(projection.totals.realizedPnlKnown, AccountingAmount.zero);
+  });
+
+  test(
+    'preserves legacy global principal in the unassigned virtual bucket',
+    () {
+      final projection = project(<AccountingMovement>[
+        buy(
+          id: 'legacy-buy',
+          asset: 'UNI',
+          quantity: '10',
+          price: '10',
+          assignment: WalletAssignmentStatus.legacyUnassigned,
+        ),
+        transferOut(
+          id: 'legacy-owned-transfer',
+          asset: 'UNI',
+          received: '4',
+          fee: '1',
+          destinationType: DestinationType.ownWallet,
+          assignment: WalletAssignmentStatus.legacyUnassigned,
+        ),
+      ]);
+      final position = projection
+          .positions[const WalletAssetKey(virtualUnassignedWalletId, 'UNI')]!;
+      final effect = projection.effects['legacy-owned-transfer']!;
+
+      expect(projection.positions, hasLength(1));
+      expect(position.custody.reconciledQuantity.toJson(), '9');
+      expect(position.performance.knownQuantity.toJson(), '9');
+      expect(position.performance.knownCostBasis.toJson(), '90');
+      expect(effect.requestedQuantity.toJson(), '5');
+      expect(effect.appliedQuantity.toJson(), '5');
+      expect(effect.unappliedQuantity, AccountingAmount.zero);
+      expect(
+        projection.issues.map((issue) => issue.code),
+        isNot(contains(ProjectionIssueCode.sameWalletTransfer)),
+      );
+    },
+  );
+
+  test('attributes transferred unknown quantity to the transfer movement', () {
+    final projection = project(<AccountingMovement>[
+      buy(
+        id: 'mixed-buy',
+        asset: 'UNI',
+        quantity: '10',
+        price: '10',
+        destinationWalletId: completeWalletId,
+      ),
+      adjustment(
+        id: 'mixed-adjustment',
+        walletId: completeWalletId,
+        asset: 'UNI',
+        quantity: '2',
+        observed: '12',
+      ),
+      transferOut(
+        id: 'mixed-transfer',
+        asset: 'UNI',
+        received: '6',
+        fee: '0',
+        sourceWalletId: completeWalletId,
+        destinationWalletId: partialWalletId,
+        destinationType: DestinationType.ownWallet,
+      ),
+    ]);
+    final destination =
+        projection.positions[const WalletAssetKey(partialWalletId, 'UNI')]!;
+
+    expect(
+      destination.completeness.state,
+      AccountingCompleteness.partiallyKnown,
+    );
+    expect(destination.knownAvailable.toJson(), '5');
+    expect(destination.unknownAvailable.toJson(), '1');
+    expect(destination.completeness.causingMovementIds, <String>[
+      'mixed-transfer',
+    ]);
+    expect(
+      projection.issues
+          .where(
+            (issue) =>
+                issue.code == ProjectionIssueCode.unknownCostBasis &&
+                issue.movementId == 'mixed-transfer',
+          )
+          .length,
+      1,
+    );
+  });
+}
+
+const String completeWalletId = '11111111-1111-4111-8111-111111111111';
+const String partialWalletId = '22222222-2222-4222-8222-222222222222';
+final DateTime baseTime = DateTime.utc(2026, 7, 30, 20, 54);
+
+AccountingAmount amount(String value) => AccountingAmount.parse(value);
+
+LedgerProjection project(
+  List<AccountingMovement> movements, {
+  Map<String, AccountingAmount> prices = const <String, AccountingAmount>{},
+}) =>
+    const AccountingLedgerEngine(
+      DefaultMovementNormalizer(),
+      DefaultCustodyProjector(),
+      DefaultPerformanceProjector(),
+    ).project(
+      LedgerInput(
+        wallets: <Wallet>[wallet(completeWalletId), wallet(partialWalletId)],
+        movements: movements,
+        currentPrices: prices,
+        saleCostConsumptionPolicy: SaleCostConsumptionPolicy.knownFirst,
+        transferCostAllocationPolicy: TransferCostAllocationPolicy.proportional,
+        legacyAccountingPolicy: LegacyAccountingPolicy.preservePreviousGlobal,
+      ),
+    );
+
+Wallet wallet(String id) => Wallet(
+  id: id,
+  name: 'Wallet $id',
+  provider: 'Bitso',
+  status: WalletStatus.active,
+  createdAt: baseTime,
+  updatedAt: baseTime,
+);
+
+AccountingMovement buy({
+  required String id,
+  required String asset,
+  required String quantity,
+  required String price,
+  String? destinationWalletId,
+  WalletAssignmentStatus assignment = WalletAssignmentStatus.assigned,
+}) => movement(
+  id: id,
+  type: MovementType.buy,
+  asset: asset,
+  quantity: quantity,
+  price: price,
+  destinationWalletId: destinationWalletId,
+  assignment: assignment,
+);
+
+AccountingMovement transferIn({
+  required String id,
+  required String asset,
+  required String quantity,
+  required WalletAssignmentStatus assignment,
+}) => movement(
+  id: id,
+  type: MovementType.transferIn,
+  asset: asset,
+  quantity: quantity,
+  assignment: assignment,
+);
+
+AccountingMovement transferOut({
+  required String id,
+  required String asset,
+  required String received,
+  required String fee,
+  String? sourceWalletId,
+  String? destinationWalletId,
+  required DestinationType destinationType,
+  WalletAssignmentStatus assignment = WalletAssignmentStatus.assigned,
+}) => movement(
+  id: id,
+  type: MovementType.transferOut,
+  asset: asset,
+  quantity: received,
+  sourceWalletId: sourceWalletId,
+  destinationWalletId: destinationWalletId,
+  destinationType: destinationType,
+  receivedAmount: received,
+  cryptoFeeAmount: fee,
+  cryptoFeeAsset: asset,
+  totalDebitedAmount: (amount(received) + amount(fee)).toJson(),
+  assignment: assignment,
+);
+
+AccountingMovement adjustment({
+  required String id,
+  required String walletId,
+  required String asset,
+  required String quantity,
+  required String observed,
+}) => movement(
+  id: id,
+  type: MovementType.balanceAdjustment,
+  asset: asset,
+  adjustmentWalletId: walletId,
+  adjustmentQuantity: quantity,
+  observedBalance: observed,
+  assignment: WalletAssignmentStatus.assigned,
+);
+
+AccountingMovement movement({
+  required String id,
+  required MovementType type,
+  required String asset,
+  String? quantity,
+  String? price,
+  String? sourceWalletId,
+  String? destinationWalletId,
+  DestinationType? destinationType,
+  String? receivedAmount,
+  String cryptoFeeAmount = '0',
+  String? cryptoFeeAsset,
+  String? totalDebitedAmount,
+  String? adjustmentWalletId,
+  String? adjustmentQuantity,
+  String? observedBalance,
+  required WalletAssignmentStatus assignment,
+}) {
+  final occurredAt = baseTime.add(
+    Duration(
+      minutes: switch (id) {
+        'complete-buy' => 0,
+        'partial-buy' => 1,
+        'partial-adjustment' => 2,
+        'pending-buy' => 3,
+        'legacy-in' => 4,
+        'deficit-buy' || 'internal-buy' || 'legacy-buy' => 0,
+        'deficit-adjustment' ||
+        'internal-transfer' ||
+        'legacy-owned-transfer' => 1,
+        'mixed-buy' => 0,
+        'mixed-adjustment' => 1,
+        'mixed-transfer' => 2,
+        _ => 5,
+      },
+    ),
+  );
+  return AccountingMovement(
+    id: id,
+    type: type,
+    asset: asset,
+    occurredAt: occurredAt,
+    quantity: quantity == null ? null : amount(quantity),
+    unitPriceFiat: price == null ? null : amount(price),
+    fiatFeeAmount: AccountingAmount.zero,
+    sourceWalletId: sourceWalletId,
+    destinationWalletId: destinationWalletId,
+    destinationType: destinationType,
+    walletAssignmentStatus: assignment,
+    receivedAmount: receivedAmount == null ? null : amount(receivedAmount),
+    cryptoFeeAmount: amount(cryptoFeeAmount),
+    cryptoFeeAsset: cryptoFeeAsset,
+    totalDebitedAmount: totalDebitedAmount == null
+        ? null
+        : amount(totalDebitedAmount),
+    fiatFeeTreatment: FiatFeeTreatment.none,
+    reconciliationLinks: const <ReconciliationLink>[],
+    createdAt: occurredAt,
+    updatedAt: occurredAt,
+    adjustmentWalletId: adjustmentWalletId,
+    adjustmentQuantity: adjustmentQuantity == null
+        ? null
+        : amount(adjustmentQuantity),
+    observedBalance: observedBalance == null ? null : amount(observedBalance),
+    adjustmentReason: type == MovementType.balanceAdjustment ? 'Corte' : null,
+  );
+}

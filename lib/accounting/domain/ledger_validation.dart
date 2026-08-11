@@ -15,6 +15,10 @@ enum ProjectionIssueCode {
   invalidReconciliationLink,
   linkedAdjustmentDeletion,
   malformedHistoricalMovement,
+  missingWalletAssignment,
+  unknownCostBasis,
+  legacyAccountingSemantics,
+  missingDestinationClassification,
 }
 
 enum LedgerLegKind { custodyDebit, custodyCredit, performanceEvent, adjustment }
