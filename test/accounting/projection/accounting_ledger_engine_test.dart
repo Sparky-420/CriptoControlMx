@@ -299,6 +299,148 @@ void main() {
       1,
     );
   });
+
+  test(
+    'bounds a malformed legacy fee-only transfer and keeps typed effects',
+    () {
+      final projection = project(<AccountingMovement>[
+        buy(
+          id: 'fee-only-balance',
+          asset: 'UNI',
+          quantity: '0.5',
+          price: '10',
+          assignment: WalletAssignmentStatus.legacyUnassigned,
+        ),
+        movement(
+          id: 'fee-only-transfer',
+          type: MovementType.transferOut,
+          asset: 'UNI',
+          cryptoFeeAmount: '0.75',
+          cryptoFeeAsset: 'UNI',
+          assignment: WalletAssignmentStatus.legacyUnassigned,
+        ),
+      ]);
+      final effect = projection.effects['fee-only-transfer']!;
+
+      expect(effect.requestedQuantity.toJson(), '0.75');
+      expect(effect.appliedQuantity.toJson(), '0.5');
+      expect(effect.unappliedQuantity.toJson(), '0.25');
+      expect(
+        effect.issues.map((issue) => issue.code),
+        containsAll(<ProjectionIssueCode>[
+          ProjectionIssueCode.invalidAmount,
+          ProjectionIssueCode.insufficientCustody,
+          ProjectionIssueCode.missingDestinationClassification,
+        ]),
+      );
+      expect(
+        projection
+            .positions[const WalletAssetKey(virtualUnassignedWalletId, 'UNI')]!
+            .custody
+            .reconciledQuantity,
+        AccountingAmount.zero,
+      );
+    },
+  );
+
+  test('reports bounded effects for a fee-only transfer in another asset', () {
+    final projection = project(<AccountingMovement>[
+      buy(
+        id: 'other-fee-balance',
+        asset: 'ETH',
+        quantity: '0.5',
+        price: '10',
+        assignment: WalletAssignmentStatus.legacyUnassigned,
+      ),
+      movement(
+        id: 'other-fee-transfer',
+        type: MovementType.transferOut,
+        asset: 'UNI',
+        cryptoFeeAmount: '0.75',
+        cryptoFeeAsset: 'ETH',
+        assignment: WalletAssignmentStatus.legacyUnassigned,
+      ),
+    ]);
+    final effect = projection.effects['other-fee-transfer']!;
+
+    expect(effect.requestedQuantity.toJson(), '0.75');
+    expect(effect.appliedQuantity.toJson(), '0.5');
+    expect(effect.unappliedQuantity.toJson(), '0.25');
+    expect(
+      effect.issues.map((issue) => issue.code),
+      contains(ProjectionIssueCode.insufficientCustody),
+    );
+  });
+
+  test('routes broken wallet references to an explicit virtual bucket', () {
+    const archivedWalletId = '33333333-3333-4333-8333-333333333333';
+    final projection = project(
+      <AccountingMovement>[
+        buy(
+          id: 'broken-wallet-buy',
+          asset: 'UNI',
+          quantity: '1',
+          price: '10',
+          destinationWalletId: 'missing-wallet-id',
+        ),
+        buy(
+          id: 'archived-wallet-buy',
+          asset: 'UNI',
+          quantity: '2',
+          price: '10',
+          destinationWalletId: archivedWalletId,
+        ),
+        buy(
+          id: 'spoofed-virtual-buy',
+          asset: 'UNI',
+          quantity: '1',
+          price: '10',
+          destinationWalletId: 'virtual:spoofed',
+        ),
+      ],
+      wallets: <Wallet>[
+        wallet(completeWalletId),
+        wallet(archivedWalletId, status: WalletStatus.archived),
+      ],
+    );
+
+    expect(
+      projection.positions.keys.map((key) => key.walletId),
+      isNot(containsAll(<String>['missing-wallet-id', 'virtual:spoofed'])),
+    );
+    final unknown =
+        projection.positions[const WalletAssetKey('virtual:unknown', 'UNI')]!;
+    expect(unknown.custody.reconciledQuantity.toJson(), '2');
+    expect(unknown.completeness.cause?.name, 'unknownWallet');
+    expect(
+      unknown.completeness.causingMovementIds,
+      containsAll(<String>['broken-wallet-buy', 'spoofed-virtual-buy']),
+    );
+    expect(
+      projection.issues.where(
+        (issue) =>
+            issue.code.name == 'unknownWallet' &&
+            issue.movementId == 'broken-wallet-buy',
+      ),
+      hasLength(1),
+    );
+    expect(
+      projection.issues.where(
+        (issue) =>
+            issue.code.name == 'unknownWallet' &&
+            issue.movementId == 'spoofed-virtual-buy',
+      ),
+      hasLength(1),
+    );
+    expect(
+      projection
+          .positions[const WalletAssetKey(archivedWalletId, 'UNI')]!
+          .custody
+          .reconciledQuantity
+          .toJson(),
+      '2',
+    );
+  });
 }
 
 const String completeWalletId = '11111111-1111-4111-8111-111111111111';
@@ -310,6 +452,7 @@ AccountingAmount amount(String value) => AccountingAmount.parse(value);
 LedgerProjection project(
   List<AccountingMovement> movements, {
   Map<String, AccountingAmount> prices = const <String, AccountingAmount>{},
+  List<Wallet>? wallets,
 }) =>
     const AccountingLedgerEngine(
       DefaultMovementNormalizer(),
@@ -317,7 +460,9 @@ LedgerProjection project(
       DefaultPerformanceProjector(),
     ).project(
       LedgerInput(
-        wallets: <Wallet>[wallet(completeWalletId), wallet(partialWalletId)],
+        wallets:
+            wallets ??
+            <Wallet>[wallet(completeWalletId), wallet(partialWalletId)],
         movements: movements,
         currentPrices: prices,
         saleCostConsumptionPolicy: SaleCostConsumptionPolicy.knownFirst,
@@ -326,11 +471,11 @@ LedgerProjection project(
       ),
     );
 
-Wallet wallet(String id) => Wallet(
+Wallet wallet(String id, {WalletStatus status = WalletStatus.active}) => Wallet(
   id: id,
   name: 'Wallet $id',
   provider: 'Bitso',
-  status: WalletStatus.active,
+  status: status,
   createdAt: baseTime,
   updatedAt: baseTime,
 );

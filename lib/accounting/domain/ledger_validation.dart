@@ -19,6 +19,7 @@ enum ProjectionIssueCode {
   unknownCostBasis,
   legacyAccountingSemantics,
   missingDestinationClassification,
+  unknownWallet,
 }
 
 enum LedgerLegKind { custodyDebit, custodyCredit, performanceEvent, adjustment }

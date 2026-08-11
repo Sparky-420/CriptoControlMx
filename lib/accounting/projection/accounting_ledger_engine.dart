@@ -38,7 +38,19 @@ final class AccountingLedgerEngine {
   final PerformanceProjector performance;
 
   LedgerProjection project(LedgerInput input) {
-    final routedMovements = input.movements.map(_routeAssignment).toList();
+    final walletReferenceIssues = <ProjectionIssue>[];
+    final walletIds = input.wallets.map((wallet) => wallet.id).toSet();
+    final routedMovements = input.movements
+        .map(
+          (movement) => _routeAssignment(
+            _routeUnknownWalletReferences(
+              movement,
+              walletIds,
+              walletReferenceIssues,
+            ),
+          ),
+        )
+        .toList();
     final normalized = _preserveVirtualGlobalTransfers(
       normalizer.normalize(routedMovements),
       input.legacyAccountingPolicy,
@@ -56,7 +68,10 @@ final class AccountingLedgerEngine {
       movementById.putIfAbsent(movement.id, () => movement);
     }
     final keysByMovementId = _keysByMovement(normalized.movements);
-    final assignmentIssues = _assignmentIssues(normalized.movements);
+    final assignmentIssues = <ProjectionIssue>[
+      ..._assignmentIssues(normalized.movements),
+      ...walletReferenceIssues,
+    ];
     final allIssues = _collectIssues(
       normalized,
       custodyProjection,
@@ -69,6 +84,7 @@ final class AccountingLedgerEngine {
       input.currentPrices,
       movementById,
       keysByMovementId,
+      walletReferenceIssues.map((issue) => issue.movementId).toSet(),
     );
     _addUniqueIssues(allIssues, _completenessIssues(positions.values));
     final effects = _movementEffects(
@@ -92,13 +108,54 @@ final class AccountingLedgerEngine {
             .where(
               (movement) =>
                   movement.walletAssignmentStatus ==
-                  WalletAssignmentStatus.assigned,
+                      WalletAssignmentStatus.assigned &&
+                  !walletReferenceIssues.any(
+                    (issue) => issue.movementId == movement.id,
+                  ),
             )
             .length,
         total: uniqueMovements.length,
       ),
     );
   }
+}
+
+AccountingMovement _routeUnknownWalletReferences(
+  AccountingMovement movement,
+  Set<String> walletIds,
+  List<ProjectionIssue> issues,
+) {
+  String? route(String? walletId, String role) {
+    if (walletId == null || walletIds.contains(walletId)) {
+      return walletId;
+    }
+    issues.add(
+      ProjectionIssue(
+        ProjectionIssueCode.unknownWallet,
+        movement.id,
+        'La cartera $walletId referenciada como $role no existe.',
+      ),
+    );
+    return virtualUnknownWalletId;
+  }
+
+  return switch (movement.type) {
+    MovementType.buy || MovementType.transferIn => movement.copyWith(
+      destinationWalletId: route(movement.destinationWalletId, 'destino'),
+    ),
+    MovementType.sell => movement.copyWith(
+      sourceWalletId: route(movement.sourceWalletId, 'origen'),
+    ),
+    MovementType.transferOut => movement.copyWith(
+      sourceWalletId: route(movement.sourceWalletId, 'origen'),
+      destinationWalletId: movement.destinationType == DestinationType.ownWallet
+          ? route(movement.destinationWalletId, 'destino')
+          : movement.destinationWalletId,
+    ),
+    MovementType.balanceAdjustment => movement.copyWith(
+      adjustmentWalletId: route(movement.adjustmentWalletId, 'ajuste'),
+    ),
+  };
 }
 
 AccountingMovement _routeAssignment(AccountingMovement movement) {
@@ -135,7 +192,7 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
       break;
   }
   final specialIds = <String>{};
-  final unclassifiedIds = <String>{};
+  final missingClassificationIds = <String>{};
   final specialLegs = <String, List<LedgerLeg>>{};
   final projectedMovements = <AccountingMovement>[];
   for (final originalMovement in ledger.movements) {
@@ -147,25 +204,25 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
         walletId != null &&
         walletId == movement.destinationWalletId &&
         isVirtualSource;
-    final isStructured =
-        movement.receivedAmount != null ||
-        movement.totalDebitedAmount != null ||
-        movement.cryptoFeeAmount != AccountingAmount.zero;
-    final isLegacyUnclassified =
+    final isLegacyVirtual =
         movement.walletAssignmentStatus ==
             WalletAssignmentStatus.legacyUnassigned &&
-        movement.destinationType == null &&
         isVirtualSource;
+    final isLegacyUnclassified =
+        isLegacyVirtual &&
+        movement.destinationType == null &&
+        movement.destinationWalletId == null;
     if (movement.type != MovementType.transferOut ||
         (!isVirtualSelf && !isLegacyUnclassified) ||
         !specialIds.add(movement.id)) {
       projectedMovements.add(movement);
       continue;
     }
-    if (isLegacyUnclassified) unclassifiedIds.add(movement.id);
+    if (isLegacyVirtual) missingClassificationIds.add(movement.id);
     final legs = <LedgerLeg>[];
-    if (isStructured) {
-      final received = movement.receivedAmount ?? movement.quantity!;
+    if (isVirtualSelf) {
+      final received =
+          movement.receivedAmount ?? movement.quantity ?? AccountingAmount.zero;
       final isSameAssetFee =
           movement.cryptoFeeAsset == null ||
           movement.cryptoFeeAsset == movement.asset;
@@ -181,26 +238,30 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
         receivedAmount: received,
         totalDebitedAmount: totalDebited,
       );
-      legs.add(
-        LedgerLeg(
-          movementId: movement.id,
-          walletId: walletId!,
-          asset: movement.asset,
-          kind: LedgerLegKind.custodyDebit,
-          quantity: totalDebited,
-          occurredAt: movement.occurredAt.toUtc(),
-        ),
-      );
-      legs.add(
-        LedgerLeg(
-          movementId: movement.id,
-          walletId: walletId,
-          asset: movement.asset,
-          kind: LedgerLegKind.custodyCredit,
-          quantity: received,
-          occurredAt: movement.occurredAt.toUtc(),
-        ),
-      );
+      if (totalDebited.compareTo(AccountingAmount.zero) > 0) {
+        legs.add(
+          LedgerLeg(
+            movementId: movement.id,
+            walletId: walletId,
+            asset: movement.asset,
+            kind: LedgerLegKind.custodyDebit,
+            quantity: totalDebited,
+            occurredAt: movement.occurredAt.toUtc(),
+          ),
+        );
+      }
+      if (received.compareTo(AccountingAmount.zero) > 0) {
+        legs.add(
+          LedgerLeg(
+            movementId: movement.id,
+            walletId: walletId,
+            asset: movement.asset,
+            kind: LedgerLegKind.custodyCredit,
+            quantity: received,
+            occurredAt: movement.occurredAt.toUtc(),
+          ),
+        );
+      }
       if (!isSameAssetFee &&
           movement.cryptoFeeAsset != null &&
           movement.cryptoFeeAmount.compareTo(AccountingAmount.zero) > 0) {
@@ -215,7 +276,7 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
           ),
         );
       }
-    } else if (movement.quantity != null) {
+    } else if ((movement.quantity?.compareTo(AccountingAmount.zero) ?? 0) > 0) {
       legs.add(
         LedgerLeg(
           movementId: movement.id,
@@ -223,6 +284,18 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
           asset: movement.asset,
           kind: LedgerLegKind.custodyDebit,
           quantity: movement.quantity!,
+          occurredAt: movement.occurredAt.toUtc(),
+        ),
+      );
+    } else if (movement.cryptoFeeAsset != null &&
+        movement.cryptoFeeAmount.compareTo(AccountingAmount.zero) > 0) {
+      legs.add(
+        LedgerLeg(
+          movementId: movement.id,
+          walletId: walletId!,
+          asset: movement.cryptoFeeAsset!,
+          kind: LedgerLegKind.custodyDebit,
+          quantity: movement.cryptoFeeAmount,
           occurredAt: movement.occurredAt.toUtc(),
         ),
       );
@@ -255,10 +328,9 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
         if (issue.code == ProjectionIssueCode.sameWalletTransfer) {
           return false;
         }
-        return !unclassifiedIds.contains(issue.movementId) ||
-            issue.code != ProjectionIssueCode.malformedHistoricalMovement;
+        return true;
       }),
-      for (final movementId in unclassifiedIds)
+      for (final movementId in missingClassificationIds)
         ProjectionIssue(
           ProjectionIssueCode.missingDestinationClassification,
           movementId,
@@ -339,6 +411,7 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
   Map<String, AccountingAmount> prices,
   Map<String, AccountingMovement> movementById,
   Map<String, Set<WalletAssetKey>> keysByMovementId,
+  Set<String> unknownWalletMovementIds,
 ) {
   final keys = <WalletAssetKey>{
     ...custody.positions.keys,
@@ -371,6 +444,11 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
       WalletAssignmentStatus.pending,
       WalletAssignmentStatus.partiallyAssigned,
     });
+    final unknownWalletIds = related
+        .where((movement) => unknownWalletMovementIds.contains(movement.id))
+        .map((movement) => movement.id)
+        .toSet()
+        .toList(growable: false);
     final unknownIds = <String>{
       ...custodyPosition.contributingMovementIds.where((id) {
         final movement = movementById[id];
@@ -386,7 +464,12 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
     final AccountingCompleteness state;
     final ProjectionIssueCode? cause;
     final List<String> causingIds;
-    if (legacyIds.isNotEmpty || key.walletId == virtualUnassignedWalletId) {
+    if (key.walletId == virtualUnknownWalletId) {
+      state = AccountingCompleteness.pendingAssignment;
+      cause = ProjectionIssueCode.unknownWallet;
+      causingIds = unknownWalletIds;
+    } else if (legacyIds.isNotEmpty ||
+        key.walletId == virtualUnassignedWalletId) {
       state = AccountingCompleteness.unassignedLegacy;
       cause = ProjectionIssueCode.legacyAccountingSemantics;
       causingIds = legacyIds;
@@ -528,6 +611,14 @@ CustodyMovementEffect? _primaryEffect(
   for (final effect in effects) {
     if (effect.key.walletId == walletId && effect.key.asset == movement.asset) {
       return effect;
+    }
+  }
+  if (movement.type == MovementType.transferOut) {
+    for (final effect in effects) {
+      if (effect.key.walletId == walletId &&
+          effect.requested.compareTo(AccountingAmount.zero) < 0) {
+        return effect;
+      }
     }
   }
   return null;

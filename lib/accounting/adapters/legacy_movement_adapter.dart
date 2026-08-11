@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../domain/accounting_amount.dart';
 import '../domain/accounting_movement.dart';
 import '../domain/movement_type.dart';
@@ -65,10 +67,15 @@ final class LegacyMovementAdapter {
         'destination_wallet_id',
       ]),
     );
-    final destinationType = _enumByName<DestinationType>(
+    final explicitDestinationType = _enumByName<DestinationType>(
       _read(value, const <String>['destinationType', 'destination_type']),
       DestinationType.values,
     );
+    final destinationType =
+        explicitDestinationType ??
+        (_wasHistoricallyOwnedTransfer(value, type)
+            ? DestinationType.ownWallet
+            : null);
     final adjustmentWalletId = _nullableText(
       _read(value, const <String>[
         'adjustmentWalletId',
@@ -104,7 +111,7 @@ final class LegacyMovementAdapter {
         _legacyFiatTreatment(fiatFeeAmount, cryptoFeeAmount, feeFiatValue);
     final id =
         _nullableText(value['id']) ??
-        'legacy-${occurredAt.microsecondsSinceEpoch}-${type.name}-$asset';
+        _synthesizedLegacyId(value, occurredAt, type, asset);
     final movement = AccountingMovement(
       id: id,
       type: type,
@@ -501,11 +508,108 @@ FiatFeeTreatment _legacyFiatTreatment(
 
 List<ReconciliationLink> _reconciliationLinks(Object? value) {
   if (value is! List) return const <ReconciliationLink>[];
-  return <ReconciliationLink>[
-    for (final item in value)
-      if (item is Map)
-        ReconciliationLink.fromJson(Map<String, Object?>.from(item)),
-  ];
+  final result = <ReconciliationLink>[];
+  for (final item in value) {
+    if (item is! Map) continue;
+    final map = Map<String, Object?>.from(item);
+    final adjustmentMovementId = _nullableText(
+      _read(map, const <String>[
+        'adjustmentMovementId',
+        'adjustment_movement_id',
+      ]),
+    );
+    final quantityResolved = _amount(
+      _read(map, const <String>['quantityResolved', 'quantity_resolved']),
+    );
+    if (adjustmentMovementId == null || quantityResolved == null) continue;
+    result.add(
+      ReconciliationLink(
+        adjustmentMovementId: adjustmentMovementId,
+        quantityResolved: quantityResolved,
+      ),
+    );
+  }
+  return List<ReconciliationLink>.unmodifiable(result);
+}
+
+bool _wasHistoricallyOwnedTransfer(
+  Map<String, Object?> value,
+  MovementType type,
+) {
+  final hasStructuredValue =
+      _amount(
+            _read(value, const <String>['receivedAmount', 'received_amount']),
+          ) !=
+          null ||
+      _amount(
+            _read(value, const <String>[
+              'cryptoFeeAmount',
+              'crypto_fee_amount',
+            ]),
+          ) !=
+          null ||
+      _amount(
+            _read(value, const <String>[
+              'totalDebitedAmount',
+              'total_debited_amount',
+            ]),
+          ) !=
+          null;
+  if (type != MovementType.transferOut || !hasStructuredValue) {
+    return false;
+  }
+  final source = _firstNonEmptyText(value, const <String>[
+    'sourcePlatform',
+    'source_platform',
+    'source',
+    'origin',
+    'origen',
+  ]);
+  final destination = _firstNonEmptyText(value, const <String>[
+    'destinationPlatform',
+    'destination_platform',
+    'wallet',
+    'cartera',
+  ]);
+  return source != null && destination != null;
+}
+
+String? _firstNonEmptyText(Map<String, Object?> value, List<String> keys) {
+  for (final key in keys) {
+    final candidate = _nullableText(value[key]);
+    if (candidate != null) return candidate;
+  }
+  return null;
+}
+
+String _synthesizedLegacyId(
+  Map<String, Object?> value,
+  DateTime occurredAt,
+  MovementType type,
+  String asset,
+) {
+  final canonical = jsonEncode(_canonicalJson(value));
+  var hash = BigInt.parse('cbf29ce484222325', radix: 16);
+  final prime = BigInt.parse('100000001b3', radix: 16);
+  final mask = (BigInt.one << 64) - BigInt.one;
+  for (final byte in utf8.encode(canonical)) {
+    hash = ((hash ^ BigInt.from(byte)) * prime) & mask;
+  }
+  return 'legacy-${occurredAt.microsecondsSinceEpoch}-${type.name}-$asset-${hash.toRadixString(16).padLeft(16, '0')}';
+}
+
+Object? _canonicalJson(Object? value) {
+  if (value is Map) {
+    final keys = value.keys.map((key) => key.toString()).toList()..sort();
+    return <String, Object?>{
+      for (final key in keys) key: _canonicalJson(value[key]),
+    };
+  }
+  if (value is List) return value.map(_canonicalJson).toList();
+  if (value == null || value is num || value is bool || value is String) {
+    return value;
+  }
+  return value.toString();
 }
 
 void _syncText(
@@ -663,6 +767,18 @@ void _syncLinks(
     return;
   }
   for (final key in present) {
+    if (_sameLinks(_reconciliationLinks(target[key]), links)) continue;
     target[key] = encoded;
   }
+}
+
+bool _sameLinks(List<ReconciliationLink> left, List<ReconciliationLink> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index].adjustmentMovementId != right[index].adjustmentMovementId ||
+        left[index].quantityResolved != right[index].quantityResolved) {
+      return false;
+    }
+  }
+  return true;
 }

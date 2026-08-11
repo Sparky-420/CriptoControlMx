@@ -6,6 +6,7 @@ import 'performance_projection.dart';
 
 const String virtualUnassignedWalletId = 'virtual:unassigned';
 const String virtualPendingWalletId = 'virtual:pending';
+const String virtualUnknownWalletId = 'virtual:unknown';
 
 final class AccountingCompletenessResult {
   const AccountingCompletenessResult({

@@ -61,7 +61,7 @@ void main() {
     );
     expect(conversion.movement.sourceWalletId, isNull);
     expect(conversion.movement.destinationWalletId, isNull);
-    expect(conversion.movement.destinationType, isNull);
+    expect(conversion.movement.destinationType, DestinationType.ownWallet);
     expect(conversion.preservedFields['sourcePlatform'], 'Mi Mercado Pago');
     expect(conversion.preservedFields['destinationPlatform'], 'Bitso');
     expect(conversion.preservedFields['deletedAt'], isNotNull);
@@ -185,6 +185,137 @@ void main() {
     );
   });
 
+  test('synthesizes stable distinct IDs while retaining real duplicates', () {
+    final adapter = const LegacyMovementAdapter();
+    final firstJson = <String, Object?>{
+      'type': 'buy',
+      'coin': 'UNI',
+      'date': '2026-07-30T20:54:00-06:00',
+      'quantity': 1,
+      'unitPrice': 10,
+      'fee': 0,
+    };
+    final secondJson = <String, Object?>{...firstJson, 'quantity': 2};
+    final first = adapter.fromLegacyJson(firstJson).movement;
+    final sameAgain = adapter.fromLegacyJson(firstJson).movement;
+    final second = adapter.fromLegacyJson(secondJson).movement;
+
+    expect(first.id, sameAgain.id);
+    expect(second.id, isNot(first.id));
+    final distinctProjection = project(<AccountingMovement>[
+      first,
+      second,
+    ], const <String, AccountingAmount>{});
+    expect(
+      distinctProjection
+          .positions[const WalletAssetKey(virtualUnassignedWalletId, 'UNI')]!
+          .custody
+          .reconciledQuantity
+          .toJson(),
+      '3',
+    );
+    expect(distinctProjection.migrationProgress.total, 2);
+
+    final duplicateLedger = const DefaultMovementNormalizer().normalize(
+      <AccountingMovement>[first, sameAgain],
+    );
+    expect(duplicateLedger.movements, hasLength(2));
+    expect(
+      duplicateLedger.issues.map((issue) => issue.code),
+      contains(ProjectionIssueCode.duplicateMovementId),
+    );
+  });
+
+  test('preserves semantically unchanged reconciliation link JSON', () {
+    final json = <String, Object?>{
+      'id': 'legacy-link',
+      'type': 'buy',
+      'coin': 'UNI',
+      'date': '2026-07-30T20:54:00-06:00',
+      'quantity': 1,
+      'unitPrice': 10,
+      'fee': 0,
+      'reconciliation_links': <Object?>[
+        <String, Object?>{
+          'adjustment_movement_id': 'adjustment-1',
+          'quantity_resolved': 0.5,
+          'futureLinkField': true,
+        },
+      ],
+    };
+    final conversion = const LegacyMovementAdapter().fromLegacyJson(json);
+
+    expect(conversion.movement.reconciliationLinks, hasLength(1));
+    expect(
+      conversion.movement.reconciliationLinks.single.quantityResolved.toJson(),
+      '0.5',
+    );
+    expect(
+      const LegacyMovementAdapter().toLegacyJson(
+        conversion.movement,
+        preservedFields: conversion.preservedFields,
+      ),
+      json,
+    );
+  });
+
+  test(
+    'preserves legacy source and wallet fallback classification evidence',
+    () {
+      final json = <String, Object?>{
+        'id': 'legacy-fallback-transfer',
+        'type': 'transfer_out',
+        'coin': 'UNI',
+        'date': '2026-07-30T20:54:00-06:00',
+        'quantity': 1,
+        'unitPrice': 0,
+        'fee': 0,
+        'receivedAmount': 1,
+        'cryptoFeeAmount': 0,
+        'totalDebitedAmount': 1,
+        'sourcePlatform': ' ',
+        'destinationPlatform': '',
+        'source': 'Origen histórico',
+        'wallet': 'Destino histórico',
+      };
+      final conversion = const LegacyMovementAdapter().fromLegacyJson(json);
+
+      expect(conversion.movement.destinationType, DestinationType.ownWallet);
+      expect(conversion.movement.sourceWalletId, isNull);
+      expect(conversion.movement.destinationWalletId, isNull);
+      expect(
+        const LegacyMovementAdapter().toLegacyJson(
+          conversion.movement,
+          preservedFields: conversion.preservedFields,
+        ),
+        json,
+      );
+    },
+  );
+
+  test(
+    'requires a parsed structured value for historical internal evidence',
+    () {
+      final conversion = const LegacyMovementAdapter()
+          .fromLegacyJson(<String, Object?>{
+            'id': 'legacy-null-structure',
+            'type': 'transfer_out',
+            'coin': 'UNI',
+            'date': '2026-07-30T20:54:00-06:00',
+            'quantity': 1,
+            'unitPrice': 0,
+            'fee': 0,
+            'receivedAmount': null,
+            'cryptoFeeAmount': null,
+            'totalDebitedAmount': null,
+            'sourcePlatform': 'Origen histórico',
+            'destinationPlatform': 'Destino histórico',
+          });
+
+      expect(conversion.movement.destinationType, isNull);
+    },
+  );
+
   test(
     'legacy structured transfer preserves global value without ownership',
     () {
@@ -216,7 +347,7 @@ void main() {
 
       expect(transfer.sourceWalletId, isNull);
       expect(transfer.destinationWalletId, isNull);
-      expect(transfer.destinationType, isNull);
+      expect(transfer.destinationType, DestinationType.ownWallet);
       final projection = project(<AccountingMovement>[buy, transfer], const {});
       final position = projection
           .positions[const WalletAssetKey(virtualUnassignedWalletId, 'UNI')]!;
@@ -230,6 +361,74 @@ void main() {
       expect(
         projection.issues.map((issue) => issue.code),
         isNot(contains(ProjectionIssueCode.malformedHistoricalMovement)),
+      );
+    },
+  );
+
+  test(
+    'preserves the historical external branch for structured legacy transfer',
+    () {
+      final historical = <legacy.Movement>[
+        legacy.Movement(
+          id: 'external-buy',
+          type: MovementType.buy,
+          coin: 'UNI',
+          date: at,
+          quantity: 10,
+          unitPrice: 10,
+          fee: 0,
+          note: 'Compra',
+        ),
+        legacy.Movement(
+          id: 'external-transfer',
+          type: MovementType.transferOut,
+          coin: 'UNI',
+          date: at.add(const Duration(minutes: 1)),
+          quantity: 4,
+          unitPrice: 0,
+          fee: 0,
+          receivedAmount: 4,
+          cryptoFeeAmount: 1,
+          cryptoFeeAsset: 'UNI',
+          totalDebitedAmount: 5,
+          note: 'Destino no clasificado',
+        ),
+      ];
+      final expected = legacy.FinancialEngine.computeStats(
+        coins: const <String>['UNI'],
+        movements: historical,
+        currentPrices: const <String, double>{'UNI': 0},
+      )['UNI']!;
+      final adapter = const LegacyMovementAdapter();
+      final projection = project(
+        historical
+            .map(
+              (movement) => adapter
+                  .fromLegacyJson(Map<String, Object?>.from(movement.toJson()))
+                  .movement,
+            )
+            .toList(),
+        const <String, AccountingAmount>{},
+      );
+      final position = projection
+          .positions[const WalletAssetKey(virtualUnassignedWalletId, 'UNI')]!;
+
+      expect(expected.quantity, 6);
+      expect(
+        double.parse(position.custody.reconciledQuantity.toJson()),
+        closeTo(expected.quantity, 0.00000001),
+      );
+      expect(
+        double.parse(position.performance.knownCostBasis.toJson()),
+        closeTo(expected.costBase, 0.00000001),
+      );
+      expect(
+        projection.effects['external-transfer']!.requestedQuantity.toJson(),
+        '4',
+      );
+      expect(
+        projection.issues.map((issue) => issue.code),
+        contains(ProjectionIssueCode.missingDestinationClassification),
       );
     },
   );
@@ -300,6 +499,33 @@ void main() {
     );
     expect(bridgedMovement.type, MovementType.buy);
     expect(bridgedMovement.coin, 'UNI');
+  });
+
+  test('normalizes price lookup and treats a missing price as zero', () {
+    final projection = project(
+      <AccountingMovement>[
+        canonical(
+          id: '01-lowercase-price',
+          type: MovementType.buy,
+          quantity: '1',
+          price: '10',
+          destinationWalletId: walletA,
+        ),
+      ],
+      <String, AccountingAmount>{'UNI': AccountingAmount.fromInt(50)},
+    );
+    final adapter = const LegacyFinancialAdapter();
+
+    expect(
+      adapter.totals(projection, const <String, double>{
+        'uni': 50,
+      }).currentValue,
+      50,
+    );
+    expect(
+      adapter.totals(projection, const <String, double>{}).currentValue,
+      0,
+    );
   });
 }
 

@@ -91,7 +91,11 @@ final class LegacyFinancialAdapter {
     LedgerProjection projection,
     Map<String, double> currentPrices,
   ) {
-    final stats = coinStats(projection, currentPrices);
+    final normalizedPrices = <String, double>{
+      for (final entry in currentPrices.entries)
+        entry.key.toUpperCase(): entry.value,
+    };
+    final stats = coinStats(projection, normalizedPrices);
     return LegacyPortfolioTotalsData(
       costBase: stats.values.fold<double>(
         0,
@@ -100,7 +104,7 @@ final class LegacyFinancialAdapter {
       currentValue: stats.values.fold<double>(
         0,
         (total, value) =>
-            total + value.quantity * (currentPrices[value.coin] ?? 0),
+            total + value.quantity * (normalizedPrices[value.coin] ?? 0),
       ),
       realizedProfit: stats.values.fold<double>(
         0,
