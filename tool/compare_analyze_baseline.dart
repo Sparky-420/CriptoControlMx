@@ -1,97 +1,76 @@
 import 'dart:io';
 
+final class _Diag {
+  const _Diag(this.key, this.path, this.line);
+  final String key;
+  final String path;
+  final int line;
+}
+
 int compareAnalyzeReports(
   String baselineMarkdown,
   String currentOutput, {
   int maximumTotal = 30,
   Map<String, String>? sources,
 }) {
-  final baseline = _baselineTuples(baselineMarkdown);
-  final current = _currentTuples(currentOutput);
-  if (current.length > maximumTotal || baseline.length != current.length) {
+  final expected = _diags(baselineMarkdown);
+  final actual = _diags(currentOutput);
+  if (expected.length != actual.length || actual.length > maximumTotal) {
     return 1;
   }
-  final expected = <String, int>{};
-  final actual = <String, int>{};
-  for (final value in baseline) {
-    expected[value] = (expected[value] ?? 0) + 1;
-  }
-  for (final value in current) {
-    actual[value] = (actual[value] ?? 0) + 1;
-  }
-  if (!_same(expected, actual)) {
-    return 1;
-  }
+  final anchors = _anchors(baselineMarkdown);
   if (sources != null &&
-      !_anchorsMatch(baselineMarkdown, currentOutput, sources)) {
+      anchors.isNotEmpty &&
+      anchors.length != expected.length) {
     return 1;
+  }
+  final remaining = List<_Diag>.from(actual);
+  for (var i = 0; i < expected.length; i++) {
+    final index = remaining.indexWhere((d) => d.key == expected[i].key);
+    if (index < 0) {
+      return 1;
+    }
+    final matched = remaining.removeAt(index);
+    if (sources != null && anchors.isNotEmpty) {
+      final text = sources[matched.path];
+      final lines = text?.split('\n');
+      if (lines == null ||
+          matched.line < 1 ||
+          matched.line > lines.length ||
+          !lines[matched.line - 1].contains(anchors[i])) {
+        return 1;
+      }
+    }
   }
   return 0;
 }
 
-bool _anchorsMatch(
-  String markdown,
-  String currentOutput,
-  Map<String, String> sources,
-) {
-  final anchors = RegExp(
-    r'\|\s*`([^`]+)`\s*\|\s*$',
-    multiLine: true,
-  ).allMatches(markdown).map((m) => m.group(1)!).toList();
-  if (anchors.isEmpty) return true;
-  final locations = RegExp(
-    r'^\s*(?:info|warning|error) - .+ - (.+):(\d+):\d+ - [\w_]+\s*$',
-    multiLine: true,
-  ).allMatches(currentOutput).toList();
-  if (locations.length < anchors.length) return false;
-  for (var i = 0; i < anchors.length; i++) {
-    final source = sources[locations[i].group(1)!.replaceAll('\\', '/')];
-    final line = int.parse(locations[i].group(2)!);
-    if (source == null ||
-        line < 1 ||
-        line > source.split('\n').length ||
-        !source.split('\n')[line - 1].contains(anchors[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool _same(Map<String, int> a, Map<String, int> b) =>
-    a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
-List<String> _currentTuples(String input) {
+List<_Diag> _diags(String text) {
   final r = RegExp(
     r'^\s*(info|warning|error) - (.+) - (.+):(\d+):(\d+) - ([\w_]+)\s*$',
     multiLine: true,
   );
-  return r
-      .allMatches(input)
-      .map((m) => '${m[1]}|${m[3]!.replaceAll('\\', '/')}|${m[6]}|${m[2]}')
-      .toList();
+  return r.allMatches(text).map((m) {
+    final path = m[3]!.replaceAll('\\', '/');
+    return _Diag('${m[1]}|$path|${m[6]}|${m[2]}', path, int.parse(m[4]!));
+  }).toList();
 }
 
-List<String> _baselineTuples(String input) {
-  final diagnostics = _currentTuples(input);
-  if (diagnostics.isNotEmpty) {
-    return diagnostics;
-  }
-  final r = RegExp(
-    r'^\|\s*\d+\s*\|\s*(info|warning|error)\s*\|[^|]*\|\s*`?([\w_]+)`?\s*\|\s*(.+?)\s*\|\s*$',
-    multiLine: true,
-  );
-  return r.allMatches(input).map((m) => '${m[1]}||${m[2]}|${m[3]}').toList();
+List<String> _anchors(String markdown) {
+  final start = markdown.indexOf('### Huella con anclas verificables');
+  if (start < 0) return <String>[];
+  final section = markdown.substring(start);
+  final r = RegExp(r'^\|\s*\d+\s*\|[^\n]*\|\s*`([^`]+)`', multiLine: true);
+  return r.allMatches(section).map((m) => m[1]!).toList();
 }
 
 void main(List<String> args) {
   if (args.length != 2) {
-    stderr.writeln(
-      'Usage: dart run tool/compare_analyze_baseline.dart <baseline.md> <analyze.txt>',
-    );
     exitCode = 64;
     return;
   }
   final root = Directory.current;
-  final result = compareAnalyzeReports(
+  exitCode = compareAnalyzeReports(
     File(args[0]).readAsStringSync(),
     File(args[1]).readAsStringSync(),
     sources: <String, String>{
@@ -100,8 +79,4 @@ void main(List<String> args) {
       ).readAsStringSync(),
     },
   );
-  if (result != 0) {
-    stderr.writeln('Analyzer report differs from approved baseline.');
-  }
-  exitCode = result;
 }
