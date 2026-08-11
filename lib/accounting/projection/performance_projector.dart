@@ -123,8 +123,15 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
         state.knownQuantity,
       ),
     };
+    final knownQuantityBefore = state.knownQuantity;
+    final knownCostBasisBefore = state.knownCostBasis;
+    final consumesAllKnown =
+        knownQuantity.compareTo(AccountingAmount.zero) > 0 &&
+        knownQuantity == knownQuantityBefore;
     final average = state.averageCost;
-    final demonstratedCost = average * knownQuantity;
+    final demonstratedCost = consumesAllKnown
+        ? knownCostBasisBefore
+        : average * knownQuantity;
     final knownProceeds = unitPrice * knownQuantity;
     final allocatedFee = requestedQuantity == AccountingAmount.zero
         ? AccountingAmount.zero
@@ -135,8 +142,10 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
         ? SaleAccountingStatus.complete
         : SaleAccountingStatus.partiallyKnown;
 
-    state.knownQuantity = state.knownQuantity - knownQuantity;
-    state.knownCostBasis = state.knownCostBasis - demonstratedCost;
+    state.knownQuantity = knownQuantityBefore - knownQuantity;
+    state.knownCostBasis = consumesAllKnown
+        ? AccountingAmount.zero
+        : knownCostBasisBefore - demonstratedCost;
     state.realizedPnlKnown = state.realizedPnlKnown + realizedPnl;
     if (pendingQuantity != AccountingAmount.zero) {
       state.pendingPnlQuantity = state.pendingPnlQuantity + pendingQuantity;

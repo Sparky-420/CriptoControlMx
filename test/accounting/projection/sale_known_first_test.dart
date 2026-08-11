@@ -84,6 +84,22 @@ void main() {
     expect(sale.pendingCostQuantity, AccountingAmount.zero);
   });
 
+  test('exact sale removes a non-terminating average cost without residue', () {
+    final projection = project(<AccountingMovement>[
+      buy(id: 'buy-1', quantity: '3', price: '1', fee: '1'),
+      sell(id: 'sell-1', quantity: '3', price: '2'),
+    ]);
+    final sale = projection.sales.single;
+    final position = projection.positions[key]!;
+
+    expect(sale.demonstratedCostBasis.toJson(), '4');
+    expect(sale.realizedPnlKnown.toJson(), '2');
+    expect(position.knownQuantity, AccountingAmount.zero);
+    expect(position.knownCostBasis, AccountingAmount.zero);
+    expect(position.averageCost, AccountingAmount.zero);
+    expect(position.unrealizedPnlKnown, AccountingAmount.zero);
+  });
+
   test(
     'sale above known quantity reports only a non-definitive known result',
     () {
