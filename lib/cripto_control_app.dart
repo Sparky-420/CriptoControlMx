@@ -12,6 +12,8 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'accounting/domain/movement_type.dart';
+export 'accounting/domain/movement_type.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:_discoveryapis_commons/_discoveryapis_commons.dart' as commons;
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -9393,6 +9395,8 @@ class _MovementsTabState extends State<MovementsTab> {
         return 'Entrada / Recepción';
       case MovementType.transferOut:
         return 'Salida / Envío';
+      case MovementType.balanceAdjustment:
+        return 'Ajuste de saldo';
       case null:
         return 'No detectado';
     }
@@ -24115,8 +24119,6 @@ SnapshotRetention snapshotRetentionFromName(String? value) {
   return SnapshotRetention.last30;
 }
 
-enum MovementType { buy, sell, transferIn, transferOut }
-
 const double transferAmountTolerance = 0.00000001;
 
 String foldOcrText(String value) => value
@@ -24390,6 +24392,8 @@ extension MovementLabel on MovementType {
         return 'Transferencia recibida';
       case MovementType.transferOut:
         return 'Transferencia enviada';
+      case MovementType.balanceAdjustment:
+        return 'Ajuste de saldo';
     }
   }
 
@@ -24403,6 +24407,8 @@ extension MovementLabel on MovementType {
         return 'Entrada';
       case MovementType.transferOut:
         return 'Salida';
+      case MovementType.balanceAdjustment:
+        return 'Ajuste';
     }
   }
 }
@@ -24436,6 +24442,12 @@ MovementType movementTypeFromAny(dynamic value) {
       raw == 'enviada' ||
       raw == 'salida') {
     return MovementType.transferOut;
+  }
+
+  if (raw == 'balanceadjustment' ||
+      raw == 'ajuste' ||
+      raw == 'ajuste de saldo') {
+    return MovementType.balanceAdjustment;
   }
 
   return MovementType.buy;
@@ -24545,6 +24557,8 @@ class FinancialEngine {
           costBaseRemoved = removedCost;
           stat.feesPaid += movement.fee;
           break;
+        case MovementType.balanceAdjustment:
+          break;
       }
 
       if (debugLedger && kDebugMode) {
@@ -24619,6 +24633,8 @@ class FinancialEngine {
         case MovementType.sell:
         case MovementType.transferOut:
           add(source, movement.coin, -movement.quantity);
+          break;
+        case MovementType.balanceAdjustment:
           break;
       }
     }
@@ -24741,6 +24757,8 @@ class FinancialEngine {
           costBaseTransferredOut += costBaseRemoved;
           quantity -= quantityToRemove;
           costBase -= costBaseRemoved;
+          break;
+        case MovementType.balanceAdjustment:
           break;
       }
 
@@ -24875,6 +24893,8 @@ class FinancialEngine {
           if (movement.quantity > current + 0.0000000001) return true;
           balances[movement.coin] = current - movement.quantity;
           break;
+        case MovementType.balanceAdjustment:
+          break;
       }
     }
 
@@ -25002,6 +25022,8 @@ class FinancialEngine {
             }
           }
           historicalBalances[movement.coin] = current - movement.quantity;
+          break;
+        case MovementType.balanceAdjustment:
           break;
       }
     }
