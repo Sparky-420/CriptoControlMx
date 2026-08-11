@@ -356,6 +356,76 @@ void main() {
     },
   );
 
+  test('internal transfer rejects links beyond its unbacked credit gap', () {
+    final destinationAdjustment =
+        adjustment(
+          id: 'gap-adjustment',
+          walletId: destinationWalletId,
+          quantity: '1',
+        ).copyWith(
+          occurredAt: at.add(const Duration(minutes: 1)),
+          observedBalance: AccountingAmount.parse('1'),
+        );
+    AccountingMovement linked(String id, String quantity) =>
+        transfer(
+          id: id,
+          destinationType: DestinationType.ownWallet,
+          destinationWalletId: destinationWalletId,
+          received: '1',
+          fee: '0.25',
+        ).copyWith(
+          reconciliationLinks: <ReconciliationLink>[
+            ReconciliationLink(
+              adjustmentMovementId: destinationAdjustment.id,
+              quantityResolved: AccountingAmount.parse(quantity),
+            ),
+          ],
+        );
+
+    final valid = _project(<AccountingMovement>[
+      buy(id: 'buy', walletId: sourceWalletId, quantity: '1'),
+      destinationAdjustment,
+      linked('gap-valid', '0.2'),
+    ]);
+    expect(
+      valid.custody
+          .effectsFor(destinationAdjustment.id)
+          .single
+          .requested
+          .toJson(),
+      '0.8',
+    );
+    expect(valid.custody.effectsFor('gap-valid')[1].applied.toJson(), '1');
+
+    final invalid = _project(<AccountingMovement>[
+      buy(id: 'buy', walletId: sourceWalletId, quantity: '1'),
+      destinationAdjustment,
+      linked('gap-invalid', '0.4'),
+    ]);
+    expect(
+      invalid.custody
+          .effectsFor(destinationAdjustment.id)
+          .single
+          .requested
+          .toJson(),
+      '1',
+    );
+    expect(
+      invalid.custody.effectsFor('gap-invalid')[1].applied.toJson(),
+      '0.8',
+    );
+    expect(
+      invalid.custody.effectsFor('gap-invalid')[1].unapplied.toJson(),
+      '0.2',
+    );
+    expect(
+      invalid.custody.positions[destinationKey]!.issues.map(
+        (issue) => issue.code,
+      ),
+      contains(ProjectionIssueCode.invalidReconciliationLink),
+    );
+  });
+
   test('one internal transfer moves its proportional cost mix without pnl', () {
     final result = _project(<AccountingMovement>[
       buy(id: 'buy', walletId: sourceWalletId, quantity: '10'),

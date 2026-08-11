@@ -15,7 +15,13 @@ final class DefaultCustodyProjector implements CustodyProjector {
   const DefaultCustodyProjector();
 
   @override
-  CustodyProjection project(NormalizedLedger ledger) {
+  CustodyProjection project(NormalizedLedger ledger) =>
+      _project(ledger, resolveLinks: true);
+
+  CustodyProjection _project(
+    NormalizedLedger ledger, {
+    required bool resolveLinks,
+  }) {
     final states = <WalletAssetKey, _CustodyState>{};
     final effects = <String, List<CustodyMovementEffect>>{};
     final legMovementIds = ledger.legs.map((leg) => leg.movementId).toSet();
@@ -26,7 +32,13 @@ final class DefaultCustodyProjector implements CustodyProjector {
         movementsById[movement.id] = movement;
       }
     }
-    final resolutions = _resolveLinks(ledger, movementsById);
+    final resolutions = resolveLinks
+        ? _resolveLinks(
+            ledger,
+            movementsById,
+            _project(ledger, resolveLinks: false),
+          )
+        : _LinkResolution.empty;
 
     for (final leg in ledger.legs) {
       final key = WalletAssetKey(leg.walletId, leg.asset);
@@ -102,6 +114,7 @@ final class DefaultCustodyProjector implements CustodyProjector {
   _LinkResolution _resolveLinks(
     NormalizedLedger ledger,
     Map<String, AccountingMovement> movementsById,
+    CustodyProjection baseCustody,
   ) {
     final adjustmentById = <String, AccountingMovement>{
       for (final movement in movementsById.values)
@@ -153,9 +166,14 @@ final class DefaultCustodyProjector implements CustodyProjector {
           );
           continue;
         }
+        final legKey = _linkResolutionKey(matchingLeg);
+        final currentForLeg = byLegKey[legKey] ?? AccountingAmount.zero;
+        final linkCapacity = _linkCapacity(baseCustody, movement, matchingLeg);
         final isInvalid =
             link.quantityResolved.compareTo(AccountingAmount.zero) <= 0 ||
             link.quantityResolved.compareTo(_absolute(matchingLeg.quantity)) >
+                0 ||
+            (currentForLeg + link.quantityResolved).compareTo(linkCapacity) >
                 0 ||
             (current + link.quantityResolved).compareTo(
                   _absolute(adjustmentQuantity),
@@ -170,7 +188,6 @@ final class DefaultCustodyProjector implements CustodyProjector {
           continue;
         }
         byAdjustmentId[adjustment.id] = current + link.quantityResolved;
-        final legKey = _linkResolutionKey(matchingLeg);
         byLegKey[legKey] =
             (byLegKey[legKey] ?? AccountingAmount.zero) + link.quantityResolved;
       }
@@ -212,6 +229,32 @@ AccountingAmount? _transferCreditLimit(
 String _linkResolutionKey(LedgerLeg leg) =>
     '${leg.movementId}|${leg.walletId}|${leg.asset}|${leg.kind.name}|${_signedLegQuantity(leg).compareTo(AccountingAmount.zero)}';
 
+AccountingAmount _linkCapacity(
+  CustodyProjection baseCustody,
+  AccountingMovement movement,
+  LedgerLeg leg,
+) {
+  if (leg.kind != LedgerLegKind.custodyCredit ||
+      movement.type != MovementType.transferOut ||
+      movement.destinationType != DestinationType.ownWallet) {
+    return _absolute(leg.quantity);
+  }
+  final baseEffect = baseCustody
+      .effectsFor(movement.id)
+      .where(
+        (effect) =>
+            effect.key.walletId == leg.walletId &&
+            effect.key.asset == leg.asset &&
+            effect.requested == leg.quantity,
+      )
+      .firstOrNull;
+  return (_absolute(leg.quantity) -
+          (baseEffect?.applied ?? AccountingAmount.zero).max(
+            AccountingAmount.zero,
+          ))
+      .max(AccountingAmount.zero);
+}
+
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
@@ -238,6 +281,12 @@ final class _LinkResolution {
   final Map<String, AccountingAmount> byAdjustmentId;
   final Map<String, AccountingAmount> byLegKey;
   final Map<String, List<ProjectionIssue>> issuesByMovementId;
+
+  static const _LinkResolution empty = _LinkResolution(
+    <String, AccountingAmount>{},
+    <String, AccountingAmount>{},
+    <String, List<ProjectionIssue>>{},
+  );
 }
 
 /// Validates a prospective transfer against a completed custody projection.
