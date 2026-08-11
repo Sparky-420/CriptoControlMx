@@ -64,4 +64,37 @@ void main() {
       );
     },
   );
+
+  test('division handles signs zero requested scale and argument errors', () {
+    expect(
+      AccountingAmount.parse('1').divide(AccountingAmount.parse('-2')).toJson(),
+      '-0.5',
+    );
+    expect(
+      AccountingAmount.parse(
+        '-1',
+      ).divide(AccountingAmount.parse('-2')).toJson(),
+      '0.5',
+    );
+    expect(
+      AccountingAmount.zero.divide(AccountingAmount.parse('-2')),
+      AccountingAmount.zero,
+    );
+    expect(
+      AccountingAmount.parse(
+        '5',
+      ).divide(AccountingAmount.parse('2'), scale: 0).toJson(),
+      '2',
+    );
+    expect(
+      () => AccountingAmount.fromInt(1).divide(AccountingAmount.zero),
+      throwsArgumentError,
+    );
+    expect(
+      () => AccountingAmount.fromInt(
+        1,
+      ).divide(AccountingAmount.fromInt(2), scale: -1),
+      throwsArgumentError,
+    );
+  });
 }

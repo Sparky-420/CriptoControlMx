@@ -30,8 +30,10 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
   }) {
     final states = <WalletAssetKey, _PerformanceState>{};
     final sales = <SaleResult>[];
+    final appliedMovementIds = <String>{};
 
     for (final movement in ledger.movements) {
+      if (!appliedMovementIds.add(movement.id)) continue;
       switch (movement.type) {
         case MovementType.buy:
           _applyBuy(movement, states);
@@ -288,13 +290,25 @@ TransferAllocation allocateTransferProportionally({
       transferredCostBasis: AccountingAmount.zero,
     );
   }
-  final ratio = totalDebited.divide(custodyBefore);
-  final knownQuantity = knownAvailable * ratio;
+  final availableKnown = knownAvailable
+      .max(AccountingAmount.zero)
+      .min(custodyBefore);
+  final knownQuantity = availableKnown == AccountingAmount.zero
+      ? AccountingAmount.zero
+      : availableKnown == custodyBefore || totalDebited == custodyBefore
+      ? availableKnown.min(totalDebited)
+      : (totalDebited * availableKnown).divide(custodyBefore);
+  final unknownQuantity = totalDebited - knownQuantity;
+  final transferredCostBasis = knownQuantity == AccountingAmount.zero
+      ? AccountingAmount.zero
+      : knownQuantity == availableKnown
+      ? knownCostBasis
+      : (knownCostBasis * totalDebited).divide(custodyBefore);
   return TransferAllocation(
     totalDebited: totalDebited,
     knownQuantity: knownQuantity,
-    unknownQuantity: (custodyBefore - knownAvailable) * ratio,
-    transferredCostBasis: knownCostBasis * ratio,
+    unknownQuantity: unknownQuantity,
+    transferredCostBasis: transferredCostBasis,
   );
 }
 

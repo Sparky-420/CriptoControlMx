@@ -185,7 +185,8 @@ AccountingAmount? _transferCreditLimit(
       )
       .firstOrNull;
   if (sourceEffect == null) return AccountingAmount.zero;
-  if (sourceEffect.before.compareTo(AccountingAmount.zero) <= 0) {
+  if (sourceEffect.before == AccountingAmount.zero &&
+      movement.reconciliationLinks.isNotEmpty) {
     return null;
   }
   return movement.receivedAmount! *

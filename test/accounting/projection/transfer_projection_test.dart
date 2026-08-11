@@ -25,6 +25,158 @@ void main() {
     expect(allocation.transferredCostBasis.toJson(), '100');
   });
 
+  test(
+    'transfer allocation partitions periodic ratios and liquidation exactly',
+    () {
+      final fullKnown = allocateTransferProportionally(
+        custodyBefore: AccountingAmount.parse('3'),
+        knownAvailable: AccountingAmount.parse('3'),
+        knownCostBasis: AccountingAmount.parse('6'),
+        totalDebited: AccountingAmount.parse('1'),
+      );
+      final mixed = allocateTransferProportionally(
+        custodyBefore: AccountingAmount.parse('3'),
+        knownAvailable: AccountingAmount.parse('1'),
+        knownCostBasis: AccountingAmount.parse('6'),
+        totalDebited: AccountingAmount.parse('1'),
+      );
+      final fullUnknown = allocateTransferProportionally(
+        custodyBefore: AccountingAmount.parse('3'),
+        knownAvailable: AccountingAmount.zero,
+        knownCostBasis: AccountingAmount.zero,
+        totalDebited: AccountingAmount.parse('1'),
+      );
+      final finalLiquidation = allocateTransferProportionally(
+        custodyBefore: AccountingAmount.parse('2'),
+        knownAvailable: AccountingAmount.parse('2'),
+        knownCostBasis: AccountingAmount.parse('4'),
+        totalDebited: AccountingAmount.parse('2'),
+      );
+
+      expect(fullKnown.knownQuantity.toJson(), '1');
+      expect(fullKnown.unknownQuantity, AccountingAmount.zero);
+      expect(fullKnown.transferredCostBasis.toJson(), '2');
+      expect(mixed.knownQuantity.toJson(), '0.333333333333333333');
+      expect(mixed.unknownQuantity.toJson(), '0.666666666666666667');
+      expect(mixed.knownQuantity + mixed.unknownQuantity, mixed.totalDebited);
+      expect(fullUnknown.knownQuantity, AccountingAmount.zero);
+      expect(fullUnknown.unknownQuantity.toJson(), '1');
+      expect(finalLiquidation.knownQuantity.toJson(), '2');
+      expect(finalLiquidation.unknownQuantity, AccountingAmount.zero);
+      expect(finalLiquidation.transferredCostBasis.toJson(), '4');
+    },
+  );
+
+  test(
+    'internal periodic transfer keeps full-known principal exact after fee',
+    () {
+      final result = _project(<AccountingMovement>[
+        buy(id: 'buy', walletId: sourceWalletId, quantity: '3'),
+        transfer(
+          id: 'periodic-internal',
+          destinationType: DestinationType.ownWallet,
+          destinationWalletId: destinationWalletId,
+          received: '2',
+          fee: '1',
+        ),
+      ]);
+
+      expect(
+        result.performance.positions[sourceKey]!.knownQuantity,
+        AccountingAmount.zero,
+      );
+      expect(
+        result.performance.positions[sourceKey]!.knownCostBasis,
+        AccountingAmount.zero,
+      );
+      expect(
+        result.performance.positions[destinationKey]!.knownQuantity.toJson(),
+        '2',
+      );
+      expect(
+        result.performance.positions[destinationKey]!.knownCostBasis.toJson(),
+        '40',
+      );
+    },
+  );
+
+  test('duplicate movement IDs apply transfer and other-asset fee once', () {
+    final duplicate = transfer(
+      id: 'z-duplicate',
+      destinationType: DestinationType.external,
+      received: '4',
+      fee: '0.5',
+      feeAsset: 'ETH',
+    );
+    final result = _project(<AccountingMovement>[
+      buy(id: 'buy', walletId: sourceWalletId, quantity: '10'),
+      buy(
+        id: 'eth-buy',
+        walletId: sourceWalletId,
+        quantity: '2',
+      ).copyWith(asset: 'ETH'),
+      duplicate,
+      duplicate,
+    ]);
+    const ethKey = WalletAssetKey(sourceWalletId, 'ETH');
+
+    expect(
+      result.custody.positions[sourceKey]!.reconciledQuantity.toJson(),
+      '6',
+    );
+    expect(
+      result.custody.positions[ethKey]!.reconciledQuantity.toJson(),
+      '1.5',
+    );
+    expect(
+      result.performance.positions[sourceKey]!.knownQuantity.toJson(),
+      '6',
+    );
+    expect(
+      result.performance.positions[sourceKey]!.knownCostBasis.toJson(),
+      '120',
+    );
+    expect(result.performance.positions[ethKey]!.knownQuantity.toJson(), '1.5');
+    expect(result.performance.positions[ethKey]!.knownCostBasis.toJson(), '30');
+  });
+
+  test(
+    'internal transfer from zero custody applies no unobserved destination credit',
+    () {
+      final result = _project(<AccountingMovement>[
+        transfer(
+          id: 'zero-source-internal',
+          destinationType: DestinationType.ownWallet,
+          destinationWalletId: destinationWalletId,
+          received: '2',
+        ),
+      ]);
+      final effects = result.custody.effectsFor('zero-source-internal');
+
+      expect(effects[0].requested.toJson(), '-2');
+      expect(effects[0].applied, AccountingAmount.zero);
+      expect(effects[0].unapplied.toJson(), '-2');
+      expect(effects[1].requested.toJson(), '2');
+      expect(effects[1].applied, AccountingAmount.zero);
+      expect(effects[1].unapplied.toJson(), '2');
+      expect(
+        result.custody.positions.values.fold<AccountingAmount>(
+          AccountingAmount.zero,
+          (total, position) => total + position.reconciledQuantity,
+        ),
+        AccountingAmount.zero,
+      );
+      expect(
+        result.custody.positions[sourceKey]!.issues.map((issue) => issue.code),
+        contains(ProjectionIssueCode.insufficientCustody),
+      );
+      expect(
+        result.performance.positions[destinationKey]!.knownQuantity,
+        AccountingAmount.zero,
+      );
+    },
+  );
+
   test('one internal transfer moves its proportional cost mix without pnl', () {
     final result = _project(<AccountingMovement>[
       buy(id: 'buy', walletId: sourceWalletId, quantity: '10'),
@@ -52,11 +204,11 @@ void main() {
     );
     expect(
       result.performance.positions[destinationKey]!.knownQuantity.toJson(),
-      '4.16666666666666666',
+      '4.166666666666666666',
     );
     expect(
       result.performance.positions[destinationKey]!.knownCostBasis.toJson(),
-      '83.3333333333333332',
+      '83.333333333333333333',
     );
     expect(
       result.performance.positions.values.fold<AccountingAmount>(
