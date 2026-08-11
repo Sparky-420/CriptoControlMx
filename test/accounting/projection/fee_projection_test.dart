@@ -1,0 +1,92 @@
+import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
+import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
+import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
+import 'package:cripto_control_mx/accounting/domain/wallet.dart';
+import 'package:cripto_control_mx/accounting/projection/fee_effect.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('same-asset crypto fee is consumed once from the transferred asset', () {
+    final effect = resolveFeeEffect(transfer(fee: '0.1', feeAsset: 'UNI'));
+
+    expect(effect.assetCustodyDebit.toJson(), '0.1');
+    expect(effect.otherAssetCustodyDebit, isEmpty);
+    expect(effect.fiatCostEffect, AccountingAmount.zero);
+  });
+
+  test('other-asset crypto fee debits only that other asset', () {
+    final effect = resolveFeeEffect(transfer(fee: '0.2', feeAsset: 'ETH'));
+
+    expect(effect.assetCustodyDebit, AccountingAmount.zero);
+    expect(effect.otherAssetCustodyDebit['ETH']!.toJson(), '0.2');
+  });
+
+  test('fiat paid separately records one fiat cost effect', () {
+    final effect = resolveFeeEffect(
+      transfer(fiatFee: '15', treatment: FiatFeeTreatment.paidSeparately),
+    );
+
+    expect(effect.assetCustodyDebit, AccountingAmount.zero);
+    expect(effect.otherAssetCustodyDebit, isEmpty);
+    expect(effect.fiatCostEffect.toJson(), '15');
+  });
+
+  test('fiat valuation is informational and creates no second debit', () {
+    final effect = resolveFeeEffect(
+      transfer(
+        fee: '0.1',
+        feeAsset: 'UNI',
+        fiatFee: '20',
+        treatment: FiatFeeTreatment.valuationOfCryptoFee,
+      ),
+    );
+
+    expect(effect.assetCustodyDebit.toJson(), '0.1');
+    expect(effect.fiatCostEffect, AccountingAmount.zero);
+  });
+
+  test('combined treatment applies crypto and fiat effects once each', () {
+    final effect = resolveFeeEffect(
+      transfer(
+        fee: '0.2',
+        feeAsset: 'ETH',
+        fiatFee: '15',
+        treatment: FiatFeeTreatment.combined,
+      ),
+    );
+
+    expect(effect.assetCustodyDebit, AccountingAmount.zero);
+    expect(effect.otherAssetCustodyDebit['ETH']!.toJson(), '0.2');
+    expect(effect.fiatCostEffect.toJson(), '15');
+  });
+}
+
+AccountingMovement transfer({
+  String fee = '0',
+  String? feeAsset,
+  String fiatFee = '0',
+  FiatFeeTreatment treatment = FiatFeeTreatment.none,
+}) {
+  final at = DateTime.utc(2026, 7, 30, 20, 54);
+  return AccountingMovement(
+    id: 'transfer',
+    type: MovementType.transferOut,
+    asset: 'UNI',
+    occurredAt: at,
+    quantity: AccountingAmount.fromInt(1),
+    fiatFeeAmount: AccountingAmount.parse(fiatFee),
+    sourceWalletId: '11111111-1111-4111-8111-111111111111',
+    destinationType: DestinationType.external,
+    externalRecipientName: 'Primo',
+    externalDestinationPlatform: 'Bitso',
+    walletAssignmentStatus: WalletAssignmentStatus.assigned,
+    receivedAmount: AccountingAmount.fromInt(1),
+    cryptoFeeAmount: AccountingAmount.parse(fee),
+    cryptoFeeAsset: feeAsset,
+    totalDebitedAmount: AccountingAmount.fromInt(1),
+    fiatFeeTreatment: treatment,
+    reconciliationLinks: const <ReconciliationLink>[],
+    createdAt: at,
+    updatedAt: at,
+  );
+}

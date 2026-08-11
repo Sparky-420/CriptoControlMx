@@ -3,7 +3,9 @@ import '../domain/accounting_movement.dart';
 import '../domain/ledger_validation.dart';
 import '../domain/movement_normalizer.dart';
 import '../domain/movement_type.dart';
+import '../domain/wallet.dart';
 import 'custody_projection.dart';
+import 'fee_effect.dart';
 
 abstract interface class CustodyProjector {
   CustodyProjection project(NormalizedLedger ledger);
@@ -55,7 +57,12 @@ final class DefaultCustodyProjector implements CustodyProjector {
         );
       }
       state.addIssues(resolutions.issuesByMovementId[leg.movementId]);
-      final applied = state.apply(requested, leg, movement);
+      final applied = state.apply(
+        requested,
+        leg,
+        movement,
+        maximumCredit: _transferCreditLimit(leg, movement, effects),
+      );
       if (leg.kind == LedgerLegKind.adjustment) {
         state.resolvedAdjustments = state.resolvedAdjustments + resolved;
       }
@@ -157,6 +164,34 @@ final class DefaultCustodyProjector implements CustodyProjector {
   }
 }
 
+AccountingAmount? _transferCreditLimit(
+  LedgerLeg leg,
+  AccountingMovement? movement,
+  Map<String, List<CustodyMovementEffect>> effects,
+) {
+  if (leg.kind != LedgerLegKind.custodyCredit ||
+      movement?.type != MovementType.transferOut ||
+      movement?.destinationType != DestinationType.ownWallet ||
+      movement?.receivedAmount == null ||
+      movement?.totalDebitedAmount == null) {
+    return null;
+  }
+  final sourceEffect = effects[movement!.id]
+      ?.where(
+        (effect) =>
+            effect.key.walletId == movement.sourceWalletId &&
+            effect.key.asset == movement.asset &&
+            effect.requested.compareTo(AccountingAmount.zero) < 0,
+      )
+      .firstOrNull;
+  if (sourceEffect == null) return AccountingAmount.zero;
+  if (sourceEffect.before.compareTo(AccountingAmount.zero) <= 0) {
+    return null;
+  }
+  return movement.receivedAmount! *
+      _absolute(sourceEffect.applied).divide(movement.totalDebitedAmount!);
+}
+
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
@@ -178,6 +213,43 @@ final class _LinkResolution {
 
   final Map<String, AccountingAmount> byAdjustmentId;
   final Map<String, List<ProjectionIssue>> issuesByMovementId;
+}
+
+/// Validates a prospective transfer against a completed custody projection.
+/// Historical replay deliberately does not use this validator: it preserves an
+/// insufficient event as an applied and unapplied custody effect instead.
+final class TransferCustodyValidator {
+  const TransferCustodyValidator();
+
+  void validateNew(AccountingMovement movement, CustodyProjection custody) {
+    final normalized = const DefaultMovementNormalizer().normalize(
+      <AccountingMovement>[movement],
+    );
+    if (movement.type != MovementType.transferOut || !normalized.isValid) {
+      throw ArgumentError('La transferencia nueva no cumple el contrato.');
+    }
+    final sourceWalletId = movement.sourceWalletId!;
+    final available =
+        custody
+            .positions[WalletAssetKey(sourceWalletId, movement.asset)]
+            ?.reconciledQuantity ??
+        AccountingAmount.zero;
+    if (available.compareTo(movement.totalDebitedAmount!) < 0) {
+      throw ArgumentError('La custodia de origen es insuficiente.');
+    }
+    for (final fee in resolveFeeEffect(
+      movement,
+    ).otherAssetCustodyDebit.entries) {
+      final feeAvailable =
+          custody
+              .positions[WalletAssetKey(sourceWalletId, fee.key)]
+              ?.reconciledQuantity ??
+          AccountingAmount.zero;
+      if (feeAvailable.compareTo(fee.value) < 0) {
+        throw ArgumentError('La custodia de comisión es insuficiente.');
+      }
+    }
+  }
 }
 
 final class LedgerRebuilder {
@@ -264,11 +336,12 @@ final class _CustodyState {
   AccountingAmount apply(
     AccountingAmount signedQuantity,
     LedgerLeg leg,
-    AccountingMovement? movement,
-  ) {
+    AccountingMovement? movement, {
+    AccountingAmount? maximumCredit,
+  }) {
     final applied = signedQuantity.compareTo(AccountingAmount.zero) < 0
         ? _negativeApplied(signedQuantity, leg.movementId)
-        : signedQuantity;
+        : maximumCredit?.min(signedQuantity) ?? signedQuantity;
     quantity = quantity + applied;
     requested = requested + signedQuantity;
     unapplied = unapplied + (signedQuantity - applied);

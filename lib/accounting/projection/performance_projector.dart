@@ -4,6 +4,7 @@ import '../domain/ledger_validation.dart';
 import '../domain/movement_type.dart';
 import '../domain/wallet.dart';
 import 'custody_projection.dart';
+import 'fee_effect.dart';
 import 'performance_projection.dart';
 
 abstract interface class PerformanceProjector {
@@ -38,7 +39,10 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
           final result = _applySale(movement, states, custody, salePolicy);
           if (result != null) sales.add(result);
         case MovementType.transferIn:
+          break;
         case MovementType.transferOut:
+          _applyTransfer(movement, states, custody, transferPolicy);
+          break;
         case MovementType.balanceAdjustment:
           break;
       }
@@ -167,11 +171,181 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
       pendingCostQuantity: pendingQuantity,
     );
   }
+
+  void _applyTransfer(
+    AccountingMovement movement,
+    Map<WalletAssetKey, _PerformanceState> states,
+    CustodyProjection custody,
+    TransferCostAllocationPolicy policy,
+  ) {
+    final sourceWalletId = movement.sourceWalletId;
+    if (sourceWalletId == null) return;
+    final sourceKey = WalletAssetKey(sourceWalletId, movement.asset);
+    final sourceEffect = custody
+        .effectsFor(movement.id)
+        .where(
+          (effect) =>
+              effect.key == sourceKey &&
+              effect.requested.compareTo(AccountingAmount.zero) < 0,
+        )
+        .firstOrNull;
+    if (sourceEffect == null) return;
+
+    final sourceState = states.putIfAbsent(sourceKey, _PerformanceState.new);
+    final removal = _removeProportionally(
+      state: sourceState,
+      custodyBefore: sourceEffect.before.max(AccountingAmount.zero),
+      appliedDebit: _absolute(sourceEffect.applied),
+      policy: policy,
+    );
+
+    if (movement.destinationType == DestinationType.ownWallet &&
+        movement.destinationWalletId != null) {
+      final destinationKey = WalletAssetKey(
+        movement.destinationWalletId!,
+        movement.asset,
+      );
+      final creditEffect = custody
+          .effectsFor(movement.id)
+          .where(
+            (effect) =>
+                effect.key == destinationKey &&
+                effect.requested.compareTo(AccountingAmount.zero) > 0,
+          )
+          .firstOrNull;
+      if (creditEffect != null) {
+        final principal = allocateTransferProportionally(
+          custodyBefore: sourceEffect.before.max(AccountingAmount.zero),
+          knownAvailable: removal.knownAvailableBefore,
+          knownCostBasis: removal.knownCostBasisBefore,
+          totalDebited: creditEffect.applied,
+        );
+        final destinationState = states.putIfAbsent(
+          destinationKey,
+          _PerformanceState.new,
+        );
+        destinationState.knownQuantity =
+            destinationState.knownQuantity + principal.knownQuantity;
+        destinationState.knownCostBasis =
+            destinationState.knownCostBasis + principal.transferredCostBasis;
+      }
+    }
+
+    for (final fee in resolveFeeEffect(
+      movement,
+    ).otherAssetCustodyDebit.entries) {
+      final feeKey = WalletAssetKey(sourceWalletId, fee.key);
+      final feeCustodyEffect = custody
+          .effectsFor(movement.id)
+          .where(
+            (effect) =>
+                effect.key == feeKey &&
+                effect.requested.compareTo(AccountingAmount.zero) < 0,
+          )
+          .firstOrNull;
+      if (feeCustodyEffect == null) continue;
+      final feeState = states.putIfAbsent(feeKey, _PerformanceState.new);
+      _removeProportionally(
+        state: feeState,
+        custodyBefore: feeCustodyEffect.before.max(AccountingAmount.zero),
+        appliedDebit: _absolute(feeCustodyEffect.applied),
+        policy: policy,
+      );
+    }
+  }
 }
 
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
+
+final class TransferAllocation {
+  const TransferAllocation({
+    required this.totalDebited,
+    required this.knownQuantity,
+    required this.unknownQuantity,
+    required this.transferredCostBasis,
+  });
+
+  final AccountingAmount totalDebited;
+  final AccountingAmount knownQuantity;
+  final AccountingAmount unknownQuantity;
+  final AccountingAmount transferredCostBasis;
+}
+
+TransferAllocation allocateTransferProportionally({
+  required AccountingAmount custodyBefore,
+  required AccountingAmount knownAvailable,
+  required AccountingAmount knownCostBasis,
+  required AccountingAmount totalDebited,
+}) {
+  if (custodyBefore == AccountingAmount.zero ||
+      totalDebited == AccountingAmount.zero) {
+    return TransferAllocation(
+      totalDebited: AccountingAmount.zero,
+      knownQuantity: AccountingAmount.zero,
+      unknownQuantity: AccountingAmount.zero,
+      transferredCostBasis: AccountingAmount.zero,
+    );
+  }
+  final ratio = totalDebited.divide(custodyBefore);
+  final knownQuantity = knownAvailable * ratio;
+  return TransferAllocation(
+    totalDebited: totalDebited,
+    knownQuantity: knownQuantity,
+    unknownQuantity: (custodyBefore - knownAvailable) * ratio,
+    transferredCostBasis: knownCostBasis * ratio,
+  );
+}
+
+final class _TransferRemoval extends TransferAllocation {
+  const _TransferRemoval({
+    required super.totalDebited,
+    required super.knownQuantity,
+    required super.unknownQuantity,
+    required super.transferredCostBasis,
+    required this.knownAvailableBefore,
+    required this.knownCostBasisBefore,
+  });
+
+  final AccountingAmount knownAvailableBefore;
+  final AccountingAmount knownCostBasisBefore;
+}
+
+_TransferRemoval _removeProportionally({
+  required _PerformanceState state,
+  required AccountingAmount custodyBefore,
+  required AccountingAmount appliedDebit,
+  required TransferCostAllocationPolicy policy,
+}) {
+  final knownAvailable = state.knownQuantity.min(custodyBefore);
+  final knownCostBasis = state.knownQuantity == AccountingAmount.zero
+      ? AccountingAmount.zero
+      : state.knownCostBasis * knownAvailable.divide(state.knownQuantity);
+  final allocation = switch (policy) {
+    TransferCostAllocationPolicy.proportional => allocateTransferProportionally(
+      custodyBefore: custodyBefore,
+      knownAvailable: knownAvailable,
+      knownCostBasis: knownCostBasis,
+      totalDebited: appliedDebit,
+    ),
+  };
+  state.knownQuantity = state.knownQuantity - allocation.knownQuantity;
+  state.knownCostBasis = state.knownCostBasis - allocation.transferredCostBasis;
+  return _TransferRemoval(
+    totalDebited: allocation.totalDebited,
+    knownQuantity: allocation.knownQuantity,
+    unknownQuantity: allocation.unknownQuantity,
+    transferredCostBasis: allocation.transferredCostBasis,
+    knownAvailableBefore: knownAvailable,
+    knownCostBasisBefore: knownCostBasis,
+  );
+}
+
+AccountingAmount _absolute(AccountingAmount value) =>
+    value.compareTo(AccountingAmount.zero) < 0
+    ? AccountingAmount.zero - value
+    : value;
 
 final class _PerformanceState {
   AccountingAmount knownQuantity = AccountingAmount.zero;
