@@ -3498,6 +3498,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                         prefixIcon: Icon(Icons.swap_vert_rounded),
                       ),
                       items: MovementType.values
+                          .where(
+                            (type) => type != MovementType.balanceAdjustment,
+                          )
+                          .where(
+                            (MovementType type) =>
+                                type != MovementType.balanceAdjustment,
+                          )
                           .map(
                             (MovementType type) =>
                                 DropdownMenuItem<MovementType>(
@@ -9868,12 +9875,20 @@ class _MovementsTabState extends State<MovementsTab> {
                           value: 'TODOS',
                           child: Text('Todos'),
                         ),
-                        ...MovementType.values.map(
-                          (MovementType t) => DropdownMenuItem<String>(
-                            value: t.name,
-                            child: Text(t.shortLabel),
-                          ),
-                        ),
+                        ...MovementType.values
+                            .where(
+                              (type) => type != MovementType.balanceAdjustment,
+                            )
+                            .where(
+                              (MovementType type) =>
+                                  type != MovementType.balanceAdjustment,
+                            )
+                            .map(
+                              (MovementType t) => DropdownMenuItem<String>(
+                                value: t.name,
+                                child: Text(t.shortLabel),
+                              ),
+                            ),
                       ],
                       onChanged: (String? value) {
                         setState(() => _typeFilter = value ?? 'TODOS');

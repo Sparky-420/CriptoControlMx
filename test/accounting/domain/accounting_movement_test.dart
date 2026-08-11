@@ -34,4 +34,47 @@ void main() {
       expect(movement.copyWith(sourceWalletId: null).sourceWalletId, isNull);
     },
   );
+
+  test('copyWith updates fields and independently clears nullables', () {
+    final original = AccountingMovement(
+      id: 'id',
+      type: MovementType.buy,
+      asset: 'BTC',
+      occurredAt: DateTime.utc(2026),
+      fiatFeeAmount: AccountingAmount.zero,
+      walletAssignmentStatus: WalletAssignmentStatus.assigned,
+      cryptoFeeAmount: AccountingAmount.zero,
+      fiatFeeTreatment: FiatFeeTreatment.none,
+      reconciliationLinks: const [],
+      createdAt: DateTime.utc(2026),
+      updatedAt: DateTime.utc(2026),
+      quantity: AccountingAmount.fromInt(1),
+      note: 'note',
+      network: 'net',
+      destinationWalletId: 'wallet',
+    );
+    final changed = original.copyWith(
+      type: MovementType.sell,
+      asset: 'ETH',
+      quantity: null,
+      note: null,
+      network: null,
+      destinationWalletId: null,
+      reconciliationLinks: <ReconciliationLink>[
+        ReconciliationLink(
+          adjustmentMovementId: 'a',
+          quantityResolved: AccountingAmount.fromInt(1),
+        ),
+      ],
+      schemaVersion: 4,
+    );
+    expect(changed.type, MovementType.sell);
+    expect(changed.asset, 'ETH');
+    expect(changed.quantity, isNull);
+    expect(changed.note, isNull);
+    expect(changed.network, isNull);
+    expect(changed.destinationWalletId, isNull);
+    expect(changed.schemaVersion, 4);
+    expect(changed.reconciliationLinks, hasLength(1));
+  });
 }

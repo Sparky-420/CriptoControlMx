@@ -89,40 +89,98 @@ final class AccountingMovement {
   final DateTime createdAt;
   final DateTime updatedAt;
   final int schemaVersion;
-  AccountingMovement copyWith({Object? sourceWalletId = unset}) =>
-      AccountingMovement(
-        id: id,
-        type: type,
-        asset: asset,
-        occurredAt: occurredAt,
-        fiatFeeAmount: fiatFeeAmount,
-        walletAssignmentStatus: walletAssignmentStatus,
-        cryptoFeeAmount: cryptoFeeAmount,
-        fiatFeeTreatment: fiatFeeTreatment,
-        reconciliationLinks: reconciliationLinks,
-        createdAt: createdAt,
-        updatedAt: updatedAt,
-        schemaVersion: schemaVersion,
-        quantity: quantity,
-        unitPriceFiat: unitPriceFiat,
-        sourceWalletId: identical(sourceWalletId, unset)
-            ? this.sourceWalletId
-            : sourceWalletId as String?,
-        destinationWalletId: destinationWalletId,
-        destinationType: destinationType,
-        externalRecipientName: externalRecipientName,
-        externalDestinationPlatform: externalDestinationPlatform,
-        receivedAmount: receivedAmount,
-        cryptoFeeAsset: cryptoFeeAsset,
-        totalDebitedAmount: totalDebitedAmount,
-        feeFiatValue: feeFiatValue,
-        network: network,
-        note: note,
-        adjustmentWalletId: adjustmentWalletId,
-        adjustmentQuantity: adjustmentQuantity,
-        observedBalance: observedBalance,
-        adjustmentReason: adjustmentReason,
-      );
+  AccountingMovement copyWith({
+    String? id,
+    MovementType? type,
+    String? asset,
+    DateTime? occurredAt,
+    Object? quantity = unset,
+    Object? unitPriceFiat = unset,
+    AccountingAmount? fiatFeeAmount,
+    Object? sourceWalletId = unset,
+    Object? destinationWalletId = unset,
+    Object? destinationType = unset,
+    Object? externalRecipientName = unset,
+    Object? externalDestinationPlatform = unset,
+    WalletAssignmentStatus? walletAssignmentStatus,
+    Object? receivedAmount = unset,
+    AccountingAmount? cryptoFeeAmount,
+    Object? cryptoFeeAsset = unset,
+    Object? totalDebitedAmount = unset,
+    Object? feeFiatValue = unset,
+    FiatFeeTreatment? fiatFeeTreatment,
+    Object? network = unset,
+    Object? note = unset,
+    Object? adjustmentWalletId = unset,
+    Object? adjustmentQuantity = unset,
+    Object? observedBalance = unset,
+    Object? adjustmentReason = unset,
+    List<ReconciliationLink>? reconciliationLinks,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    int? schemaVersion,
+  }) => AccountingMovement(
+    id: id ?? this.id,
+    type: type ?? this.type,
+    asset: asset ?? this.asset,
+    occurredAt: occurredAt ?? this.occurredAt,
+    fiatFeeAmount: fiatFeeAmount ?? this.fiatFeeAmount,
+    walletAssignmentStatus:
+        walletAssignmentStatus ?? this.walletAssignmentStatus,
+    cryptoFeeAmount: cryptoFeeAmount ?? this.cryptoFeeAmount,
+    fiatFeeTreatment: fiatFeeTreatment ?? this.fiatFeeTreatment,
+    reconciliationLinks: reconciliationLinks ?? this.reconciliationLinks,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    schemaVersion: schemaVersion ?? this.schemaVersion,
+    quantity: identical(quantity, unset)
+        ? this.quantity
+        : quantity as AccountingAmount?,
+    unitPriceFiat: identical(unitPriceFiat, unset)
+        ? this.unitPriceFiat
+        : unitPriceFiat as AccountingAmount?,
+    sourceWalletId: identical(sourceWalletId, unset)
+        ? this.sourceWalletId
+        : sourceWalletId as String?,
+    destinationWalletId: identical(destinationWalletId, unset)
+        ? this.destinationWalletId
+        : destinationWalletId as String?,
+    destinationType: identical(destinationType, unset)
+        ? this.destinationType
+        : destinationType as DestinationType?,
+    externalRecipientName: identical(externalRecipientName, unset)
+        ? this.externalRecipientName
+        : externalRecipientName as String?,
+    externalDestinationPlatform: identical(externalDestinationPlatform, unset)
+        ? this.externalDestinationPlatform
+        : externalDestinationPlatform as String?,
+    receivedAmount: identical(receivedAmount, unset)
+        ? this.receivedAmount
+        : receivedAmount as AccountingAmount?,
+    cryptoFeeAsset: identical(cryptoFeeAsset, unset)
+        ? this.cryptoFeeAsset
+        : cryptoFeeAsset as String?,
+    totalDebitedAmount: identical(totalDebitedAmount, unset)
+        ? this.totalDebitedAmount
+        : totalDebitedAmount as AccountingAmount?,
+    feeFiatValue: identical(feeFiatValue, unset)
+        ? this.feeFiatValue
+        : feeFiatValue as AccountingAmount?,
+    network: identical(network, unset) ? this.network : network as String?,
+    note: identical(note, unset) ? this.note : note as String?,
+    adjustmentWalletId: identical(adjustmentWalletId, unset)
+        ? this.adjustmentWalletId
+        : adjustmentWalletId as String?,
+    adjustmentQuantity: identical(adjustmentQuantity, unset)
+        ? this.adjustmentQuantity
+        : adjustmentQuantity as AccountingAmount?,
+    observedBalance: identical(observedBalance, unset)
+        ? this.observedBalance
+        : observedBalance as AccountingAmount?,
+    adjustmentReason: identical(adjustmentReason, unset)
+        ? this.adjustmentReason
+        : adjustmentReason as String?,
+  );
   Map<String, Object?> toJson() => {
     'id': id,
     'type': type.name,

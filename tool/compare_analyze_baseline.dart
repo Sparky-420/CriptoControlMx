@@ -4,6 +4,7 @@ int compareAnalyzeReports(
   String baselineMarkdown,
   String currentOutput, {
   int maximumTotal = 30,
+  Map<String, String>? sources,
 }) {
   final baseline = _baselineTuples(baselineMarkdown);
   final current = _currentTuples(currentOutput);
@@ -18,7 +19,23 @@ int compareAnalyzeReports(
   for (final value in current) {
     actual[value] = (actual[value] ?? 0) + 1;
   }
-  return _same(expected, actual) ? 0 : 1;
+  if (!_same(expected, actual)) {
+    return 1;
+  }
+  if (sources != null && !_anchorsMatch(baselineMarkdown, sources)) {
+    return 1;
+  }
+  return 0;
+}
+
+bool _anchorsMatch(String markdown, Map<String, String> sources) {
+  final anchors = RegExp(
+    r'\|\s*`([^`]+)`\s*\|\s*$',
+    multiLine: true,
+  ).allMatches(markdown).map((m) => m.group(1)!).toList();
+  if (anchors.length < 30) return true;
+  final source = sources['lib/cripto_control_app.dart'];
+  return source != null && anchors.every(source.contains);
 }
 
 bool _same(Map<String, int> a, Map<String, int> b) =>
@@ -54,9 +71,15 @@ void main(List<String> args) {
     exitCode = 64;
     return;
   }
+  final root = Directory.current;
   final result = compareAnalyzeReports(
     File(args[0]).readAsStringSync(),
     File(args[1]).readAsStringSync(),
+    sources: <String, String>{
+      'lib/cripto_control_app.dart': File(
+        '${root.path}${Platform.pathSeparator}lib${Platform.pathSeparator}cripto_control_app.dart',
+      ).readAsStringSync(),
+    },
   );
   if (result != 0) {
     stderr.writeln('Analyzer report differs from approved baseline.');
