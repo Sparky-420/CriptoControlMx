@@ -218,12 +218,19 @@ AccountingAmount? _transferCreditLimit(
       )
       .firstOrNull;
   if (sourceEffect == null) return AccountingAmount.zero;
-  final sourceBacked =
-      movement.receivedAmount! *
-      _absolute(sourceEffect.applied).divide(movement.totalDebitedAmount!);
+  final received = movement.receivedAmount!;
+  final totalDebited = movement.totalDebitedAmount!;
+  final appliedDebit = _absolute(sourceEffect.applied);
+  final sourceBacked = appliedDebit == AccountingAmount.zero
+      ? AccountingAmount.zero
+      : appliedDebit == totalDebited
+      ? received
+      : received == totalDebited
+      ? appliedDebit
+      : (received * appliedDebit).divide(totalDebited);
   final linkedCredit =
       resolutions.byLegKey[_linkResolutionKey(leg)] ?? AccountingAmount.zero;
-  return (sourceBacked + linkedCredit).min(movement.receivedAmount!);
+  return (sourceBacked + linkedCredit).min(received);
 }
 
 String _linkResolutionKey(LedgerLeg leg) =>

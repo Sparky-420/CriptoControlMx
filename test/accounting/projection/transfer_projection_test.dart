@@ -68,37 +68,103 @@ void main() {
   );
 
   test(
-    'internal periodic transfer keeps full-known principal exact after fee',
+    'historical internal periodic transfer preserves exact principal globally',
     () {
       final result = _project(<AccountingMovement>[
-        buy(id: 'buy', walletId: sourceWalletId, quantity: '3'),
+        buy(id: 'buy', walletId: sourceWalletId, quantity: '1'),
         transfer(
-          id: 'periodic-internal',
+          id: 'historic-periodic-internal',
           destinationType: DestinationType.ownWallet,
           destinationWalletId: destinationWalletId,
-          received: '2',
-          fee: '1',
+          received: '3',
         ),
       ]);
+      final effects = result.custody.effectsFor('historic-periodic-internal');
+      final globalDelta =
+          result.custody.positions.values.fold<AccountingAmount>(
+            AccountingAmount.zero,
+            (total, position) => total + position.reconciledQuantity,
+          ) -
+          AccountingAmount.parse('1');
 
+      expect(effects[0].requested.toJson(), '-3');
+      expect(effects[0].applied.toJson(), '-1');
+      expect(effects[0].unapplied.toJson(), '-2');
+      expect(effects[1].requested.toJson(), '3');
+      expect(effects[1].applied.toJson(), '1');
+      expect(effects[1].unapplied.toJson(), '2');
+      expect(globalDelta, AccountingAmount.zero);
       expect(
         result.performance.positions[sourceKey]!.knownQuantity,
         AccountingAmount.zero,
       );
       expect(
-        result.performance.positions[sourceKey]!.knownCostBasis,
-        AccountingAmount.zero,
-      );
-      expect(
         result.performance.positions[destinationKey]!.knownQuantity.toJson(),
-        '2',
+        '1',
       );
       expect(
         result.performance.positions[destinationKey]!.knownCostBasis.toJson(),
-        '40',
+        '20',
       );
     },
   );
+
+  test('periodic partial debit divides once and keeps unapplied remainder', () {
+    final result = _project(<AccountingMovement>[
+      buy(id: 'buy', walletId: sourceWalletId, quantity: '2'),
+      transfer(
+        id: 'periodic-partial-with-fee',
+        destinationType: DestinationType.ownWallet,
+        destinationWalletId: destinationWalletId,
+        received: '2',
+        fee: '1',
+      ),
+    ]);
+    final effects = result.custody.effectsFor('periodic-partial-with-fee');
+
+    expect(effects[0].requested.toJson(), '-3');
+    expect(effects[0].applied.toJson(), '-2');
+    expect(effects[0].unapplied.toJson(), '-1');
+    expect(effects[1].requested.toJson(), '2');
+    expect(effects[1].applied.toJson(), '1.333333333333333333');
+    expect(effects[1].unapplied.toJson(), '0.666666666666666667');
+    expect(effects[1].applied + effects[1].unapplied, effects[1].requested);
+  });
+
+  test('fully applied internal debit credits received exactly after fee', () {
+    final result = _project(<AccountingMovement>[
+      buy(id: 'buy', walletId: sourceWalletId, quantity: '3'),
+      transfer(
+        id: 'periodic-internal',
+        destinationType: DestinationType.ownWallet,
+        destinationWalletId: destinationWalletId,
+        received: '2',
+        fee: '1',
+      ),
+    ]);
+    final effects = result.custody.effectsFor('periodic-internal');
+
+    expect(effects[0].applied.toJson(), '-3');
+    expect(effects[1].requested.toJson(), '2');
+    expect(effects[1].applied.toJson(), '2');
+    expect(effects[1].unapplied, AccountingAmount.zero);
+    expect(
+      result.performance.positions[sourceKey]!.knownQuantity,
+      AccountingAmount.zero,
+    );
+    expect(
+      result.performance.positions[sourceKey]!.knownCostBasis,
+      AccountingAmount.zero,
+    );
+    expect(
+      result.performance.positions[destinationKey]!.knownQuantity.toJson(),
+      '2',
+    );
+    expect(
+      result.performance.positions[destinationKey]!.knownCostBasis.toJson(),
+      '40',
+    );
+  });
 
   test('duplicate movement IDs apply transfer and other-asset fee once', () {
     final duplicate = transfer(
