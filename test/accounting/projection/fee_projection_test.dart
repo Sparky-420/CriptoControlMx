@@ -1,5 +1,7 @@
 import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
 import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
+import 'package:cripto_control_mx/accounting/domain/ledger_validation.dart';
+import 'package:cripto_control_mx/accounting/domain/movement_normalizer.dart';
 import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
 import 'package:cripto_control_mx/accounting/projection/fee_effect.dart';
@@ -23,10 +25,15 @@ void main() {
 
   test('fiat paid separately records one fiat cost effect', () {
     final effect = resolveFeeEffect(
-      transfer(fiatFee: '15', treatment: FiatFeeTreatment.paidSeparately),
+      transfer(
+        fee: '0.1',
+        feeAsset: 'UNI',
+        fiatFee: '15',
+        treatment: FiatFeeTreatment.paidSeparately,
+      ),
     );
 
-    expect(effect.assetCustodyDebit, AccountingAmount.zero);
+    expect(effect.assetCustodyDebit.toJson(), '0.1');
     expect(effect.otherAssetCustodyDebit, isEmpty);
     expect(effect.fiatCostEffect.toJson(), '15');
   });
@@ -36,7 +43,7 @@ void main() {
       transfer(
         fee: '0.1',
         feeAsset: 'UNI',
-        fiatFee: '20',
+        feeFiatValue: '20',
         treatment: FiatFeeTreatment.valuationOfCryptoFee,
       ),
     );
@@ -59,12 +66,50 @@ void main() {
     expect(effect.otherAssetCustodyDebit['ETH']!.toJson(), '0.2');
     expect(effect.fiatCostEffect.toJson(), '15');
   });
+
+  test('normalizer rejects invalid fiat fee treatment matrix without legs', () {
+    final invalid = <AccountingMovement>[
+      transfer(fiatFee: '1'),
+      transfer(treatment: FiatFeeTreatment.valuationOfCryptoFee),
+      transfer(
+        fee: '0.1',
+        feeAsset: 'UNI',
+        fiatFee: '1',
+        treatment: FiatFeeTreatment.valuationOfCryptoFee,
+      ),
+      transfer(treatment: FiatFeeTreatment.paidSeparately),
+      transfer(
+        fiatFee: '1',
+        feeFiatValue: '1',
+        treatment: FiatFeeTreatment.paidSeparately,
+      ),
+      transfer(fiatFee: '1', treatment: FiatFeeTreatment.paidSeparately),
+      transfer(
+        fee: '0.1',
+        feeAsset: 'UNI',
+        treatment: FiatFeeTreatment.combined,
+      ),
+      transfer(fiatFee: '1', treatment: FiatFeeTreatment.combined),
+    ];
+    final ledger = const DefaultMovementNormalizer()
+        .normalize(<AccountingMovement>[
+          for (var index = 0; index < invalid.length; index++)
+            invalid[index].copyWith(id: 'invalid-$index'),
+        ]);
+
+    expect(ledger.legs, isEmpty);
+    expect(
+      ledger.issues.map((issue) => issue.code),
+      everyElement(ProjectionIssueCode.invalidAmount),
+    );
+  });
 }
 
 AccountingMovement transfer({
   String fee = '0',
   String? feeAsset,
   String fiatFee = '0',
+  String? feeFiatValue,
   FiatFeeTreatment treatment = FiatFeeTreatment.none,
 }) {
   final at = DateTime.utc(2026, 7, 30, 20, 54);
@@ -83,7 +128,12 @@ AccountingMovement transfer({
     receivedAmount: AccountingAmount.fromInt(1),
     cryptoFeeAmount: AccountingAmount.parse(fee),
     cryptoFeeAsset: feeAsset,
-    totalDebitedAmount: AccountingAmount.fromInt(1),
+    totalDebitedAmount: fee == '0' || feeAsset != 'UNI'
+        ? AccountingAmount.fromInt(1)
+        : AccountingAmount.fromInt(1) + AccountingAmount.parse(fee),
+    feeFiatValue: feeFiatValue == null
+        ? null
+        : AccountingAmount.parse(feeFiatValue),
     fiatFeeTreatment: treatment,
     reconciliationLinks: const <ReconciliationLink>[],
     createdAt: at,

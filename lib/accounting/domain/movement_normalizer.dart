@@ -252,7 +252,32 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
         'El total debitado no cuadra con cantidad recibida y comisión.',
       );
     }
-    return null;
+    return _validateFiatFeeTreatment(movement);
+  }
+
+  ProjectionIssue? _validateFiatFeeTreatment(AccountingMovement movement) {
+    final hasCryptoFee =
+        movement.cryptoFeeAmount.compareTo(AccountingAmount.zero) > 0;
+    final hasFiatFee =
+        movement.fiatFeeAmount.compareTo(AccountingAmount.zero) > 0;
+    final hasFiatValue = movement.feeFiatValue != null;
+    final hasNegativeFiat =
+        movement.fiatFeeAmount.compareTo(AccountingAmount.zero) < 0 ||
+        (movement.feeFiatValue?.compareTo(AccountingAmount.zero) ?? 0) < 0;
+    final isValid = switch (movement.fiatFeeTreatment) {
+      FiatFeeTreatment.none => !hasFiatFee && !hasFiatValue,
+      FiatFeeTreatment.valuationOfCryptoFee => hasCryptoFee && !hasFiatFee,
+      FiatFeeTreatment.paidSeparately =>
+        hasCryptoFee && hasFiatFee && !hasFiatValue,
+      FiatFeeTreatment.combined => hasCryptoFee && hasFiatFee,
+    };
+    return hasNegativeFiat || !isValid
+        ? _issue(
+            ProjectionIssueCode.invalidAmount,
+            movement,
+            'El tratamiento de comisión fiat no coincide con sus importes.',
+          )
+        : null;
   }
 
   ProjectionIssue? _validateAdjustment(AccountingMovement movement) {
