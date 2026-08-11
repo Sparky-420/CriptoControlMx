@@ -54,6 +54,9 @@ final class CustodyProjection {
   final Map<WalletAssetKey, CustodyPosition> positions;
   final List<AccountingMovement> adjustmentHistory;
   final Map<String, List<CustodyMovementEffect>> effectsByMovementId;
+
+  List<CustodyMovementEffect> effectsFor(String movementId) =>
+      effectsByMovementId[movementId] ?? const <CustodyMovementEffect>[];
 }
 
 final class CustodyMovementEffect {
