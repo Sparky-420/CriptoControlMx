@@ -61,7 +61,12 @@ final class DefaultCustodyProjector implements CustodyProjector {
         requested,
         leg,
         movement,
-        maximumCredit: _transferCreditLimit(leg, movement, effects),
+        maximumCredit: _transferCreditLimit(
+          leg,
+          movement,
+          effects,
+          resolutions,
+        ),
       );
       if (leg.kind == LedgerLegKind.adjustment) {
         state.resolvedAdjustments = state.resolvedAdjustments + resolved;
@@ -108,6 +113,7 @@ final class DefaultCustodyProjector implements CustodyProjector {
       (legsByMovementId[leg.movementId] ??= <LedgerLeg>[]).add(leg);
     }
     final byAdjustmentId = <String, AccountingAmount>{};
+    final byLegKey = <String, AccountingAmount>{};
     final issuesByMovementId = <String, List<ProjectionIssue>>{};
 
     void issue(ProjectionIssueCode code, String movementId, String message) =>
@@ -139,10 +145,16 @@ final class DefaultCustodyProjector implements CustodyProjector {
                   )
                   .firstOrNull;
         final current = byAdjustmentId[adjustment.id] ?? AccountingAmount.zero;
+        if (adjustmentQuantity == null || matchingLeg == null) {
+          issue(
+            ProjectionIssueCode.invalidReconciliationLink,
+            movement.id,
+            'El vínculo de conciliación no coincide con el ajuste.',
+          );
+          continue;
+        }
         final isInvalid =
-            adjustmentQuantity == null ||
             link.quantityResolved.compareTo(AccountingAmount.zero) <= 0 ||
-            matchingLeg == null ||
             link.quantityResolved.compareTo(_absolute(matchingLeg.quantity)) >
                 0 ||
             (current + link.quantityResolved).compareTo(
@@ -158,9 +170,12 @@ final class DefaultCustodyProjector implements CustodyProjector {
           continue;
         }
         byAdjustmentId[adjustment.id] = current + link.quantityResolved;
+        final legKey = _linkResolutionKey(matchingLeg);
+        byLegKey[legKey] =
+            (byLegKey[legKey] ?? AccountingAmount.zero) + link.quantityResolved;
       }
     }
-    return _LinkResolution(byAdjustmentId, issuesByMovementId);
+    return _LinkResolution(byAdjustmentId, byLegKey, issuesByMovementId);
   }
 }
 
@@ -168,6 +183,7 @@ AccountingAmount? _transferCreditLimit(
   LedgerLeg leg,
   AccountingMovement? movement,
   Map<String, List<CustodyMovementEffect>> effects,
+  _LinkResolution resolutions,
 ) {
   if (leg.kind != LedgerLegKind.custodyCredit ||
       movement?.type != MovementType.transferOut ||
@@ -185,13 +201,16 @@ AccountingAmount? _transferCreditLimit(
       )
       .firstOrNull;
   if (sourceEffect == null) return AccountingAmount.zero;
-  if (sourceEffect.before == AccountingAmount.zero &&
-      movement.reconciliationLinks.isNotEmpty) {
-    return null;
-  }
-  return movement.receivedAmount! *
+  final sourceBacked =
+      movement.receivedAmount! *
       _absolute(sourceEffect.applied).divide(movement.totalDebitedAmount!);
+  final linkedCredit =
+      resolutions.byLegKey[_linkResolutionKey(leg)] ?? AccountingAmount.zero;
+  return (sourceBacked + linkedCredit).min(movement.receivedAmount!);
 }
+
+String _linkResolutionKey(LedgerLeg leg) =>
+    '${leg.movementId}|${leg.walletId}|${leg.asset}|${leg.kind.name}|${_signedLegQuantity(leg).compareTo(AccountingAmount.zero)}';
 
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
@@ -210,9 +229,14 @@ AccountingAmount _withAdjustmentRemainder(
     : AccountingAmount.zero - (_absolute(adjustment) - resolved);
 
 final class _LinkResolution {
-  const _LinkResolution(this.byAdjustmentId, this.issuesByMovementId);
+  const _LinkResolution(
+    this.byAdjustmentId,
+    this.byLegKey,
+    this.issuesByMovementId,
+  );
 
   final Map<String, AccountingAmount> byAdjustmentId;
+  final Map<String, AccountingAmount> byLegKey;
   final Map<String, List<ProjectionIssue>> issuesByMovementId;
 }
 

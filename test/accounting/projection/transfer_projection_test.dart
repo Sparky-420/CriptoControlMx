@@ -177,6 +177,185 @@ void main() {
     },
   );
 
+  test(
+    'zero-source internal transfer credits only its validated destination link',
+    () {
+      final destinationAdjustment =
+          adjustment(
+            id: 'destination-adjustment',
+            walletId: destinationWalletId,
+            quantity: '1',
+          ).copyWith(
+            occurredAt: at.add(const Duration(minutes: 3)),
+            observedBalance: AccountingAmount.parse('1'),
+          );
+      final partial =
+          transfer(
+            id: 'zero-source-partial',
+            destinationType: DestinationType.ownWallet,
+            destinationWalletId: destinationWalletId,
+            received: '1',
+          ).copyWith(
+            reconciliationLinks: <ReconciliationLink>[
+              ReconciliationLink(
+                adjustmentMovementId: destinationAdjustment.id,
+                quantityResolved: AccountingAmount.parse('0.4'),
+              ),
+            ],
+          );
+
+      final partialResult = _project(<AccountingMovement>[
+        destinationAdjustment,
+        partial,
+      ]);
+      final partialEffects = partialResult.custody.effectsFor(partial.id);
+      final adjustmentEffect = partialResult.custody
+          .effectsFor(destinationAdjustment.id)
+          .single;
+
+      expect(adjustmentEffect.requested.toJson(), '0.6');
+      expect(partialEffects[1].applied.toJson(), '0.4');
+      expect(partialEffects[1].unapplied.toJson(), '0.6');
+      expect(
+        partialResult.custody.positions[destinationKey]!.reconciledQuantity
+            .toJson(),
+        '1',
+      );
+
+      final total = partial.copyWith(
+        id: 'zero-source-total',
+        reconciliationLinks: <ReconciliationLink>[
+          ReconciliationLink(
+            adjustmentMovementId: destinationAdjustment.id,
+            quantityResolved: AccountingAmount.parse('1'),
+          ),
+        ],
+      );
+      final totalResult = _project(<AccountingMovement>[
+        destinationAdjustment,
+        total,
+      ]);
+      expect(totalResult.custody.effectsFor(total.id)[1].applied.toJson(), '1');
+    },
+  );
+
+  test(
+    'zero-source internal transfer ignores invalid and non-credit links',
+    () {
+      final destinationAdjustment = adjustment(
+        id: 'valid-destination-adjustment',
+        walletId: destinationWalletId,
+        quantity: '1',
+      ).copyWith(occurredAt: at, observedBalance: AccountingAmount.parse('1'));
+      final wrongWalletAdjustment =
+          adjustment(
+            id: 'wrong-wallet-adjustment',
+            walletId: sourceWalletId,
+            quantity: '1',
+          ).copyWith(
+            occurredAt: at.add(const Duration(minutes: 3)),
+            observedBalance: AccountingAmount.parse('1'),
+          );
+      final wrongAssetAdjustment =
+          adjustment(
+            id: 'wrong-asset-adjustment',
+            walletId: destinationWalletId,
+            quantity: '1',
+          ).copyWith(
+            asset: 'ETH',
+            occurredAt: at.add(const Duration(minutes: 3)),
+            observedBalance: AccountingAmount.parse('1'),
+          );
+      final wrongSignAdjustment =
+          adjustment(
+            id: 'wrong-sign-adjustment',
+            walletId: destinationWalletId,
+            quantity: '-1',
+          ).copyWith(
+            occurredAt: at.add(const Duration(minutes: 3)),
+            observedBalance: AccountingAmount.zero,
+          );
+      final sourceDebitAdjustment =
+          adjustment(
+            id: 'source-debit-adjustment',
+            walletId: sourceWalletId,
+            quantity: '-1',
+          ).copyWith(
+            occurredAt: at.add(const Duration(minutes: 3)),
+            observedBalance: AccountingAmount.zero,
+          );
+      final base = transfer(
+        id: 'zero-source-invalid-link',
+        destinationType: DestinationType.ownWallet,
+        destinationWalletId: destinationWalletId,
+        received: '1',
+      );
+      final cases = <AccountingMovement>[
+        base.copyWith(
+          id: 'missing-link',
+          reconciliationLinks: <ReconciliationLink>[
+            ReconciliationLink(
+              adjustmentMovementId: 'missing',
+              quantityResolved: AccountingAmount.parse('1'),
+            ),
+          ],
+        ),
+        base.copyWith(
+          id: 'wrong-wallet-link',
+          reconciliationLinks: <ReconciliationLink>[
+            ReconciliationLink(
+              adjustmentMovementId: wrongWalletAdjustment.id,
+              quantityResolved: AccountingAmount.parse('1'),
+            ),
+          ],
+        ),
+        base.copyWith(
+          id: 'wrong-asset-link',
+          reconciliationLinks: <ReconciliationLink>[
+            ReconciliationLink(
+              adjustmentMovementId: wrongAssetAdjustment.id,
+              quantityResolved: AccountingAmount.parse('1'),
+            ),
+          ],
+        ),
+        base.copyWith(
+          id: 'wrong-sign-link',
+          reconciliationLinks: <ReconciliationLink>[
+            ReconciliationLink(
+              adjustmentMovementId: wrongSignAdjustment.id,
+              quantityResolved: AccountingAmount.parse('1'),
+            ),
+          ],
+        ),
+        base.copyWith(
+          id: 'source-debit-link',
+          reconciliationLinks: <ReconciliationLink>[
+            ReconciliationLink(
+              adjustmentMovementId: sourceDebitAdjustment.id,
+              quantityResolved: AccountingAmount.parse('1'),
+            ),
+          ],
+        ),
+      ];
+
+      for (final movement in cases) {
+        final result = _project(<AccountingMovement>[
+          destinationAdjustment,
+          wrongWalletAdjustment,
+          wrongAssetAdjustment,
+          wrongSignAdjustment,
+          sourceDebitAdjustment,
+          movement,
+        ]);
+        expect(
+          result.custody.effectsFor(movement.id)[1].applied.toJson(),
+          '0',
+          reason: movement.id,
+        );
+      }
+    },
+  );
+
   test('one internal transfer moves its proportional cost mix without pnl', () {
     final result = _project(<AccountingMovement>[
       buy(id: 'buy', walletId: sourceWalletId, quantity: '10'),
