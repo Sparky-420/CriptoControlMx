@@ -24,25 +24,78 @@ int compareAnalyzeReports(
       anchors.length != expected.length) {
     return 1;
   }
-  final remaining = List<_Diag>.from(actual);
+  final expectedByKey = <String, List<int>>{};
   for (var i = 0; i < expected.length; i++) {
-    final index = remaining.indexWhere((d) => d.key == expected[i].key);
-    if (index < 0) {
+    expectedByKey.putIfAbsent(expected[i].key, () => <int>[]).add(i);
+  }
+  final actualByKey = <String, List<_Diag>>{};
+  for (final diagnostic in actual) {
+    actualByKey.putIfAbsent(diagnostic.key, () => <_Diag>[]).add(diagnostic);
+  }
+  for (final entry in expectedByKey.entries) {
+    final candidates = actualByKey[entry.key];
+    if (candidates == null || candidates.length != entry.value.length) {
       return 1;
     }
-    final matched = remaining.removeAt(index);
-    if (sources != null && anchors.isNotEmpty) {
-      final text = sources[matched.path];
-      final lines = text?.split('\n');
-      if (lines == null ||
-          matched.line < 1 ||
-          matched.line > lines.length ||
-          !lines[matched.line - 1].contains(anchors[i])) {
-        return 1;
-      }
+    if (sources != null &&
+        anchors.isNotEmpty &&
+        !_hasPerfectAnchorMatching(entry.value, candidates, anchors, sources)) {
+      return 1;
     }
   }
   return 0;
+}
+
+bool _hasPerfectAnchorMatching(
+  List<int> expectedIndices,
+  List<_Diag> candidates,
+  List<String> anchors,
+  Map<String, String> sources,
+) {
+  final matchedExpectedByCandidate = List<int>.filled(candidates.length, -1);
+
+  bool assign(int expectedIndex, Set<int> visitedCandidates) {
+    for (
+      var candidateIndex = 0;
+      candidateIndex < candidates.length;
+      candidateIndex++
+    ) {
+      if (visitedCandidates.contains(candidateIndex) ||
+          !_anchorMatches(
+            candidates[candidateIndex],
+            anchors[expectedIndex],
+            sources,
+          )) {
+        continue;
+      }
+      visitedCandidates.add(candidateIndex);
+      final previousExpected = matchedExpectedByCandidate[candidateIndex];
+      if (previousExpected < 0 || assign(previousExpected, visitedCandidates)) {
+        matchedExpectedByCandidate[candidateIndex] = expectedIndex;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (final expectedIndex in expectedIndices) {
+    if (!assign(expectedIndex, <int>{})) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _anchorMatches(
+  _Diag candidate,
+  String anchor,
+  Map<String, String> sources,
+) {
+  final lines = sources[candidate.path]?.split('\n');
+  return lines != null &&
+      candidate.line >= 1 &&
+      candidate.line <= lines.length &&
+      lines[candidate.line - 1].contains(anchor);
 }
 
 List<_Diag> _diags(String text) {

@@ -36,4 +36,78 @@ warning - Second message - lib\\b.dart:2:1 - rule_two''';
       isNot(0),
     );
   });
+
+  test('matches permuted same-key diagnostics by anchors one to one', () {
+    const anchoredBaseline = '''
+info - Same message - lib\\a.dart:1:1 - repeated_rule
+info - Same message - lib\\a.dart:2:1 - repeated_rule
+info - Same message - lib\\a.dart:3:1 - repeated_rule
+info - Same message - lib\\a.dart:4:1 - repeated_rule
+info - Same message - lib\\a.dart:5:1 - repeated_rule
+
+### Huella con anclas verificables
+| # | Severidad | Posición | Regla | Mensaje | Ancla fuente |
+| 1 | info | 1:1 | `repeated_rule` | M1 | `commonCall();` |
+| 2 | info | 2:1 | `repeated_rule` | M1 | `specificCall();` |
+| 3 | info | 3:1 | `repeated_rule` | M1 | `thirdCall();` |
+| 4 | info | 4:1 | `repeated_rule` | M1 | `repeatCall();` |
+| 5 | info | 5:1 | `repeated_rule` | M1 | `repeatCall();` |''';
+    const permuted = '''
+info - Same message - lib\\a.dart:1:1 - repeated_rule
+info - Same message - lib\\a.dart:4:1 - repeated_rule
+info - Same message - lib\\a.dart:3:1 - repeated_rule
+info - Same message - lib\\a.dart:2:1 - repeated_rule
+info - Same message - lib\\a.dart:5:1 - repeated_rule''';
+    const sources = <String, String>{
+      'lib/a.dart': '''commonCall(); specificCall();
+commonCall();
+thirdCall();
+repeatCall();
+repeatCall();''',
+    };
+
+    expect(
+      compareAnalyzeReports(anchoredBaseline, permuted, sources: sources),
+      0,
+    );
+  });
+
+  test('rejects same-key diagnostics without a perfect anchor matching', () {
+    const anchoredBaseline = '''
+info - Same message - lib\\a.dart:1:1 - repeated_rule
+info - Same message - lib\\a.dart:2:1 - repeated_rule
+info - Same message - lib\\a.dart:3:1 - repeated_rule
+info - Same message - lib\\a.dart:4:1 - repeated_rule
+info - Same message - lib\\a.dart:5:1 - repeated_rule
+
+### Huella con anclas verificables
+| # | Severidad | Posición | Regla | Mensaje | Ancla fuente |
+| 1 | info | 1:1 | `repeated_rule` | M1 | `commonCall();` |
+| 2 | info | 2:1 | `repeated_rule` | M1 | `specificCall();` |
+| 3 | info | 3:1 | `repeated_rule` | M1 | `thirdCall();` |
+| 4 | info | 4:1 | `repeated_rule` | M1 | `repeatCall();` |
+| 5 | info | 5:1 | `repeated_rule` | M1 | `repeatCall();` |''';
+    const incompleteMultiplicity = '''
+info - Same message - lib\\a.dart:1:1 - repeated_rule
+info - Same message - lib\\a.dart:4:1 - repeated_rule
+info - Same message - lib\\a.dart:3:1 - repeated_rule
+info - Same message - lib\\a.dart:2:1 - repeated_rule
+info - Same message - lib\\a.dart:2:1 - repeated_rule''';
+    const sources = <String, String>{
+      'lib/a.dart': '''commonCall(); specificCall();
+commonCall();
+thirdCall();
+repeatCall();
+repeatCall();''',
+    };
+
+    expect(
+      compareAnalyzeReports(
+        anchoredBaseline,
+        incompleteMultiplicity,
+        sources: sources,
+      ),
+      isNot(0),
+    );
+  });
 }
