@@ -39,7 +39,10 @@ final class AccountingLedgerEngine {
 
   LedgerProjection project(LedgerInput input) {
     final walletReferenceIssues = <ProjectionIssue>[];
-    final walletIds = input.wallets.map((wallet) => wallet.id).toSet();
+    final walletIds = input.wallets
+        .map((wallet) => wallet.id)
+        .where((walletId) => !walletId.startsWith('virtual:'))
+        .toSet();
     final routedMovements = input.movements
         .map(
           (movement) => _routeAssignment(

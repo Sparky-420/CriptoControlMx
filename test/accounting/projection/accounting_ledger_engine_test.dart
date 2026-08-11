@@ -441,6 +441,82 @@ void main() {
       '2',
     );
   });
+
+  test('rejects supplied wallets in the reserved virtual namespace', () {
+    const archivedWalletId = '33333333-3333-4333-8333-333333333333';
+    const reservedWalletIds = <String>[
+      virtualUnassignedWalletId,
+      virtualPendingWalletId,
+      virtualUnknownWalletId,
+      'virtual:arbitrary',
+    ];
+    final reservedMovementIds = <String>[
+      for (var index = 0; index < reservedWalletIds.length; index++)
+        'reserved-wallet-buy-$index',
+    ];
+    final projection = project(
+      <AccountingMovement>[
+        for (var index = 0; index < reservedWalletIds.length; index++)
+          buy(
+            id: reservedMovementIds[index],
+            asset: 'UNI',
+            quantity: '1',
+            price: '10',
+            destinationWalletId: reservedWalletIds[index],
+          ),
+        buy(
+          id: 'archived-wallet-history',
+          asset: 'UNI',
+          quantity: '2',
+          price: '10',
+          destinationWalletId: archivedWalletId,
+        ),
+      ],
+      wallets: <Wallet>[
+        for (final walletId in reservedWalletIds) wallet(walletId),
+        wallet(archivedWalletId, status: WalletStatus.archived),
+      ],
+    );
+
+    expect(
+      projection.positions.keys.map((key) => key.walletId),
+      isNot(
+        containsAll(<String>[
+          virtualUnassignedWalletId,
+          virtualPendingWalletId,
+          'virtual:arbitrary',
+        ]),
+      ),
+    );
+    final unknown = projection
+        .positions[const WalletAssetKey(virtualUnknownWalletId, 'UNI')]!;
+    expect(unknown.custody.reconciledQuantity.toJson(), '4');
+    expect(unknown.completeness.cause?.name, 'unknownWallet');
+    expect(
+      unknown.completeness.causingMovementIds,
+      containsAll(reservedMovementIds),
+    );
+    final unknownWalletIssues = projection.issues
+        .where((issue) => issue.code == ProjectionIssueCode.unknownWallet)
+        .toList();
+    expect(unknownWalletIssues, hasLength(reservedWalletIds.length));
+    expect(
+      unknownWalletIssues.map((issue) => issue.movementId),
+      containsAll(reservedMovementIds),
+    );
+    for (final movementId in reservedMovementIds) {
+      expect(
+        projection.effects[movementId]!.issues.map((issue) => issue.code),
+        contains(ProjectionIssueCode.unknownWallet),
+      );
+    }
+    final archived =
+        projection.positions[const WalletAssetKey(archivedWalletId, 'UNI')]!;
+    expect(archived.custody.reconciledQuantity.toJson(), '2');
+    expect(archived.completeness.cause, isNull);
+    expect(projection.migrationProgress.assigned, 1);
+    expect(projection.migrationProgress.total, 5);
+  });
 }
 
 const String completeWalletId = '11111111-1111-4111-8111-111111111111';
