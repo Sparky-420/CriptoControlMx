@@ -22,20 +22,39 @@ int compareAnalyzeReports(
   if (!_same(expected, actual)) {
     return 1;
   }
-  if (sources != null && !_anchorsMatch(baselineMarkdown, sources)) {
+  if (sources != null &&
+      !_anchorsMatch(baselineMarkdown, currentOutput, sources)) {
     return 1;
   }
   return 0;
 }
 
-bool _anchorsMatch(String markdown, Map<String, String> sources) {
+bool _anchorsMatch(
+  String markdown,
+  String currentOutput,
+  Map<String, String> sources,
+) {
   final anchors = RegExp(
     r'\|\s*`([^`]+)`\s*\|\s*$',
     multiLine: true,
   ).allMatches(markdown).map((m) => m.group(1)!).toList();
-  if (anchors.length < 30) return true;
-  final source = sources['lib/cripto_control_app.dart'];
-  return source != null && anchors.every(source.contains);
+  if (anchors.isEmpty) return true;
+  final locations = RegExp(
+    r'^\s*(?:info|warning|error) - .+ - (.+):(\d+):\d+ - [\w_]+\s*$',
+    multiLine: true,
+  ).allMatches(currentOutput).toList();
+  if (locations.length < anchors.length) return false;
+  for (var i = 0; i < anchors.length; i++) {
+    final source = sources[locations[i].group(1)!.replaceAll('\\', '/')];
+    final line = int.parse(locations[i].group(2)!);
+    if (source == null ||
+        line < 1 ||
+        line > source.split('\n').length ||
+        !source.split('\n')[line - 1].contains(anchors[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool _same(Map<String, int> a, Map<String, int> b) =>

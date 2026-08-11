@@ -14,6 +14,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'accounting/domain/movement_type.dart';
 export 'accounting/domain/movement_type.dart';
+
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:_discoveryapis_commons/_discoveryapis_commons.dart' as commons;
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -27,6 +28,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
+
+const List<MovementType> _legacyMovementTypes = <MovementType>[
+  MovementType.buy,
+  MovementType.sell,
+  MovementType.transferIn,
+  MovementType.transferOut,
+];
 
 const Set<String> _safeCrashAreas = <String>{
   'cloud',
@@ -3497,14 +3505,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                         labelText: 'Tipo',
                         prefixIcon: Icon(Icons.swap_vert_rounded),
                       ),
-                      items: MovementType.values
-                          .where(
-                            (type) => type != MovementType.balanceAdjustment,
-                          )
-                          .where(
-                            (MovementType type) =>
-                                type != MovementType.balanceAdjustment,
-                          )
+                      items: _legacyMovementTypes
                           .map(
                             (MovementType type) =>
                                 DropdownMenuItem<MovementType>(
@@ -9875,20 +9876,12 @@ class _MovementsTabState extends State<MovementsTab> {
                           value: 'TODOS',
                           child: Text('Todos'),
                         ),
-                        ...MovementType.values
-                            .where(
-                              (type) => type != MovementType.balanceAdjustment,
-                            )
-                            .where(
-                              (MovementType type) =>
-                                  type != MovementType.balanceAdjustment,
-                            )
-                            .map(
-                              (MovementType t) => DropdownMenuItem<String>(
-                                value: t.name,
-                                child: Text(t.shortLabel),
-                              ),
-                            ),
+                        ..._legacyMovementTypes.map(
+                          (MovementType t) => DropdownMenuItem<String>(
+                            value: t.name,
+                            child: Text(t.shortLabel),
+                          ),
+                        ),
                       ],
                       onChanged: (String? value) {
                         setState(() => _typeFilter = value ?? 'TODOS');
