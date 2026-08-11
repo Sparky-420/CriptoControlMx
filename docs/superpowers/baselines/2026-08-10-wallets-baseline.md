@@ -1,7 +1,7 @@
 # Baseline previa a carteras contables
 
-Fecha: 2026-08-10  
-Rama: `feature/carteras-contables`  
+Fecha: 2026-08-10
+Rama: `feature/carteras-contables`
 HEAD: `eb87a4ce6b371547690f8825feb8384ba5b610b1`
 
 ## Comandos y resultados
