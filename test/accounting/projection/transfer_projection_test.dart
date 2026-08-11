@@ -67,6 +67,93 @@ void main() {
     },
   );
 
+  test('H1-05 deficit transfer multiplies cost before division exactly', () {
+    final result = _project(<AccountingMovement>[
+      movement(
+        id: 'buy',
+        type: MovementType.buy,
+        quantity: '3',
+        unitPrice: '1',
+        destinationWalletId: sourceWalletId,
+      ).copyWith(fiatFeeAmount: AccountingAmount.parse('1')),
+      movement(
+        id: 'deficit-adjustment',
+        type: MovementType.balanceAdjustment,
+        adjustmentWalletId: sourceWalletId,
+        adjustmentQuantity: '-1',
+        observedBalance: '2',
+        adjustmentReason: 'Deficit historico',
+      ),
+      transfer(
+        id: 'deficit-transfer',
+        destinationType: DestinationType.external,
+        received: '1',
+      ),
+    ]);
+
+    expect(
+      result.performance.positions[sourceKey]!.knownCostBasis.toJson(),
+      '2.666666666666666667',
+    );
+    expect(
+      result.performance.positions[sourceKey]!.knownQuantity.toJson(),
+      '2',
+    );
+  });
+
+  test('H1-05 periodic deficit custody liquidation removes exact cost', () {
+    final result = _project(<AccountingMovement>[
+      movement(
+        id: 'buy',
+        type: MovementType.buy,
+        quantity: '3',
+        unitPrice: '1',
+        destinationWalletId: sourceWalletId,
+      ).copyWith(fiatFeeAmount: AccountingAmount.parse('1')),
+      movement(
+        id: 'deficit-adjustment',
+        type: MovementType.balanceAdjustment,
+        adjustmentWalletId: sourceWalletId,
+        adjustmentQuantity: '-1',
+        observedBalance: '2',
+        adjustmentReason: 'Deficit historico',
+      ),
+      transfer(
+        id: 'deficit-transfer-1',
+        destinationType: DestinationType.ownWallet,
+        destinationWalletId: destinationWalletId,
+        received: '1',
+      ),
+      transfer(
+        id: 'deficit-transfer-2',
+        destinationType: DestinationType.ownWallet,
+        destinationWalletId: thirdWalletId,
+        received: '1',
+      ),
+    ]);
+
+    expect(
+      result.custody.positions[sourceKey]!.reconciledQuantity,
+      AccountingAmount.zero,
+    );
+    expect(
+      result.performance.positions[sourceKey]!.knownQuantity.toJson(),
+      '1',
+    );
+    expect(
+      result.performance.positions[sourceKey]!.knownCostBasis.toJson(),
+      '1.333333333333333334',
+    );
+    expect(
+      result.performance.positions[destinationKey]!.knownCostBasis.toJson(),
+      '1.333333333333333333',
+    );
+    expect(
+      result.performance.positions[thirdKey]!.knownCostBasis.toJson(),
+      '1.333333333333333333',
+    );
+  });
+
   test(
     'historical internal periodic transfer preserves exact principal globally',
     () {
@@ -686,11 +773,13 @@ void main() {
 
 const String sourceWalletId = '11111111-1111-4111-8111-111111111111';
 const String destinationWalletId = '22222222-2222-4222-8222-222222222222';
+const String thirdWalletId = '33333333-3333-4333-8333-333333333333';
 const WalletAssetKey sourceKey = WalletAssetKey(sourceWalletId, 'UNI');
 const WalletAssetKey destinationKey = WalletAssetKey(
   destinationWalletId,
   'UNI',
 );
+const WalletAssetKey thirdKey = WalletAssetKey(thirdWalletId, 'UNI');
 final DateTime at = DateTime.utc(2026, 7, 30, 20, 54);
 
 _ProjectionResult _project(List<AccountingMovement> movements) {

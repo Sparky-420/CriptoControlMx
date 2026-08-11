@@ -7,6 +7,69 @@ import 'package:cripto_control_mx/accounting/domain/wallet.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'H1-09 creation requires existing active wallets but replay allows archived',
+    () {
+      final at = DateTime.utc(2026, 7, 30, 20, 54);
+      final active = Wallet(
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'Activa',
+        provider: 'Bitso',
+        status: WalletStatus.active,
+        createdAt: at,
+        updatedAt: at,
+      );
+      final archived = Wallet(
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'Archivada',
+        provider: 'Bitso',
+        status: WalletStatus.archived,
+        createdAt: at,
+        updatedAt: at,
+      );
+      final validator = const MovementCreationValidator();
+      final activeBuy = movement(
+        id: 'active-buy',
+        occurredAt: at,
+        destinationWalletId: active.id,
+      );
+      final archivedBuy = movement(
+        id: 'archived-buy',
+        occurredAt: at,
+        destinationWalletId: archived.id,
+      );
+      final missingBuy = movement(
+        id: 'missing-buy',
+        occurredAt: at,
+        destinationWalletId: '33333333-3333-4333-8333-333333333333',
+      );
+
+      expect(
+        validator.validate(activeBuy, wallets: <Wallet>[active, archived]),
+        isEmpty,
+      );
+      expect(
+        validator
+            .validate(archivedBuy, wallets: <Wallet>[active, archived])
+            .map((issue) => issue.code),
+        <ProjectionIssueCode>[ProjectionIssueCode.inactiveWallet],
+      );
+      expect(
+        validator
+            .validate(missingBuy, wallets: <Wallet>[active, archived])
+            .map((issue) => issue.code),
+        <ProjectionIssueCode>[ProjectionIssueCode.unknownWallet],
+      );
+      expect(
+        validator.validateHistoricalReplay(
+          archivedBuy,
+          wallets: <Wallet>[active, archived],
+        ),
+        isEmpty,
+      );
+    },
+  );
+
   test('sorts by instant and then id without mutating input', () {
     final input = <AccountingMovement>[
       movement(id: 'b', occurredAt: DateTime.utc(2026, 7, 30, 20, 54)),

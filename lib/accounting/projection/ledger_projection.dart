@@ -2,6 +2,7 @@ import '../domain/accounting_amount.dart';
 import '../domain/ledger_validation.dart';
 import '../domain/wallet.dart';
 import 'custody_projection.dart';
+import 'fee_effect.dart';
 import 'performance_projection.dart';
 
 const String virtualUnassignedWalletId = 'virtual:unassigned';
@@ -31,6 +32,7 @@ final class WalletAssetProjection {
     required this.key,
     required this.custody,
     required this.performance,
+    required this.availability,
     required this.completeness,
     required this.custodyMarketValue,
     required this.knownPositionMarketValue,
@@ -39,24 +41,72 @@ final class WalletAssetProjection {
   final WalletAssetKey key;
   final CustodyPosition custody;
   final PerformancePosition performance;
+  final PositionAvailability availability;
   final AccountingCompletenessResult completeness;
   final AccountingAmount custodyMarketValue;
   final AccountingAmount knownPositionMarketValue;
 
   AccountingAmount get reconciliationDifference =>
-      custody.reconciledQuantity - performance.knownQuantity;
+      availability.reconciliationDifference;
 
-  AccountingAmount get knownAvailable => performance.knownQuantity
-      .min(custody.reconciledQuantity)
-      .max(AccountingAmount.zero);
+  AccountingAmount get knownAvailable => availability.knownAvailable;
 
-  AccountingAmount get unknownAvailable =>
-      (custody.reconciledQuantity - knownAvailable).max(AccountingAmount.zero);
+  AccountingAmount get unknownAvailable => availability.unknownAvailable;
 
-  AccountingAmount get custodyDeficit =>
-      (performance.knownQuantity - custody.reconciledQuantity).max(
+  AccountingAmount get custodyDeficit => availability.custodyDeficit;
+}
+
+final class PositionAvailability {
+  const PositionAvailability({
+    required this.reconciliationDifference,
+    required this.knownAvailable,
+    required this.unknownAvailable,
+    required this.custodyDeficit,
+  });
+
+  factory PositionAvailability.derive({
+    required AccountingAmount custodyQuantity,
+    required AccountingAmount knownQuantity,
+  }) {
+    final knownAvailable = knownQuantity
+        .min(custodyQuantity)
+        .max(AccountingAmount.zero);
+    return PositionAvailability(
+      reconciliationDifference: custodyQuantity - knownQuantity,
+      knownAvailable: knownAvailable,
+      unknownAvailable: (custodyQuantity - knownAvailable).max(
         AccountingAmount.zero,
-      );
+      ),
+      custodyDeficit: (knownQuantity - custodyQuantity).max(
+        AccountingAmount.zero,
+      ),
+    );
+  }
+
+  final AccountingAmount reconciliationDifference;
+  final AccountingAmount knownAvailable;
+  final AccountingAmount unknownAvailable;
+  final AccountingAmount custodyDeficit;
+}
+
+final class MovementCustodyLegEffect {
+  const MovementCustodyLegEffect({
+    required this.key,
+    required this.kind,
+    required this.before,
+    required this.requested,
+    required this.applied,
+    required this.unapplied,
+    required this.after,
+  });
+
+  final WalletAssetKey key;
+  final LedgerLegKind kind;
+  final AccountingAmount before;
+  final AccountingAmount requested;
+  final AccountingAmount applied;
+  final AccountingAmount unapplied;
+  final AccountingAmount after;
 }
 
 final class MovementEffect {
@@ -65,7 +115,11 @@ final class MovementEffect {
     required this.requestedQuantity,
     required this.appliedQuantity,
     required this.unappliedQuantity,
+    required this.custodyLegs,
+    required this.globalDeltasByAsset,
+    required this.feeEffect,
     required this.issues,
+    this.transferAllocation,
     this.sale,
   });
 
@@ -73,6 +127,10 @@ final class MovementEffect {
   final AccountingAmount requestedQuantity;
   final AccountingAmount appliedQuantity;
   final AccountingAmount unappliedQuantity;
+  final List<MovementCustodyLegEffect> custodyLegs;
+  final Map<String, AccountingAmount> globalDeltasByAsset;
+  final FeeEffect feeEffect;
+  final TransferAllocation? transferAllocation;
   final List<ProjectionIssue> issues;
   final SaleResult? sale;
 }
@@ -84,6 +142,7 @@ final class LedgerTotals {
     required this.knownCostBasis,
     required this.realizedPnlKnown,
     required this.unrealizedPnlKnown,
+    required this.fiatCostEffect,
   });
 
   final AccountingAmount custodyMarketValue;
@@ -91,6 +150,7 @@ final class LedgerTotals {
   final AccountingAmount knownCostBasis;
   final AccountingAmount realizedPnlKnown;
   final AccountingAmount unrealizedPnlKnown;
+  final AccountingAmount fiatCostEffect;
 }
 
 final class MigrationProgress {

@@ -30,9 +30,11 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
   }) {
     final states = <WalletAssetKey, _PerformanceState>{};
     final sales = <SaleResult>[];
+    final transferAllocations = <String, TransferAllocation>{};
     final appliedMovementIds = <String>{};
 
     for (final movement in ledger.movements) {
+      if (!ledger.acceptedMovementIds.contains(movement.id)) continue;
       if (!appliedMovementIds.add(movement.id)) continue;
       switch (movement.type) {
         case MovementType.buy:
@@ -41,9 +43,17 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
           final result = _applySale(movement, states, custody, salePolicy);
           if (result != null) sales.add(result);
         case MovementType.transferIn:
-          break;
+          _applyBuy(movement, states);
         case MovementType.transferOut:
-          _applyTransfer(movement, states, custody, transferPolicy);
+          final allocation = _applyTransfer(
+            movement,
+            states,
+            custody,
+            transferPolicy,
+          );
+          if (allocation != null) {
+            transferAllocations[movement.id] = allocation;
+          }
           break;
         case MovementType.balanceAdjustment:
           break;
@@ -59,6 +69,9 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
     return PerformanceProjection(
       Map<WalletAssetKey, PerformancePosition>.unmodifiable(positions),
       List<SaleResult>.unmodifiable(sales),
+      transferAllocations: Map<String, TransferAllocation>.unmodifiable(
+        transferAllocations,
+      ),
     );
   }
 
@@ -109,21 +122,6 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
         : AccountingAmount.zero - effect.applied;
     final insufficientCustody =
         effect == null || effect.unapplied != AccountingAmount.zero;
-    if (insufficientCustody) {
-      state.block(movement.id);
-      state.addIssues(custody.positions[key]?.issues);
-      return SaleResult(
-        movementId: movement.id,
-        status: SaleAccountingStatus.insufficientCustody,
-        totalQuantity: requestedQuantity,
-        knownQuantity: AccountingAmount.zero,
-        demonstratedCostBasis: AccountingAmount.zero,
-        knownProceeds: AccountingAmount.zero,
-        allocatedKnownFiatFee: AccountingAmount.zero,
-        realizedPnlKnown: AccountingAmount.zero,
-        pendingCostQuantity: AccountingAmount.zero,
-      );
-    }
     final knownQuantity = switch (salePolicy) {
       SaleCostConsumptionPolicy.knownFirst => appliedQuantity.min(
         state.knownQuantity,
@@ -144,7 +142,9 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
         : (movement.fiatFeeAmount * knownQuantity).divide(requestedQuantity);
     final realizedPnl = knownProceeds - allocatedFee - demonstratedCost;
     final pendingQuantity = appliedQuantity - knownQuantity;
-    final status = pendingQuantity == AccountingAmount.zero
+    final status = insufficientCustody
+        ? SaleAccountingStatus.insufficientCustody
+        : pendingQuantity == AccountingAmount.zero
         ? SaleAccountingStatus.complete
         : SaleAccountingStatus.partiallyKnown;
 
@@ -174,14 +174,14 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
     );
   }
 
-  void _applyTransfer(
+  TransferAllocation? _applyTransfer(
     AccountingMovement movement,
     Map<WalletAssetKey, _PerformanceState> states,
     CustodyProjection custody,
     TransferCostAllocationPolicy policy,
   ) {
     final sourceWalletId = movement.sourceWalletId;
-    if (sourceWalletId == null) return;
+    if (sourceWalletId == null) return null;
     final sourceKey = WalletAssetKey(sourceWalletId, movement.asset);
     final sourceEffect = custody
         .effectsFor(movement.id)
@@ -191,7 +191,7 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
               effect.requested.compareTo(AccountingAmount.zero) < 0,
         )
         .firstOrNull;
-    if (sourceEffect == null) return;
+    if (sourceEffect == null) return null;
 
     final sourceState = states.putIfAbsent(sourceKey, _PerformanceState.new);
     final removal = _removeProportionally(
@@ -254,25 +254,13 @@ final class DefaultPerformanceProjector implements PerformanceProjector {
         policy: policy,
       );
     }
+
+    return removal;
   }
 }
 
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
-}
-
-final class TransferAllocation {
-  const TransferAllocation({
-    required this.totalDebited,
-    required this.knownQuantity,
-    required this.unknownQuantity,
-    required this.transferredCostBasis,
-  });
-
-  final AccountingAmount totalDebited;
-  final AccountingAmount knownQuantity;
-  final AccountingAmount unknownQuantity;
-  final AccountingAmount transferredCostBasis;
 }
 
 TransferAllocation allocateTransferProportionally({
@@ -335,7 +323,7 @@ _TransferRemoval _removeProportionally({
   final knownAvailable = state.knownQuantity.min(custodyBefore);
   final knownCostBasis = state.knownQuantity == AccountingAmount.zero
       ? AccountingAmount.zero
-      : state.knownCostBasis * knownAvailable.divide(state.knownQuantity);
+      : (state.knownCostBasis * knownAvailable).divide(state.knownQuantity);
   final allocation = switch (policy) {
     TransferCostAllocationPolicy.proportional => allocateTransferProportionally(
       custodyBefore: custodyBefore,

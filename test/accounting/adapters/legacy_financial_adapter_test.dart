@@ -14,6 +14,31 @@ import 'package:cripto_control_mx/cripto_control_app.dart' as legacy;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('H1-08 malformed legacy input stays raw without semantic movement', () {
+    final raw = <String, Object?>{
+      'id': 'broken-legacy',
+      'type': 'mystery-operation',
+      'coin': '   ',
+      'date': 'not-a-date',
+      'quantity': 2,
+      'futureField': <String, Object?>{'keep': true},
+    };
+
+    final conversion = const LegacyMovementAdapter().fromLegacyJson(raw);
+
+    expect(conversion.movementOrNull, isNull);
+    expect(
+      conversion.issues.map((issue) => issue.code),
+      containsAll(<LegacyConversionIssueCode>[
+        LegacyConversionIssueCode.unknownMovementType,
+        LegacyConversionIssueCode.missingAsset,
+        LegacyConversionIssueCode.invalidOccurredAt,
+      ]),
+    );
+    expect(conversion.toLegacyJson(), raw);
+    expect(() => conversion.movement, throwsStateError);
+  });
+
   test('round trips every current Movement JSON field and unknown data', () {
     final historical = legacy.Movement(
       id: 'legacy-transfer',
@@ -501,6 +526,127 @@ void main() {
     expect(bridgedMovement.coin, 'UNI');
   });
 
+  test('H1-01 legacy transferIn keeps documented cost compatibility', () {
+    final adapter = const LegacyMovementAdapter();
+    final documented = adapter.fromLegacyJson(<String, Object?>{
+      'id': 'legacy-in-known',
+      'type': 'transfer_in',
+      'coin': 'UNI',
+      'date': '2026-07-30T20:54:00Z',
+      'quantity': 2,
+      'unitPrice': 100,
+      'fee': 5,
+    }).movement;
+    final unknown = adapter.fromLegacyJson(<String, Object?>{
+      'id': 'legacy-in-unknown',
+      'type': 'transfer_in',
+      'coin': 'UNI',
+      'date': '2026-07-30T20:54:00Z',
+      'quantity': 2,
+      'fee': 0,
+    }).movement;
+    final financial = const LegacyFinancialAdapter();
+    final knownProjection = project(<AccountingMovement>[documented], const {});
+    final unknownProjection = project(<AccountingMovement>[unknown], const {});
+    final knownData = financial.coinStats(knownProjection, const {})['UNI']!;
+    final unknownData = financial.coinStats(
+      unknownProjection,
+      const {},
+    )['UNI']!;
+
+    expect(knownData.quantity, 2);
+    expect(knownData.custodyQuantity, 2);
+    expect(knownData.costBase, 205);
+    expect(knownData.completeness, AccountingCompleteness.unassignedLegacy);
+    expect(unknownData.quantity, 0);
+    expect(unknownData.custodyQuantity, 2);
+    expect(unknownData.costBase, 0);
+    expect(unknownData.hasDefinitivePerformance, isFalse);
+  });
+
+  test('H1-06 legacy DTO separates known performance from partial custody', () {
+    final projection = project(
+      <AccountingMovement>[
+        canonical(
+          id: '01-partial-buy',
+          type: MovementType.buy,
+          quantity: '10',
+          price: '10',
+          destinationWalletId: walletA,
+        ),
+        canonicalAdjustment(
+          id: '02-partial-adjustment',
+          quantity: '2',
+          observed: '12',
+        ),
+      ],
+      <String, AccountingAmount>{'UNI': AccountingAmount.fromInt(50)},
+    );
+    final adapter = const LegacyFinancialAdapter();
+    final data = adapter.coinStats(projection, const {'UNI': 50})['UNI']!;
+    final totals = adapter.totals(projection, const {'UNI': 50});
+
+    expect(data.quantity, 10);
+    expect(data.custodyQuantity, 12);
+    expect(data.unknownQuantity, 2);
+    expect(data.costBase, 100);
+    expect(data.completeness, AccountingCompleteness.partiallyKnown);
+    expect(data.hasDefinitivePerformance, isFalse);
+    expect(totals.currentValue, 500);
+  });
+
+  test('H1-06 legacy DTO exposes deficit without zero-cost inference', () {
+    final projection = project(
+      <AccountingMovement>[
+        canonical(
+          id: '01-deficit-buy',
+          type: MovementType.buy,
+          quantity: '10',
+          price: '10',
+          destinationWalletId: walletA,
+        ),
+        canonicalAdjustment(
+          id: '02-deficit-adjustment',
+          quantity: '-2',
+          observed: '8',
+        ),
+      ],
+      <String, AccountingAmount>{'UNI': AccountingAmount.fromInt(50)},
+    );
+    final data = const LegacyFinancialAdapter().coinStats(projection, const {
+      'UNI': 50,
+    })['UNI']!;
+
+    expect(data.quantity, 10);
+    expect(data.custodyQuantity, 8);
+    expect(data.unknownQuantity, 0);
+    expect(data.costBase, 100);
+    expect(data.completeness, AccountingCompleteness.partiallyKnown);
+    expect(data.hasDefinitivePerformance, isFalse);
+  });
+
+  test('H1-06 fully unknown custody never creates performance value', () {
+    final projection = project(
+      <AccountingMovement>[
+        canonicalAdjustment(
+          id: '01-unknown-adjustment',
+          quantity: '2',
+          observed: '2',
+        ),
+      ],
+      <String, AccountingAmount>{'UNI': AccountingAmount.fromInt(50)},
+    );
+    final adapter = const LegacyFinancialAdapter();
+    final data = adapter.coinStats(projection, const {'UNI': 50})['UNI']!;
+
+    expect(data.quantity, 0);
+    expect(data.custodyQuantity, 2);
+    expect(data.unknownQuantity, 2);
+    expect(data.costBase, 0);
+    expect(data.hasDefinitivePerformance, isFalse);
+    expect(adapter.totals(projection, const {'UNI': 50}).currentValue, 0);
+  });
+
   test('normalizes price lookup and treats a missing price as zero', () {
     final projection = project(
       <AccountingMovement>[
@@ -690,5 +836,30 @@ AccountingMovement canonical({
     reconciliationLinks: const <ReconciliationLink>[],
     createdAt: occurredAt,
     updatedAt: occurredAt,
+  );
+}
+
+AccountingMovement canonicalAdjustment({
+  required String id,
+  required String quantity,
+  required String observed,
+}) {
+  final occurredAt = at.add(Duration(minutes: int.parse(id.substring(0, 2))));
+  return AccountingMovement(
+    id: id,
+    type: MovementType.balanceAdjustment,
+    asset: 'UNI',
+    occurredAt: occurredAt,
+    fiatFeeAmount: AccountingAmount.zero,
+    walletAssignmentStatus: WalletAssignmentStatus.assigned,
+    cryptoFeeAmount: AccountingAmount.zero,
+    fiatFeeTreatment: FiatFeeTreatment.none,
+    reconciliationLinks: const <ReconciliationLink>[],
+    createdAt: occurredAt,
+    updatedAt: occurredAt,
+    adjustmentWalletId: walletA,
+    adjustmentQuantity: AccountingAmount.parse(quantity),
+    observedBalance: AccountingAmount.parse(observed),
+    adjustmentReason: 'Corte',
   );
 }

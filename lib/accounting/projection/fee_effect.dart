@@ -12,6 +12,12 @@ final class FeeEffect {
   final AccountingAmount assetCustodyDebit;
   final Map<String, AccountingAmount> otherAssetCustodyDebit;
   final AccountingAmount fiatCostEffect;
+
+  static final FeeEffect zero = FeeEffect(
+    assetCustodyDebit: AccountingAmount.zero,
+    otherAssetCustodyDebit: <String, AccountingAmount>{},
+    fiatCostEffect: AccountingAmount.zero,
+  );
 }
 
 FeeEffect resolveFeeEffect(AccountingMovement movement) {
@@ -28,7 +34,9 @@ FeeEffect resolveFeeEffect(AccountingMovement movement) {
     otherAssetCustodyDebit:
         cryptoFee == AccountingAmount.zero || feeAsset == null || isSameAsset
         ? const <String, AccountingAmount>{}
-        : <String, AccountingAmount>{feeAsset: cryptoFee},
+        : Map<String, AccountingAmount>.unmodifiable(<String, AccountingAmount>{
+            feeAsset: cryptoFee,
+          }),
     fiatCostEffect: isPaidSeparately
         ? movement.fiatFeeAmount
         : AccountingAmount.zero,

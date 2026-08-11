@@ -54,9 +54,28 @@ final class PerformancePosition {
   final List<ProjectionIssue> issues;
 }
 
+base class TransferAllocation {
+  const TransferAllocation({
+    required this.totalDebited,
+    required this.knownQuantity,
+    required this.unknownQuantity,
+    required this.transferredCostBasis,
+  });
+
+  final AccountingAmount totalDebited;
+  final AccountingAmount knownQuantity;
+  final AccountingAmount unknownQuantity;
+  final AccountingAmount transferredCostBasis;
+}
+
 final class PerformanceProjection {
-  const PerformanceProjection(this.positions, this.sales);
+  const PerformanceProjection(
+    this.positions,
+    this.sales, {
+    this.transferAllocations = const <String, TransferAllocation>{},
+  });
 
   final Map<WalletAssetKey, PerformancePosition> positions;
   final List<SaleResult> sales;
+  final Map<String, TransferAllocation> transferAllocations;
 }

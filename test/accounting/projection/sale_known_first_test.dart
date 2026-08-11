@@ -12,6 +12,73 @@ import 'package:cripto_control_mx/cripto_control_app.dart' as legacy;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('H1-01 external transferIn documents known cost and fee once', () {
+    final projection = project(<AccountingMovement>[
+      transferIn(id: 'documented-in', quantity: '2', price: '100', fee: '5'),
+    ]);
+    final position = projection.positions[key];
+
+    expect(position?.knownQuantity.toJson(), '2');
+    expect(position?.knownCostBasis.toJson(), '205');
+    expect(position?.investedCapital.toJson(), '205');
+    expect(position?.pendingPnlQuantity, AccountingAmount.zero);
+  });
+
+  test('H1-01 external transferIn without price remains unknown', () {
+    final movements = <AccountingMovement>[
+      transferIn(id: 'undocumented-in', quantity: '2'),
+    ];
+    final ledger = const DefaultMovementNormalizer().normalize(movements);
+    final custody = const DefaultCustodyProjector().project(ledger);
+    final projection = const DefaultPerformanceProjector().project(
+      ledger,
+      custody,
+      const <String, AccountingAmount>{},
+      salePolicy: SaleCostConsumptionPolicy.knownFirst,
+      transferPolicy: TransferCostAllocationPolicy.proportional,
+    );
+
+    expect(custody.positions[key]!.reconciledQuantity.toJson(), '2');
+    expect(projection.positions[key]?.knownQuantity, AccountingAmount.zero);
+    expect(projection.positions[key]?.knownCostBasis, AccountingAmount.zero);
+    expect(projection.positions[key]?.blockingMovementIds, <String>[
+      'undocumented-in',
+    ]);
+  });
+
+  test('H1-02 rejected buys retain issues without performance effects', () {
+    final movements = <AccountingMovement>[
+      buy(id: 'buy-1', quantity: '10', price: '20'),
+      buy(id: 'negative-buy', quantity: '-2', price: '20'),
+      buy(
+        id: 'malformed-buy',
+        quantity: '3',
+        price: '20',
+      ).copyWith(sourceWalletId: walletId),
+    ];
+    final ledger = const DefaultMovementNormalizer().normalize(movements);
+    final custody = const DefaultCustodyProjector().project(ledger);
+    final projection = const DefaultPerformanceProjector().project(
+      ledger,
+      custody,
+      const <String, AccountingAmount>{},
+      salePolicy: SaleCostConsumptionPolicy.knownFirst,
+      transferPolicy: TransferCostAllocationPolicy.proportional,
+    );
+    final position = projection.positions[key]!;
+
+    expect(
+      ledger.issues.map((issue) => issue.code),
+      containsAll(<Object?>[
+        ProjectionIssueCode.invalidAmount,
+        ProjectionIssueCode.malformedHistoricalMovement,
+      ]),
+    );
+    expect(position.knownQuantity.toJson(), '10');
+    expect(position.knownCostBasis.toJson(), '200');
+    expect(custody.positions[key]!.reconciledQuantity.toJson(), '10');
+  });
+
   test('sale below known quantity keeps weighted cost and legacy fiat fee', () {
     final projection = project(<AccountingMovement>[
       buy(id: 'buy-1', quantity: '10', price: '20', fee: '10'),
@@ -122,38 +189,60 @@ void main() {
   );
 
   test(
-    'insufficient custody preserves the sale and never projects negative',
+    'H1-03 insufficient custody consumes the applied known sale portion',
     () {
       final projection = project(<AccountingMovement>[
         buy(id: 'buy-1', quantity: '8', price: '20'),
-        sell(id: 'sell-1', quantity: '9', price: '30'),
+        sell(id: 'sell-1', quantity: '10', price: '30', fee: '10'),
       ]);
       final sale = projection.sales.single;
       final custody = custodyFor(<AccountingMovement>[
         buy(id: 'buy-1', quantity: '8', price: '20'),
-        sell(id: 'sell-1', quantity: '9', price: '30'),
+        sell(id: 'sell-1', quantity: '10', price: '30', fee: '10'),
       ]);
+      final effect = custody.effectsFor('sell-1').single;
 
       expect(sale.status, SaleAccountingStatus.insufficientCustody);
       expect(sale.hasDefinitiveTotal, isFalse);
-      expect(sale.totalQuantity.toJson(), '9');
-      expect(sale.knownQuantity, AccountingAmount.zero);
-      expect(sale.demonstratedCostBasis, AccountingAmount.zero);
-      expect(sale.knownProceeds, AccountingAmount.zero);
+      expect(sale.totalQuantity.toJson(), '10');
+      expect(sale.knownQuantity.toJson(), '8');
+      expect(sale.demonstratedCostBasis.toJson(), '160');
+      expect(sale.knownProceeds.toJson(), '240');
+      expect(sale.allocatedKnownFiatFee.toJson(), '8');
+      expect(sale.realizedPnlKnown.toJson(), '72');
       expect(sale.pendingCostQuantity, AccountingAmount.zero);
+      expect(effect.requested.toJson(), '-10');
+      expect(effect.applied.toJson(), '-8');
+      expect(effect.unapplied.toJson(), '-2');
       expect(custody.positions[key]!.reconciledQuantity, AccountingAmount.zero);
-      expect(projection.positions[key]!.knownQuantity.toJson(), '8');
-      expect(projection.positions[key]!.knownCostBasis.toJson(), '160');
-      expect(
-        projection.positions[key]!.realizedPnlKnown,
-        AccountingAmount.zero,
-      );
+      expect(projection.positions[key]!.knownQuantity, AccountingAmount.zero);
+      expect(projection.positions[key]!.knownCostBasis, AccountingAmount.zero);
+      expect(projection.positions[key]!.realizedPnlKnown.toJson(), '72');
       expect(
         projection.positions[key]!.issues.map((issue) => issue.code),
         contains(ProjectionIssueCode.insufficientCustody),
       );
     },
   );
+
+  test('H1-03 insufficient sale keeps applied unknown cost pending', () {
+    final projection = project(<AccountingMovement>[
+      buy(id: 'buy-1', quantity: '5', price: '20'),
+      adjustment(id: 'adjustment-1', quantity: '3', observed: '8'),
+      sell(id: 'sell-1', quantity: '10', price: '30'),
+    ]);
+    final sale = projection.sales.single;
+
+    expect(sale.status, SaleAccountingStatus.insufficientCustody);
+    expect(sale.knownQuantity.toJson(), '5');
+    expect(sale.demonstratedCostBasis.toJson(), '100');
+    expect(sale.knownProceeds.toJson(), '150');
+    expect(sale.realizedPnlKnown.toJson(), '50');
+    expect(sale.pendingCostQuantity.toJson(), '3');
+    expect(projection.positions[key]!.knownQuantity, AccountingAmount.zero);
+    expect(projection.positions[key]!.knownCostBasis, AccountingAmount.zero);
+    expect(projection.positions[key]!.pendingPnlQuantity.toJson(), '3');
+  });
 
   test('adjustments never alter known quantity cost or realized pnl', () {
     final withoutAdjustment = project(<AccountingMovement>[
@@ -216,6 +305,20 @@ AccountingMovement sell({
   price: price,
   fee: fee,
   sourceWalletId: walletId,
+);
+
+AccountingMovement transferIn({
+  required String id,
+  required String quantity,
+  String? price,
+  String fee = '0',
+}) => movement(
+  id: id,
+  type: MovementType.transferIn,
+  quantity: quantity,
+  price: price,
+  fee: fee,
+  destinationWalletId: walletId,
 );
 
 AccountingMovement adjustment({

@@ -20,6 +20,7 @@ enum ProjectionIssueCode {
   legacyAccountingSemantics,
   missingDestinationClassification,
   unknownWallet,
+  inactiveWallet,
 }
 
 enum LedgerLegKind { custodyDebit, custodyCredit, performanceEvent, adjustment }
@@ -55,11 +56,13 @@ final class NormalizedLedger {
     required this.movements,
     required this.legs,
     required this.issues,
+    required this.acceptedMovementIds,
   });
 
   final List<AccountingMovement> movements;
   final List<LedgerLeg> legs;
   final List<ProjectionIssue> issues;
+  final Set<String> acceptedMovementIds;
 
   bool get isValid => issues.isEmpty;
 }

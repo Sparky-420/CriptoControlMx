@@ -5,26 +5,123 @@ import '../domain/accounting_movement.dart';
 import '../domain/movement_type.dart';
 import '../domain/wallet.dart';
 
-final class LegacyMovementConversion {
-  const LegacyMovementConversion(this.movement, this.preservedFields);
+enum LegacyConversionIssueCode {
+  missingMovementType,
+  unknownMovementType,
+  missingAsset,
+  missingOccurredAt,
+  invalidOccurredAt,
+}
 
-  final AccountingMovement movement;
+final class LegacyConversionIssue {
+  const LegacyConversionIssue({
+    required this.code,
+    required this.message,
+    this.rawValue,
+  });
+
+  final LegacyConversionIssueCode code;
+  final String message;
+  final Object? rawValue;
+}
+
+final class LegacyMovementConversion {
+  const LegacyMovementConversion({
+    required this.movementOrNull,
+    required this.preservedFields,
+    required this.issues,
+  });
+
+  final AccountingMovement? movementOrNull;
   final Map<String, Object?> preservedFields;
+  final List<LegacyConversionIssue> issues;
+
+  AccountingMovement get movement =>
+      movementOrNull ??
+      (throw StateError(
+        'La conversión legada contiene incidencias y no produjo movimiento.',
+      ));
+
+  Map<String, Object?> toLegacyJson() =>
+      Map<String, Object?>.from(preservedFields);
 }
 
 final class LegacyMovementAdapter {
   const LegacyMovementAdapter();
 
   LegacyMovementConversion fromLegacyJson(Map<String, Object?> value) {
-    final type = _movementType(_read(value, const <String>['type', 'tipo']));
-    final asset = _text(
-      _read(value, const <String>['asset', 'coin', 'crypto']),
-      fallback: 'BTC',
-    ).toUpperCase();
-    final occurredAt = _date(
-      _read(value, const <String>['occurredAt', 'occurred_at', 'date']),
-      fallback: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    final preservedFields = Map<String, Object?>.unmodifiable(
+      Map<String, Object?>.from(value),
     );
+    final issues = <LegacyConversionIssue>[];
+    final rawType = _read(value, const <String>['type', 'tipo']);
+    final typeText = _nullableText(rawType);
+    final parsedType = _movementType(rawType);
+    if (typeText == null) {
+      issues.add(
+        LegacyConversionIssue(
+          code: LegacyConversionIssueCode.missingMovementType,
+          message: 'El tipo del movimiento legado es obligatorio.',
+          rawValue: rawType,
+        ),
+      );
+    } else if (parsedType == null) {
+      issues.add(
+        LegacyConversionIssue(
+          code: LegacyConversionIssueCode.unknownMovementType,
+          message: 'El tipo del movimiento legado no es reconocido.',
+          rawValue: rawType,
+        ),
+      );
+    }
+    final rawAsset = _read(value, const <String>['asset', 'coin', 'crypto']);
+    final parsedAsset = _nullableText(rawAsset)?.toUpperCase();
+    if (parsedAsset == null) {
+      issues.add(
+        LegacyConversionIssue(
+          code: LegacyConversionIssueCode.missingAsset,
+          message: 'El activo del movimiento legado es obligatorio.',
+          rawValue: rawAsset,
+        ),
+      );
+    }
+    final rawOccurredAt = _read(value, const <String>[
+      'occurredAt',
+      'occurred_at',
+      'date',
+    ]);
+    final occurredAtText = _nullableText(rawOccurredAt);
+    final parsedOccurredAt = occurredAtText == null
+        ? null
+        : DateTime.tryParse(occurredAtText);
+    if (occurredAtText == null) {
+      issues.add(
+        LegacyConversionIssue(
+          code: LegacyConversionIssueCode.missingOccurredAt,
+          message: 'La fecha del movimiento legado es obligatoria.',
+          rawValue: rawOccurredAt,
+        ),
+      );
+    } else if (parsedOccurredAt == null) {
+      issues.add(
+        LegacyConversionIssue(
+          code: LegacyConversionIssueCode.invalidOccurredAt,
+          message: 'La fecha del movimiento legado no es válida.',
+          rawValue: rawOccurredAt,
+        ),
+      );
+    }
+    if (issues.isNotEmpty) {
+      return LegacyMovementConversion(
+        movementOrNull: null,
+        preservedFields: preservedFields,
+        issues: List<LegacyConversionIssue>.unmodifiable(issues),
+      );
+    }
+
+    final type = parsedType!;
+    final asset = parsedAsset!;
+    final occurredAt = parsedOccurredAt!;
     final createdAt = _date(
       _read(value, const <String>['createdAt', 'created_at']),
       fallback: occurredAt,
@@ -183,8 +280,9 @@ final class LegacyMovementAdapter {
       schemaVersion: _integer(value['schemaVersion']) ?? 1,
     );
     return LegacyMovementConversion(
-      movement,
-      Map<String, Object?>.unmodifiable(Map<String, Object?>.from(value)),
+      movementOrNull: movement,
+      preservedFields: preservedFields,
+      issues: const <LegacyConversionIssue>[],
     );
   }
 
@@ -387,11 +485,6 @@ Object? _read(Map<String, Object?> value, List<String> keys) {
   return null;
 }
 
-String _text(Object? value, {required String fallback}) {
-  final result = value?.toString().trim() ?? '';
-  return result.isEmpty ? fallback : result;
-}
-
 String? _nullableText(Object? value) {
   final result = value?.toString().trim() ?? '';
   return result.isEmpty ? null : result;
@@ -432,7 +525,7 @@ T? _enumByName<T extends Enum>(Object? value, List<T> values) {
   return null;
 }
 
-MovementType _movementType(Object? value) {
+MovementType? _movementType(Object? value) {
   final raw = value?.toString().trim().toLowerCase() ?? '';
   if (const <String>{'buy', 'compra', 'comprar'}.contains(raw)) {
     return MovementType.buy;
@@ -470,7 +563,7 @@ MovementType _movementType(Object? value) {
   }.contains(raw)) {
     return MovementType.balanceAdjustment;
   }
-  return MovementType.buy;
+  return null;
 }
 
 bool _hasConfirmedRoles(
@@ -656,7 +749,7 @@ void _syncEnum<T extends Enum>(
   Map<String, Object?> target,
   List<String> keys,
   T value,
-  T Function(Object?) parser, {
+  T? Function(Object?) parser, {
   required bool writeWhenAbsent,
 }) {
   final present = keys.where(target.containsKey).toList();

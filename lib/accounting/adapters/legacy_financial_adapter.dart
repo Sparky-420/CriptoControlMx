@@ -1,17 +1,29 @@
+import '../domain/wallet.dart';
 import '../projection/ledger_projection.dart';
 
 final class LegacyCoinStatsData {
   const LegacyCoinStatsData({
     required this.coin,
     required this.quantity,
+    required this.custodyQuantity,
+    required this.unknownQuantity,
+    required this.completeness,
     required this.costBase,
     required this.realizedProfit,
   });
 
   final String coin;
+
+  /// Quantity whose cost basis is known and can support performance metrics.
   final double quantity;
+  final double custodyQuantity;
+  final double unknownQuantity;
+  final AccountingCompleteness completeness;
   final double costBase;
   final double realizedProfit;
+
+  bool get hasDefinitivePerformance =>
+      completeness == AccountingCompleteness.complete;
 }
 
 final class LegacyPortfolioTotalsData {
@@ -49,28 +61,10 @@ final class LegacyFinancialAdapter {
     };
     return <String, LegacyCoinStatsData>{
       for (final asset in assets)
-        asset: LegacyCoinStatsData(
-          coin: asset,
-          quantity: _sum(
-            projection.positions.values
-                .where((position) => position.key.asset == asset)
-                .map(
-                  (position) => position.custody.reconciledQuantity.toJson(),
-                ),
-          ),
-          costBase: _sum(
-            projection.positions.values
-                .where((position) => position.key.asset == asset)
-                .map(
-                  (position) => position.performance.knownCostBasis.toJson(),
-                ),
-          ),
-          realizedProfit: _sum(
-            projection.positions.values
-                .where((position) => position.key.asset == asset)
-                .map(
-                  (position) => position.performance.realizedPnlKnown.toJson(),
-                ),
+        asset: _coinStats(
+          asset,
+          projection.positions.values.where(
+            (position) => position.key.asset == asset,
           ),
         ),
     };
@@ -112,6 +106,60 @@ final class LegacyFinancialAdapter {
       ),
     );
   }
+}
+
+LegacyCoinStatsData _coinStats(
+  String asset,
+  Iterable<WalletAssetProjection> positions,
+) {
+  final materialized = positions.toList(growable: false);
+  return LegacyCoinStatsData(
+    coin: asset,
+    quantity: _sum(
+      materialized.map(
+        (position) => position.performance.knownQuantity.toJson(),
+      ),
+    ),
+    custodyQuantity: _sum(
+      materialized.map(
+        (position) => position.custody.reconciledQuantity.toJson(),
+      ),
+    ),
+    unknownQuantity: _sum(
+      materialized.map(
+        (position) => position.completeness.unknownQuantity.toJson(),
+      ),
+    ),
+    completeness: _aggregateCompleteness(
+      materialized.map((position) => position.completeness.state),
+    ),
+    costBase: _sum(
+      materialized.map(
+        (position) => position.performance.knownCostBasis.toJson(),
+      ),
+    ),
+    realizedProfit: _sum(
+      materialized.map(
+        (position) => position.performance.realizedPnlKnown.toJson(),
+      ),
+    ),
+  );
+}
+
+AccountingCompleteness _aggregateCompleteness(
+  Iterable<AccountingCompleteness> states,
+) {
+  final values = states.toSet();
+  if (values.contains(AccountingCompleteness.unassignedLegacy)) {
+    return AccountingCompleteness.unassignedLegacy;
+  }
+  if (values.contains(AccountingCompleteness.pendingAssignment)) {
+    return AccountingCompleteness.pendingAssignment;
+  }
+  if (values.contains(AccountingCompleteness.partiallyKnown)) {
+    return AccountingCompleteness.partiallyKnown;
+  }
+  return AccountingCompleteness.complete;
 }
 
 double _sum(Iterable<String> values) =>

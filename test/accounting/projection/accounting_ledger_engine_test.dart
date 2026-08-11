@@ -71,6 +71,9 @@ void main() {
     final complete =
         projection.positions[const WalletAssetKey(completeWalletId, 'UNI')]!;
     expect(complete.reconciliationDifference, AccountingAmount.zero);
+    expect(complete.availability.knownAvailable.toJson(), '2');
+    expect(complete.availability.unknownAvailable, AccountingAmount.zero);
+    expect(complete.availability.custodyDeficit, AccountingAmount.zero);
     expect(complete.knownAvailable.toJson(), '2');
     expect(complete.unknownAvailable, AccountingAmount.zero);
     expect(complete.custodyDeficit, AccountingAmount.zero);
@@ -206,10 +209,170 @@ void main() {
     expect(effect.unappliedQuantity, AccountingAmount.zero);
     expect(effect.issues, isEmpty);
     expect(effect.sale, isNull);
+    expect(effect.custodyLegs, hasLength(2));
+    expect(effect.custodyLegs.map((leg) => leg.kind), <LedgerLegKind>[
+      LedgerLegKind.custodyDebit,
+      LedgerLegKind.custodyCredit,
+    ]);
+    expect(effect.custodyLegs.map((leg) => leg.applied.toJson()), <String>[
+      '-5',
+      '4',
+    ]);
+    expect(effect.globalDeltasByAsset['UNI']!.toJson(), '-1');
+    expect(effect.feeEffect.assetCustodyDebit.toJson(), '1');
+    expect(effect.feeEffect.otherAssetCustodyDebit, isEmpty);
+    expect(effect.feeEffect.fiatCostEffect, AccountingAmount.zero);
+    expect(effect.transferAllocation!.totalDebited.toJson(), '5');
+    expect(effect.transferAllocation!.knownQuantity.toJson(), '5');
+    expect(effect.transferAllocation!.unknownQuantity, AccountingAmount.zero);
+    expect(effect.transferAllocation!.transferredCostBasis.toJson(), '50');
     expect(projection.totals.custodyMarketValue.toJson(), '45');
     expect(projection.totals.knownPositionMarketValue.toJson(), '45');
     expect(projection.totals.knownCostBasis.toJson(), '90');
     expect(projection.totals.realizedPnlKnown, AccountingAmount.zero);
+  });
+
+  test('H1-04 final ledger records paidSeparately fiat cost once', () {
+    final projection = project(<AccountingMovement>[
+      buy(
+        id: 'a-fiat-seed',
+        asset: 'UNI',
+        quantity: '10',
+        price: '10',
+        destinationWalletId: completeWalletId,
+      ),
+      transferOut(
+        id: 'b-fiat-paid-separately',
+        asset: 'UNI',
+        received: '2',
+        fee: '0',
+        sourceWalletId: completeWalletId,
+        destinationType: DestinationType.external,
+        fiatFeeAmount: '7',
+        fiatFeeTreatment: FiatFeeTreatment.paidSeparately,
+      ),
+    ]);
+    final effect = projection.effects['b-fiat-paid-separately']!;
+
+    expect(effect.feeEffect.fiatCostEffect.toJson(), '7');
+    expect(projection.totals.fiatCostEffect.toJson(), '7');
+    expect(projection.totals.realizedPnlKnown, AccountingAmount.zero);
+  });
+
+  test('H1-04 final ledger records combined fiat and crypto fees once', () {
+    final projection = project(<AccountingMovement>[
+      buy(
+        id: 'a-combined-seed',
+        asset: 'UNI',
+        quantity: '10',
+        price: '10',
+        destinationWalletId: completeWalletId,
+      ),
+      transferOut(
+        id: 'b-combined-transfer',
+        asset: 'UNI',
+        received: '2',
+        fee: '1',
+        sourceWalletId: completeWalletId,
+        destinationType: DestinationType.external,
+        fiatFeeAmount: '5',
+        fiatFeeTreatment: FiatFeeTreatment.combined,
+      ),
+    ]);
+    final effect = projection.effects['b-combined-transfer']!;
+
+    expect(effect.feeEffect.assetCustodyDebit.toJson(), '1');
+    expect(effect.feeEffect.fiatCostEffect.toJson(), '5');
+    expect(effect.custodyLegs.single.applied.toJson(), '-3');
+    expect(effect.globalDeltasByAsset['UNI']!.toJson(), '-3');
+    expect(projection.totals.fiatCostEffect.toJson(), '5');
+    expect(projection.totals.realizedPnlKnown, AccountingAmount.zero);
+  });
+
+  test('H1-07 cross-asset fee publishes every leg and global delta', () {
+    final projection = project(<AccountingMovement>[
+      buy(
+        id: 'a-cross-uni-seed',
+        asset: 'UNI',
+        quantity: '10',
+        price: '10',
+        destinationWalletId: completeWalletId,
+      ),
+      buy(
+        id: 'b-cross-eth-seed',
+        asset: 'ETH',
+        quantity: '2',
+        price: '20',
+        destinationWalletId: completeWalletId,
+      ),
+      transferOut(
+        id: 'c-cross-asset-transfer',
+        asset: 'UNI',
+        received: '4',
+        fee: '0.5',
+        feeAsset: 'ETH',
+        sourceWalletId: completeWalletId,
+        destinationWalletId: partialWalletId,
+        destinationType: DestinationType.ownWallet,
+      ),
+    ]);
+    final effect = projection.effects['c-cross-asset-transfer']!;
+
+    expect(effect.custodyLegs, hasLength(3));
+    expect(
+      effect.custodyLegs.map(
+        (leg) =>
+            '${leg.kind.name}:${leg.key.walletId}:${leg.key.asset}:${leg.applied.toJson()}',
+      ),
+      <String>[
+        'custodyDebit:$completeWalletId:UNI:-4',
+        'custodyCredit:$partialWalletId:UNI:4',
+        'custodyDebit:$completeWalletId:ETH:-0.5',
+      ],
+    );
+    expect(effect.globalDeltasByAsset['UNI'], AccountingAmount.zero);
+    expect(effect.globalDeltasByAsset['ETH']!.toJson(), '-0.5');
+    expect(effect.feeEffect.assetCustodyDebit, AccountingAmount.zero);
+    expect(effect.feeEffect.otherAssetCustodyDebit['ETH']!.toJson(), '0.5');
+    expect(effect.transferAllocation!.knownQuantity.toJson(), '4');
+    expect(effect.transferAllocation!.transferredCostBasis.toJson(), '40');
+  });
+
+  test('H1-07 partial transfer effect retains every requested remainder', () {
+    final projection = project(<AccountingMovement>[
+      buy(
+        id: 'a-partial-effect-seed',
+        asset: 'UNI',
+        quantity: '1',
+        price: '10',
+        destinationWalletId: completeWalletId,
+      ),
+      transferOut(
+        id: 'b-partial-effect-transfer',
+        asset: 'UNI',
+        received: '3',
+        fee: '0',
+        sourceWalletId: completeWalletId,
+        destinationWalletId: partialWalletId,
+        destinationType: DestinationType.ownWallet,
+      ),
+    ]);
+    final effect = projection.effects['b-partial-effect-transfer']!;
+
+    expect(effect.requestedQuantity.toJson(), '3');
+    expect(effect.appliedQuantity.toJson(), '1');
+    expect(effect.unappliedQuantity.toJson(), '2');
+    expect(effect.custodyLegs, hasLength(2));
+    expect(effect.custodyLegs[0].requested.toJson(), '-3');
+    expect(effect.custodyLegs[0].applied.toJson(), '-1');
+    expect(effect.custodyLegs[0].unapplied.toJson(), '-2');
+    expect(effect.custodyLegs[1].requested.toJson(), '3');
+    expect(effect.custodyLegs[1].applied.toJson(), '1');
+    expect(effect.custodyLegs[1].unapplied.toJson(), '2');
+    expect(effect.globalDeltasByAsset['UNI'], AccountingAmount.zero);
+    expect(effect.transferAllocation!.totalDebited.toJson(), '1');
+    expect(effect.transferAllocation!.knownQuantity.toJson(), '1');
+    expect(effect.transferAllocation!.transferredCostBasis.toJson(), '10');
   });
 
   test(
@@ -591,10 +754,13 @@ AccountingMovement transferOut({
   required String asset,
   required String received,
   required String fee,
+  String? feeAsset,
   String? sourceWalletId,
   String? destinationWalletId,
   required DestinationType destinationType,
   WalletAssignmentStatus assignment = WalletAssignmentStatus.assigned,
+  String fiatFeeAmount = '0',
+  FiatFeeTreatment fiatFeeTreatment = FiatFeeTreatment.none,
 }) => movement(
   id: id,
   type: MovementType.transferOut,
@@ -603,10 +769,22 @@ AccountingMovement transferOut({
   sourceWalletId: sourceWalletId,
   destinationWalletId: destinationWalletId,
   destinationType: destinationType,
+  externalRecipientName: destinationType == DestinationType.external
+      ? 'Tercero'
+      : null,
+  externalDestinationPlatform: destinationType == DestinationType.external
+      ? 'Bitso'
+      : null,
   receivedAmount: received,
   cryptoFeeAmount: fee,
-  cryptoFeeAsset: asset,
-  totalDebitedAmount: (amount(received) + amount(fee)).toJson(),
+  cryptoFeeAsset: fee == '0' ? null : feeAsset ?? asset,
+  totalDebitedAmount:
+      (fee != '0' && (feeAsset ?? asset) == asset
+              ? amount(received) + amount(fee)
+              : amount(received))
+          .toJson(),
+  fiatFeeAmount: fiatFeeAmount,
+  fiatFeeTreatment: fiatFeeTreatment,
   assignment: assignment,
 );
 
@@ -635,6 +813,8 @@ AccountingMovement movement({
   String? sourceWalletId,
   String? destinationWalletId,
   DestinationType? destinationType,
+  String? externalRecipientName,
+  String? externalDestinationPlatform,
   String? receivedAmount,
   String cryptoFeeAmount = '0',
   String? cryptoFeeAsset,
@@ -643,6 +823,8 @@ AccountingMovement movement({
   String? adjustmentQuantity,
   String? observedBalance,
   required WalletAssignmentStatus assignment,
+  String fiatFeeAmount = '0',
+  FiatFeeTreatment fiatFeeTreatment = FiatFeeTreatment.none,
 }) {
   final occurredAt = baseTime.add(
     Duration(
@@ -670,10 +852,12 @@ AccountingMovement movement({
     occurredAt: occurredAt,
     quantity: quantity == null ? null : amount(quantity),
     unitPriceFiat: price == null ? null : amount(price),
-    fiatFeeAmount: AccountingAmount.zero,
+    fiatFeeAmount: amount(fiatFeeAmount),
     sourceWalletId: sourceWalletId,
     destinationWalletId: destinationWalletId,
     destinationType: destinationType,
+    externalRecipientName: externalRecipientName,
+    externalDestinationPlatform: externalDestinationPlatform,
     walletAssignmentStatus: assignment,
     receivedAmount: receivedAmount == null ? null : amount(receivedAmount),
     cryptoFeeAmount: amount(cryptoFeeAmount),
@@ -681,7 +865,7 @@ AccountingMovement movement({
     totalDebitedAmount: totalDebitedAmount == null
         ? null
         : amount(totalDebitedAmount),
-    fiatFeeTreatment: FiatFeeTreatment.none,
+    fiatFeeTreatment: fiatFeeTreatment,
     reconciliationLinks: const <ReconciliationLink>[],
     createdAt: occurredAt,
     updatedAt: occurredAt,

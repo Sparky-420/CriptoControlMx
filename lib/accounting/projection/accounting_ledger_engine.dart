@@ -6,6 +6,7 @@ import '../domain/movement_type.dart';
 import '../domain/wallet.dart';
 import 'custody_projection.dart';
 import 'custody_projector.dart';
+import 'fee_effect.dart';
 import 'ledger_projection.dart';
 import 'performance_projection.dart';
 import 'performance_projector.dart';
@@ -91,7 +92,7 @@ final class AccountingLedgerEngine {
     );
     _addUniqueIssues(allIssues, _completenessIssues(positions.values));
     final effects = _movementEffects(
-      normalized.movements,
+      normalized,
       custodyProjection,
       performanceProjection,
       allIssues,
@@ -104,7 +105,7 @@ final class AccountingLedgerEngine {
       ),
       sales: performanceProjection.sales,
       effects: Map<String, MovementEffect>.unmodifiable(effects),
-      totals: _totals(positions.values),
+      totals: _totals(positions.values, effects.values),
       issues: List<ProjectionIssue>.unmodifiable(allIssues),
       migrationProgress: MigrationProgress(
         assigned: uniqueMovements
@@ -340,6 +341,10 @@ NormalizedLedger _preserveVirtualGlobalTransfers(
           'La transferencia legacy conserva el efecto global con destino pendiente de clasificar.',
         ),
     ]),
+    acceptedMovementIds: Set<String>.unmodifiable(<String>{
+      ...ledger.acceptedMovementIds,
+      ...specialIds,
+    }),
   );
 }
 
@@ -425,16 +430,10 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
     final custodyPosition = custody.positions[key] ?? _emptyCustodyPosition();
     final performancePosition =
         performance.positions[key] ?? _emptyPerformancePosition();
-    final knownAvailable = performancePosition.knownQuantity
-        .min(custodyPosition.reconciledQuantity)
-        .max(AccountingAmount.zero);
-    final unknownAvailable =
-        (custodyPosition.reconciledQuantity - knownAvailable).max(
-          AccountingAmount.zero,
-        );
-    final custodyDeficit =
-        (performancePosition.knownQuantity - custodyPosition.reconciledQuantity)
-            .max(AccountingAmount.zero);
+    final availability = PositionAvailability.derive(
+      custodyQuantity: custodyPosition.reconciledQuantity,
+      knownQuantity: performancePosition.knownQuantity,
+    );
     final related = <AccountingMovement>[
       for (final entry in keysByMovementId.entries)
         if (entry.value.contains(key) && movementById[entry.key] != null)
@@ -481,8 +480,8 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
       state = AccountingCompleteness.pendingAssignment;
       cause = ProjectionIssueCode.missingWalletAssignment;
       causingIds = pendingIds;
-    } else if (unknownAvailable != AccountingAmount.zero ||
-        custodyDeficit != AccountingAmount.zero ||
+    } else if (availability.unknownAvailable != AccountingAmount.zero ||
+        availability.custodyDeficit != AccountingAmount.zero ||
         performancePosition.pendingPnlQuantity != AccountingAmount.zero) {
       state = AccountingCompleteness.partiallyKnown;
       cause = ProjectionIssueCode.unknownCostBasis;
@@ -496,8 +495,8 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
     final completeness = AccountingCompletenessResult(
       state: state,
       totalQuantity: custodyPosition.reconciledQuantity,
-      knownQuantity: knownAvailable,
-      unknownQuantity: unknownAvailable,
+      knownQuantity: availability.knownAvailable,
+      unknownQuantity: availability.unknownAvailable,
       cause: cause,
       causingMovementIds: List<String>.unmodifiable(causingIds),
     );
@@ -505,6 +504,7 @@ Map<WalletAssetKey, WalletAssetProjection> _combinePositions(
       key: key,
       custody: custodyPosition,
       performance: performancePosition,
+      availability: availability,
       completeness: completeness,
       custodyMarketValue: custodyPosition.reconciledQuantity * price,
       knownPositionMarketValue: performancePosition.knownQuantity * price,
@@ -576,7 +576,7 @@ void _addUniqueIssues(
 }
 
 Map<String, MovementEffect> _movementEffects(
-  List<AccountingMovement> movements,
+  NormalizedLedger ledger,
   CustodyProjection custody,
   PerformanceProjection performance,
   List<ProjectionIssue> issues,
@@ -585,14 +585,41 @@ Map<String, MovementEffect> _movementEffects(
     for (final sale in performance.sales) sale.movementId: sale,
   };
   final result = <String, MovementEffect>{};
-  for (final movement in movements) {
+  for (final movement in ledger.movements) {
     if (result.containsKey(movement.id)) continue;
-    final primary = _primaryEffect(movement, custody.effectsFor(movement.id));
+    final custodyEffects = custody.effectsFor(movement.id);
+    final primary = _primaryEffect(movement, custodyEffects);
+    final custodyLegs = <MovementCustodyLegEffect>[
+      for (final effect in custodyEffects)
+        MovementCustodyLegEffect(
+          key: effect.key,
+          kind: _custodyLegKind(movement, effect),
+          before: effect.before,
+          requested: effect.requested,
+          applied: effect.applied,
+          unapplied: effect.unapplied,
+          after: effect.after,
+        ),
+    ];
+    final globalDeltas = <String, AccountingAmount>{};
+    for (final effect in custodyEffects) {
+      globalDeltas[effect.key.asset] =
+          (globalDeltas[effect.key.asset] ?? AccountingAmount.zero) +
+          effect.applied;
+    }
     result[movement.id] = MovementEffect(
       movementId: movement.id,
       requestedQuantity: _absolute(primary?.requested ?? AccountingAmount.zero),
       appliedQuantity: _absolute(primary?.applied ?? AccountingAmount.zero),
       unappliedQuantity: _absolute(primary?.unapplied ?? AccountingAmount.zero),
+      custodyLegs: List<MovementCustodyLegEffect>.unmodifiable(custodyLegs),
+      globalDeltasByAsset: Map<String, AccountingAmount>.unmodifiable(
+        globalDeltas,
+      ),
+      feeEffect: ledger.acceptedMovementIds.contains(movement.id)
+          ? resolveFeeEffect(movement)
+          : FeeEffect.zero,
+      transferAllocation: performance.transferAllocations[movement.id],
       issues: List<ProjectionIssue>.unmodifiable(
         issues.where((issue) => issue.movementId == movement.id),
       ),
@@ -600,6 +627,18 @@ Map<String, MovementEffect> _movementEffects(
     );
   }
   return result;
+}
+
+LedgerLegKind _custodyLegKind(
+  AccountingMovement movement,
+  CustodyMovementEffect effect,
+) {
+  if (movement.type == MovementType.balanceAdjustment) {
+    return LedgerLegKind.adjustment;
+  }
+  return effect.requested.compareTo(AccountingAmount.zero) < 0
+      ? LedgerLegKind.custodyDebit
+      : LedgerLegKind.custodyCredit;
 }
 
 CustodyMovementEffect? _primaryEffect(
@@ -627,12 +666,16 @@ CustodyMovementEffect? _primaryEffect(
   return null;
 }
 
-LedgerTotals _totals(Iterable<WalletAssetProjection> positions) {
+LedgerTotals _totals(
+  Iterable<WalletAssetProjection> positions,
+  Iterable<MovementEffect> effects,
+) {
   var custodyMarketValue = AccountingAmount.zero;
   var knownPositionMarketValue = AccountingAmount.zero;
   var knownCostBasis = AccountingAmount.zero;
   var realizedPnlKnown = AccountingAmount.zero;
   var unrealizedPnlKnown = AccountingAmount.zero;
+  var fiatCostEffect = AccountingAmount.zero;
   for (final position in positions) {
     custodyMarketValue = custodyMarketValue + position.custodyMarketValue;
     knownPositionMarketValue =
@@ -642,12 +685,16 @@ LedgerTotals _totals(Iterable<WalletAssetProjection> positions) {
     unrealizedPnlKnown =
         unrealizedPnlKnown + position.performance.unrealizedPnlKnown;
   }
+  for (final effect in effects) {
+    fiatCostEffect = fiatCostEffect + effect.feeEffect.fiatCostEffect;
+  }
   return LedgerTotals(
     custodyMarketValue: custodyMarketValue,
     knownPositionMarketValue: knownPositionMarketValue,
     knownCostBasis: knownCostBasis,
     realizedPnlKnown: realizedPnlKnown,
     unrealizedPnlKnown: unrealizedPnlKnown,
+    fiatCostEffect: fiatCostEffect,
   );
 }
 

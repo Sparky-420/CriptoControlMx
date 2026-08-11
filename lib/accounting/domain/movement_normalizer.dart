@@ -8,6 +8,100 @@ abstract interface class MovementNormalizer {
   NormalizedLedger normalize(List<AccountingMovement> movements);
 }
 
+final class MovementCreationValidator {
+  const MovementCreationValidator({
+    this.normalizer = const DefaultMovementNormalizer(),
+  });
+
+  final MovementNormalizer normalizer;
+
+  List<ProjectionIssue> validate(
+    AccountingMovement movement, {
+    required Iterable<Wallet> wallets,
+  }) => _validate(
+    movement,
+    wallets: wallets,
+    requireActiveWallet: true,
+    requireAssignment: true,
+  );
+
+  List<ProjectionIssue> validateHistoricalReplay(
+    AccountingMovement movement, {
+    required Iterable<Wallet> wallets,
+  }) => _validate(
+    movement,
+    wallets: wallets,
+    requireActiveWallet: false,
+    requireAssignment: false,
+  );
+
+  List<ProjectionIssue> _validate(
+    AccountingMovement movement, {
+    required Iterable<Wallet> wallets,
+    required bool requireActiveWallet,
+    required bool requireAssignment,
+  }) {
+    final issues = <ProjectionIssue>[
+      ...normalizer.normalize(<AccountingMovement>[movement]).issues,
+    ];
+    if (requireAssignment &&
+        movement.walletAssignmentStatus != WalletAssignmentStatus.assigned) {
+      issues.add(
+        ProjectionIssue(
+          ProjectionIssueCode.missingWalletAssignment,
+          movement.id,
+          'Un movimiento nuevo requiere asignación completa de carteras.',
+        ),
+      );
+    }
+
+    final walletsById = <String, Wallet>{
+      for (final wallet in wallets) wallet.id: wallet,
+    };
+    for (final walletId in _referencedWalletIds(movement)) {
+      final wallet = walletsById[walletId];
+      if (wallet == null) {
+        issues.add(
+          ProjectionIssue(
+            ProjectionIssueCode.unknownWallet,
+            movement.id,
+            'La cartera $walletId no existe.',
+          ),
+        );
+      } else if (requireActiveWallet && wallet.status != WalletStatus.active) {
+        issues.add(
+          ProjectionIssue(
+            ProjectionIssueCode.inactiveWallet,
+            movement.id,
+            'La cartera $walletId está archivada.',
+          ),
+        );
+      }
+    }
+    return List<ProjectionIssue>.unmodifiable(issues);
+  }
+
+  Set<String> _referencedWalletIds(AccountingMovement movement) =>
+      switch (movement.type) {
+        MovementType.buy || MovementType.transferIn => {
+          if (movement.destinationWalletId != null)
+            movement.destinationWalletId!,
+        },
+        MovementType.sell => {
+          if (movement.sourceWalletId != null) movement.sourceWalletId!,
+        },
+        MovementType.transferOut => {
+          if (movement.sourceWalletId != null) movement.sourceWalletId!,
+          if (movement.destinationType == DestinationType.ownWallet &&
+              movement.destinationWalletId != null)
+            movement.destinationWalletId!,
+        },
+        MovementType.balanceAdjustment => {
+          if (movement.adjustmentWalletId != null) movement.adjustmentWalletId!,
+        },
+      };
+}
+
 final class DefaultMovementNormalizer implements MovementNormalizer {
   const DefaultMovementNormalizer();
 
@@ -23,6 +117,7 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
     final legs = <LedgerLeg>[];
     final issues = <ProjectionIssue>[];
     final seenIds = <String>{};
+    final acceptedMovementIds = <String>{};
 
     for (final movement in ordered) {
       if (!seenIds.add(movement.id)) {
@@ -40,6 +135,7 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
         issues.add(issue);
         continue;
       }
+      acceptedMovementIds.add(movement.id);
       legs.addAll(_legsFor(movement));
     }
 
@@ -47,6 +143,7 @@ final class DefaultMovementNormalizer implements MovementNormalizer {
       movements: List<AccountingMovement>.unmodifiable(ordered),
       legs: List<LedgerLeg>.unmodifiable(legs),
       issues: List<ProjectionIssue>.unmodifiable(issues),
+      acceptedMovementIds: Set<String>.unmodifiable(acceptedMovementIds),
     );
   }
 
