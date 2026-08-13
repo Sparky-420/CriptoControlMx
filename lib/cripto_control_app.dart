@@ -14,9 +14,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'accounting/adapters/legacy_financial_adapter.dart';
 import 'accounting/adapters/legacy_movement_adapter.dart';
+import 'accounting/adapters/legacy_persistence_bridge.dart';
 import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
 import 'accounting/domain/wallet.dart';
+import 'accounting/migration/accounting_migrator.dart';
+import 'accounting/persistence/accounting_document.dart';
+import 'accounting/persistence/accounting_repository.dart';
+import 'accounting/persistence/shared_preferences_accounting_repository.dart';
 export 'accounting/domain/movement_type.dart';
 
 import 'package:flutter_svg/flutter_svg.dart';
@@ -454,6 +459,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       'firebase_cloud_state_downloaded_from_device_id_v1';
 
   final List<Movement> _movements = <Movement>[];
+  final AccountingRepository _accountingRepository =
+      SharedPreferencesAccountingRepository();
+  late final LegacyPersistenceBridge _legacyPersistenceBridge =
+      LegacyPersistenceBridge(
+        _accountingRepository,
+        const AccountingMigrator(LegacyMovementAdapter()),
+        const LegacyMovementAdapter(),
+      );
+  AccountingDocument? _accountingDocument;
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
   final PriceService _priceService = PriceService();
   final PriceAlertService _priceAlertService = PriceAlertService();
@@ -2390,39 +2404,31 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
 
-      final String? movementsRaw = prefs.getString(_movementsKey);
-      if (movementsRaw != null && movementsRaw.trim().isNotEmpty) {
-        try {
-          final dynamic decoded = jsonDecode(movementsRaw);
-          if (decoded is List) {
-            var migratedMovementMetadata = false;
-            final List<Movement> loadedMovements = <Movement>[];
-            for (final dynamic raw in decoded) {
-              final Map<String, dynamic> json = Map<String, dynamic>.from(
-                raw as Map,
-              );
-              migratedMovementMetadata =
-                  migratedMovementMetadata ||
-                  _movementJsonNeedsSyncMetadata(json);
-              loadedMovements.add(Movement.fromJson(json));
-            }
-            final String deviceId = await _localFirebaseDeviceId();
-            migratedMovementMetadata =
-                _normalizeMovementSyncMetadata(loadedMovements, deviceId) ||
-                migratedMovementMetadata;
-            _movements
-              ..clear()
-              ..addAll(loadedMovements);
-            if (migratedMovementMetadata) {
-              await prefs.setString(
-                _movementsKey,
-                jsonEncode(_movements.map((Movement m) => m.toJson()).toList()),
+      final legacySource = <Map<String, Object?>>[];
+      if (!prefs.containsKey(accountingDocumentKey)) {
+        final String? movementsRaw = prefs.getString(_movementsKey);
+        if (movementsRaw != null && movementsRaw.trim().isNotEmpty) {
+          try {
+            final dynamic decoded = jsonDecode(movementsRaw);
+            if (decoded is List) {
+              legacySource.addAll(
+                decoded.map(
+                  (dynamic raw) => Map<String, Object?>.from(raw as Map),
+                ),
               );
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
-
+      final accounting = await _legacyPersistenceBridge.load(legacySource);
+      _accountingDocument = accounting.document;
+      _movements
+        ..clear()
+        ..addAll(
+          accounting.legacyView.map(
+            (json) => Movement.fromJson(Map<String, dynamic>.from(json)),
+          ),
+        );
       final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
       _applyPriceCache(priceCache);
       _loadPriceModeState(prefs);
@@ -3004,9 +3010,14 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<void> _saveData() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
 
-    await prefs.setString(
-      _movementsKey,
-      jsonEncode(_movements.map((Movement m) => m.toJson()).toList()),
+    final current =
+        _accountingDocument ??
+        (await _legacyPersistenceBridge.load(
+          const <Map<String, Object?>>[],
+        )).document;
+    _accountingDocument = await _legacyPersistenceBridge.saveLegacyView(
+      current,
+      _movements.map((movement) => movement.toJson()).toList(),
     );
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
