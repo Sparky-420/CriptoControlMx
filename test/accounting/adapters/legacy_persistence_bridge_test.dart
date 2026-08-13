@@ -118,6 +118,211 @@ void main() {
       expect(preferences.getString('movements_json'), legacyEncoded);
     },
   );
+
+  test(
+    'new legacy rows remain explicitly unassigned despite wallet fields',
+    () async {
+      final current = assignedDocumentFixture();
+      final repository = SharedPreferencesAccountingRepository();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+      );
+      const raw = <String, Object?>{
+        'id': 'new-1',
+        'type': 'buy',
+        'coin': 'ETH',
+        'date': '2026-08-13T12:00:00Z',
+        'quantity': '2',
+        'unitPrice': '50000',
+        'fee': '10',
+        'sourceWalletId': '11111111-1111-4111-8111-111111111111',
+        'destinationWalletId': '11111111-1111-4111-8111-111111111111',
+        'destinationType': 'ownWallet',
+        'adjustmentWalletId': '11111111-1111-4111-8111-111111111111',
+        'walletAssignmentStatus': 'assigned',
+        'platform': 'untrusted legacy platform',
+      };
+
+      final saved = await bridge.saveLegacyView(current, <Map<String, Object?>>[
+        raw,
+      ]);
+
+      final added = saved.movements.singleWhere(
+        (movement) => movement.id == 'new-1',
+      );
+      expect(
+        added.walletAssignmentStatus,
+        WalletAssignmentStatus.legacyUnassigned,
+      );
+      expect(added.sourceWalletId, isNull);
+      expect(added.destinationWalletId, isNull);
+      expect(added.destinationType, isNull);
+      expect(added.adjustmentWalletId, isNull);
+      expect(saved.legacyMovementMetadata['new-1'], raw);
+      expect(
+        saved.legacyMovementMigrationMetadata['new-1']!['projectionWalletId'],
+        'virtual:unassigned',
+      );
+    },
+  );
+
+  test(
+    'deleted ids win over same-id legacy rows and remove only their metadata',
+    () async {
+      final original = assignedDocumentFixture();
+      final retained = original.movements.single.copyWith(id: 'keep-1');
+      final current = AccountingDocument(
+        schemaVersion: accountingSchemaVersion,
+        wallets: original.wallets,
+        movements: <AccountingMovement>[original.movements.single, retained],
+        appliedMigrationIds: original.appliedMigrationIds,
+        updatedAt: original.updatedAt,
+        legacyMovementMetadata: <String, Map<String, Object?>>{
+          ...original.legacyMovementMetadata,
+          'keep-1': <String, Object?>{'id': 'keep-1', 'type': 'buy'},
+        },
+        legacyMovementMigrationMetadata: <String, Map<String, Object?>>{
+          ...original.legacyMovementMigrationMetadata,
+          'keep-1': <String, Object?>{
+            'projectionWalletId': 'virtual:unassigned',
+          },
+        },
+        legacyMigrationProblems: original.legacyMigrationProblems,
+        legacyAccountingPolicy: original.legacyAccountingPolicy,
+      );
+      final repository = SharedPreferencesAccountingRepository();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+      );
+      final repeated = adapter.toLegacyJson(
+        current.movements.first,
+        preservedFields: current.legacyMovementMetadata['old-1']!,
+      );
+
+      final saved = await bridge.saveLegacyView(
+        current,
+        <Map<String, Object?>>[repeated],
+        deletedIds: const <String>{'old-1'},
+      );
+
+      expect(saved.movements.map((movement) => movement.id), <String>[
+        'keep-1',
+      ]);
+      expect(saved.legacyMovementMetadata.containsKey('old-1'), isFalse);
+      expect(
+        saved.legacyMovementMigrationMetadata.containsKey('old-1'),
+        isFalse,
+      );
+      expect(
+        saved.legacyMovementMetadata['keep-1'],
+        current.legacyMovementMetadata['keep-1'],
+      );
+      expect(
+        saved.legacyMovementMigrationMetadata['keep-1'],
+        current.legacyMovementMigrationMetadata['keep-1'],
+      );
+    },
+  );
+
+  test(
+    'load keeps persisted v3 authoritative over conflicting legacy source',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final current = assignedDocumentFixture();
+      final repository = SharedPreferencesAccountingRepository();
+      await repository.write(current);
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+      );
+
+      final loaded = await bridge.load(<Map<String, Object?>>[
+        <String, Object?>{
+          'id': 'old-1',
+          'type': 'sell',
+          'coin': 'ETH',
+          'date': '2026-08-13T12:00:00Z',
+          'quantity': '99',
+          'unitPrice': '1',
+          'fee': '0',
+          'note': 'conflicting legacy source',
+        },
+      ]);
+
+      expect(loaded.migrationReport, isNull);
+      expect(loaded.document.toJson(), current.toJson());
+      expect(loaded.legacyView.single['coin'], 'BTC');
+      expect(
+        loaded.legacyView.single['note'],
+        isNot('conflicting legacy source'),
+      );
+    },
+  );
+
+  test(
+    'load keeps unconvertible legacy rows in durable migration quarantine',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final repository = SharedPreferencesAccountingRepository();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+      );
+      const broken = <String, Object?>{'id': 'broken', 'coin': 'BTC'};
+
+      final loaded = await bridge.load(<Map<String, Object?>>[broken]);
+
+      expect(loaded.document.movements, isEmpty);
+      expect(loaded.migrationReport!.problems.single.primaryPayload, broken);
+      expect(
+        (await repository.read())!
+            .legacyMigrationProblems
+            .single
+            .primaryPayload,
+        broken,
+      );
+    },
+  );
+
+  test('load quarantines conflicting duplicate legacy IDs', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final repository = SharedPreferencesAccountingRepository();
+    final bridge = LegacyPersistenceBridge(
+      repository,
+      const AccountingMigrator(adapter),
+      adapter,
+    );
+    const first = <String, Object?>{
+      'id': 'same-id',
+      'type': 'buy',
+      'coin': 'BTC',
+      'date': '2026-08-13T12:00:00Z',
+      'quantity': '1',
+      'unitPrice': '1',
+      'fee': '0',
+    };
+
+    final loaded = await bridge.load(<Map<String, Object?>>[
+      first,
+      <String, Object?>{...first, 'quantity': '2'},
+    ]);
+
+    expect(loaded.document.movements, isEmpty);
+    expect(
+      loaded.migrationReport!.problems.single.kind,
+      LegacyMigrationProblemKind.conflictingId,
+    );
+    expect(
+      loaded.migrationReport!.problems.single.primaryPayload['quantity'],
+      '2',
+    );
+  });
 }
 
 AccountingDocument assignedDocumentFixture() {

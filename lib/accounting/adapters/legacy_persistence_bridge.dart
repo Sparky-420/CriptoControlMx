@@ -69,12 +69,19 @@ final class LegacyPersistenceBridge {
       if (legacyMovement == null) {
         throw FormatException('Legacy movement cannot be converted.');
       }
+      if (deletedIds.contains(legacyMovement.id)) continue;
       if (updatedById.containsKey(legacyMovement.id)) {
         throw StateError('Duplicate legacy movement id: ${legacyMovement.id}');
       }
       final existing = currentById[legacyMovement.id];
       if (existing == null) {
-        updatedById[legacyMovement.id] = legacyMovement;
+        updatedById[legacyMovement.id] = legacyMovement.copyWith(
+          sourceWalletId: null,
+          destinationWalletId: null,
+          destinationType: null,
+          adjustmentWalletId: null,
+          walletAssignmentStatus: WalletAssignmentStatus.legacyUnassigned,
+        );
         metadata[legacyMovement.id] = <String, Object?>{
           ...conversion.preservedFields,
         };
