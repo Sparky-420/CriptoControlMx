@@ -292,11 +292,4 @@ final class DefaultMovementAssignmentService
     WalletAssignmentTarget.adjustment =>
       before.adjustmentWalletId == after.adjustmentWalletId,
   };
-
-  bool _sameAssignment(AccountingMovement a, AccountingMovement b) =>
-      a.sourceWalletId == b.sourceWalletId &&
-      a.destinationWalletId == b.destinationWalletId &&
-      a.adjustmentWalletId == b.adjustmentWalletId &&
-      a.destinationType == b.destinationType &&
-      a.walletAssignmentStatus == b.walletAssignmentStatus;
 }
