@@ -106,6 +106,7 @@ void main() {
 
   test('assignMany is atomic and records one audit per changed movement', () {
     final before = twoTransferDocumentFixture();
+    final beforeJson = before.toJson();
     final result = service.assignMany(
       before,
       commands: const <MovementAssignmentCommand>[
@@ -141,13 +142,7 @@ void main() {
       ),
       throwsArgumentError,
     );
-    expect(before.assignmentAudits, isEmpty);
-    expect(
-      before.movements.map((movement) => movement.toJson()).toList(),
-      twoTransferDocumentFixture().movements
-          .map((movement) => movement.toJson())
-          .toList(),
-    );
+    expect(before.toJson(), beforeJson);
   });
 
   test('identical assignment is idempotent and reassignment is audited', () {
