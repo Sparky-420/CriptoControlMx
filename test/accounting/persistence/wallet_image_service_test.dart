@@ -90,6 +90,44 @@ void main() {
   );
 
   test(
+    'duplicate staged images commit without orphan temporary files',
+    () async {
+      final root = await Directory.systemTemp.createTemp('wallet_images_test_');
+      addTearDown(() => root.delete(recursive: true));
+      final bytes = Uint8List.fromList(<int>[137, 80, 78, 71]);
+      final hash = sha256BytesHex(bytes);
+      final image = ProcessedWalletImage(
+        bytes,
+        WalletImageRef.create(
+          id: hash,
+          fileName: '$hash.png',
+          mimeType: 'image/png',
+          sha256: hash,
+          width: 1,
+          height: 1,
+          byteLength: bytes.length,
+        ),
+      );
+      final store = PrivateWalletImageStore(
+        applicationSupportDirectory: () async => root,
+      );
+
+      final batch = await store.stageAll(<ProcessedWalletImage>[image, image]);
+      await batch.commit();
+
+      final files = await Directory(
+        '${root.path}${Platform.pathSeparator}wallet_images',
+      ).list().toList();
+      expect(
+        files.map((file) => file.path).where((path) => path.endsWith('.tmp')),
+        isEmpty,
+      );
+      expect(files, hasLength(1));
+      expect(await store.read(image.imageRef), image.bytes);
+    },
+  );
+
+  test(
     'private store rejects unsafe or manipulated durable references',
     () async {
       final root = await Directory.systemTemp.createTemp('wallet_images_test_');

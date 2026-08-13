@@ -45,10 +45,11 @@ final class PrivateWalletImageStore implements WalletImageStore {
     }
     final directory = await _imageDirectory();
     final staged = <_StagedImage>[];
+    final stagedTargets = <String>{};
     try {
       for (final image in images) {
         final target = File(_pathFor(directory, image.imageRef));
-        if (await target.exists()) {
+        if (!stagedTargets.add(target.path) || await target.exists()) {
           continue;
         }
         final temporary = File(
