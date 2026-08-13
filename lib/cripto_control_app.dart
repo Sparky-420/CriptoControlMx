@@ -15,6 +15,8 @@ import 'package:flutter/material.dart';
 import 'accounting/adapters/legacy_financial_adapter.dart';
 import 'accounting/adapters/legacy_movement_adapter.dart';
 import 'accounting/adapters/legacy_persistence_bridge.dart';
+import 'accounting/application/wallet_image_cleanup_journal.dart';
+import 'accounting/application/wallet_lifecycle_coordinator.dart';
 import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
 import 'accounting/domain/wallet.dart';
@@ -478,12 +480,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         _walletImageStore,
         _accountingBackupStateStore,
       );
-  late final LegacyPersistenceBridge _legacyPersistenceBridge =
-      LegacyPersistenceBridge(
-        _accountingRepository,
-        const AccountingMigrator(LegacyMovementAdapter()),
-        const LegacyMovementAdapter(),
-      );
+  late final LegacyPersistenceBridge _legacyPersistenceBridge;
   AccountingDocument? _accountingDocument;
   final List<PortfolioSnapshot> _snapshots = <PortfolioSnapshot>[];
   final PriceService _priceService = PriceService();
@@ -2533,6 +2530,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<void> _loadData() async {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
+      _legacyPersistenceBridge = LegacyPersistenceBridge(
+        _accountingRepository,
+        const AccountingMigrator(LegacyMovementAdapter()),
+        const LegacyMovementAdapter(),
+        DefaultWalletLifecycleCoordinator(
+          _accountingRepository,
+          _walletImageStore,
+          SharedPreferencesWalletImageCleanupJournal(prefs),
+        ),
+      );
 
       final legacySource = <Map<String, Object?>>[];
       if (!prefs.containsKey(accountingDocumentKey)) {

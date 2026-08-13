@@ -1,5 +1,6 @@
 import '../migration/accounting_migrator.dart';
 import '../migration/migration_report.dart';
+import '../application/wallet_lifecycle_coordinator.dart';
 import '../domain/accounting_movement.dart';
 import '../domain/wallet.dart';
 import '../persistence/accounting_document.dart';
@@ -20,17 +21,24 @@ final class AccountingLoadResult {
 }
 
 final class LegacyPersistenceBridge {
-  const LegacyPersistenceBridge(this.repository, this.migrator, this.adapter);
+  const LegacyPersistenceBridge(
+    this.repository,
+    this.migrator,
+    this.adapter,
+    this.lifecycleCoordinator,
+  );
 
   final AccountingRepository repository;
   final AccountingMigrator migrator;
   final LegacyMovementAdapter adapter;
+  final WalletLifecycleCoordinator lifecycleCoordinator;
 
   Future<AccountingLoadResult> load(
     List<Map<String, Object?>> legacySource,
   ) async {
     final persisted = await repository.read();
     if (persisted != null) {
+      await lifecycleCoordinator.recoverPendingCleanup();
       return AccountingLoadResult(
         document: persisted,
         legacyView: _legacyView(persisted),
@@ -40,6 +48,7 @@ final class LegacyPersistenceBridge {
 
     final report = migrator.migrateLegacy(legacy: legacySource);
     await repository.write(report.document);
+    await lifecycleCoordinator.recoverPendingCleanup();
     return AccountingLoadResult(
       document: report.document,
       legacyView: _legacyView(report.document),

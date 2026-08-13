@@ -1,5 +1,7 @@
 import 'package:cripto_control_mx/accounting/adapters/legacy_movement_adapter.dart';
 import 'package:cripto_control_mx/accounting/adapters/legacy_persistence_bridge.dart';
+import 'package:cripto_control_mx/accounting/application/wallet_lifecycle_coordinator.dart';
+import 'package:cripto_control_mx/accounting/application/wallet_lifecycle_service.dart';
 import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
 import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
 import 'package:cripto_control_mx/accounting/domain/assignment_audit.dart';
@@ -29,6 +31,7 @@ void main() {
         repository,
         AccountingMigrator(adapter),
         adapter,
+        RecordingLifecycleCoordinator(),
       );
 
       final loaded = await bridge.load(<Map<String, Object?>>[
@@ -68,6 +71,7 @@ void main() {
         repository,
         const AccountingMigrator(adapter),
         adapter,
+        RecordingLifecycleCoordinator(),
       );
       final legacy =
           adapter.toLegacyJson(
@@ -133,6 +137,7 @@ void main() {
         repository,
         const AccountingMigrator(adapter),
         adapter,
+        RecordingLifecycleCoordinator(),
       );
       const raw = <String, Object?>{
         'id': 'new-1',
@@ -202,6 +207,7 @@ void main() {
         repository,
         const AccountingMigrator(adapter),
         adapter,
+        RecordingLifecycleCoordinator(),
       );
       final repeated = adapter.toLegacyJson(
         current.movements.first,
@@ -244,6 +250,7 @@ void main() {
         repository,
         const AccountingMigrator(adapter),
         adapter,
+        RecordingLifecycleCoordinator(),
       );
 
       final loaded = await bridge.load(<Map<String, Object?>>[
@@ -278,6 +285,7 @@ void main() {
         repository,
         const AccountingMigrator(adapter),
         adapter,
+        RecordingLifecycleCoordinator(),
       );
       const broken = <String, Object?>{'id': 'broken', 'coin': 'BTC'};
 
@@ -302,6 +310,7 @@ void main() {
       repository,
       const AccountingMigrator(adapter),
       adapter,
+      RecordingLifecycleCoordinator(),
     );
     const first = <String, Object?>{
       'id': 'same-id',
@@ -328,6 +337,79 @@ void main() {
       '2',
     );
   });
+
+  test(
+    'load recovers pending cleanup after persisted v3 is authoritative',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final repository = SharedPreferencesAccountingRepository();
+      final current = assignedDocumentFixture();
+      await repository.write(current);
+      final lifecycle = RecordingLifecycleCoordinator();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+        lifecycle,
+      );
+
+      final loaded = await bridge.load(const <Map<String, Object?>>[]);
+
+      expect(loaded.document.toJson(), current.toJson());
+      expect(lifecycle.recoverCalls, 1);
+    },
+  );
+
+  test(
+    'load recovers pending cleanup after migrated v3 is persisted',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final repository = SharedPreferencesAccountingRepository();
+      final lifecycle = RecordingLifecycleCoordinator();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+        lifecycle,
+      );
+
+      final loaded = await bridge.load(<Map<String, Object?>>[
+        <String, Object?>{
+          'id': 'old-1',
+          'type': 'buy',
+          'coin': 'BTC',
+          'date': '2026-08-11T12:00:00Z',
+          'quantity': '1',
+          'unitPrice': '1',
+          'fee': '0',
+        },
+      ]);
+
+      expect(loaded.migrationReport, isNotNull);
+      expect((await repository.read())!.schemaVersion, accountingSchemaVersion);
+      expect(lifecycle.recoverCalls, 1);
+    },
+  );
+}
+
+final class RecordingLifecycleCoordinator
+    implements WalletLifecycleCoordinator {
+  int recoverCalls = 0;
+
+  @override
+  Future<WalletDeleteCommitResult> commitDelete(
+    PreparedWalletDeletion prepared,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<WalletImageCleanupResult> recoverPendingCleanup() async {
+    recoverCalls += 1;
+    return const WalletImageCleanupResult(
+      deletedImageIds: <String>{},
+      stillReferencedImageIds: <String>{},
+      pendingRetryImageIds: <String>{},
+    );
+  }
 }
 
 AccountingDocument assignedDocumentFixture() {
