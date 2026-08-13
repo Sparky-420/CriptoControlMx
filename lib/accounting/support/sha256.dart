@@ -8,6 +8,11 @@ String sha256Hex(String value) {
   return digest.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
 }
 
+String sha256BytesHex(Uint8List value) {
+  final digest = _sha256(value);
+  return digest.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+}
+
 String deterministicUuidFromSha256(String value) {
   final bytes = _sha256(Uint8List.fromList(utf8.encode(value)));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;

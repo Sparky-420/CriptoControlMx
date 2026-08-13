@@ -121,16 +121,18 @@ void main() {
   });
 
   test('round trips every wallet and image field', () {
+    const hash =
+        'abababababababababababababababababababababababababababababababab';
     final wallet = Wallet(
       id: 'wallet-1',
       name: 'Mi Mercado Pago',
       provider: 'Mercado Pago',
       status: WalletStatus.active,
       imageRef: const WalletImageRef(
-        id: 'image-1',
-        fileName: 'wallet.png',
+        id: hash,
+        fileName: '$hash.png',
         mimeType: 'image/png',
-        sha256: 'abc',
+        sha256: hash,
         width: 24,
         height: 24,
         byteLength: 3,

@@ -105,15 +105,16 @@ final class WalletImageRef {
     'height': height,
     'byteLength': byteLength,
   };
-  factory WalletImageRef.fromJson(Map<String, Object?> json) => WalletImageRef(
-    id: json['id']! as String,
-    fileName: json['fileName']! as String,
-    mimeType: json['mimeType']! as String,
-    sha256: json['sha256']! as String,
-    width: json['width']! as int,
-    height: json['height']! as int,
-    byteLength: json['byteLength']! as int,
-  );
+  factory WalletImageRef.fromJson(Map<String, Object?> json) =>
+      WalletImageRef.create(
+        id: json['id']! as String,
+        fileName: json['fileName']! as String,
+        mimeType: json['mimeType']! as String,
+        sha256: json['sha256']! as String,
+        width: json['width']! as int,
+        height: json['height']! as int,
+        byteLength: json['byteLength']! as int,
+      );
 }
 
 final class Wallet {
