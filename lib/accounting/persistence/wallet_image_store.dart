@@ -19,7 +19,7 @@ abstract interface class WalletImageStore {
 
 abstract interface class WalletImageWriteBatch {
   Future<void> commit();
-  Future<void> rollback();
+  Future<void> rollback({Set<String> referencedImageIds = const <String>{}});
 }
 
 final class PrivateWalletImageStore implements WalletImageStore {
@@ -56,7 +56,7 @@ final class PrivateWalletImageStore implements WalletImageStore {
           '${target.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
         );
         await temporary.writeAsBytes(image.bytes, flush: true);
-        staged.add(_StagedImage(temporary, target));
+        staged.add(_StagedImage(temporary, target, image.imageRef.id));
       }
     } catch (_) {
       for (final item in staged) {
@@ -151,38 +151,45 @@ final class PrivateWalletImageStore implements WalletImageStore {
 }
 
 final class _StagedImage {
-  const _StagedImage(this.temporary, this.target);
+  const _StagedImage(this.temporary, this.target, this.imageId);
   final File temporary;
   final File target;
+  final String imageId;
 }
 
 final class _PrivateWalletImageWriteBatch implements WalletImageWriteBatch {
   _PrivateWalletImageWriteBatch(this._staged);
   final List<_StagedImage> _staged;
-  final List<File> _promoted = <File>[];
-  var _complete = false;
+  final List<_StagedImage> _promoted = <_StagedImage>[];
+  var _committed = false;
+  var _rolledBack = false;
 
   @override
   Future<void> commit() async {
-    if (_complete) return;
+    if (_committed || _rolledBack) return;
     for (final item in _staged) {
       if (await item.temporary.exists() && !await item.target.exists()) {
         await item.temporary.rename(item.target.path);
-        _promoted.add(item.target);
+        _promoted.add(item);
       }
     }
-    _complete = true;
+    _committed = true;
   }
 
   @override
-  Future<void> rollback() async {
-    if (_complete) return;
+  Future<void> rollback({
+    Set<String> referencedImageIds = const <String>{},
+  }) async {
+    if (_rolledBack) return;
     for (final item in _staged) {
       if (await item.temporary.exists()) await item.temporary.delete();
     }
-    for (final file in _promoted) {
-      if (await file.exists()) await file.delete();
+    for (final item in _promoted) {
+      if (!referencedImageIds.contains(item.imageId) &&
+          await item.target.exists()) {
+        await item.target.delete();
+      }
     }
-    _complete = true;
+    _rolledBack = true;
   }
 }

@@ -18,10 +18,16 @@ import 'accounting/adapters/legacy_persistence_bridge.dart';
 import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
 import 'accounting/domain/wallet.dart';
+import 'accounting/io/accounting_backup_bundle.dart';
+import 'accounting/io/accounting_backup_codec.dart';
+import 'accounting/io/accounting_backup_restore_service.dart';
+import 'accounting/io/cloud_image_chunks.dart';
+import 'accounting/io/shared_preferences_accounting_backup_state_store.dart';
 import 'accounting/migration/accounting_migrator.dart';
 import 'accounting/persistence/accounting_document.dart';
 import 'accounting/persistence/accounting_repository.dart';
 import 'accounting/persistence/shared_preferences_accounting_repository.dart';
+import 'accounting/persistence/wallet_image_store.dart';
 export 'accounting/domain/movement_type.dart';
 
 import 'package:flutter_svg/flutter_svg.dart';
@@ -461,6 +467,17 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   final List<Movement> _movements = <Movement>[];
   final AccountingRepository _accountingRepository =
       SharedPreferencesAccountingRepository();
+  final WalletImageStore _walletImageStore = PrivateWalletImageStore();
+  final AccountingBackupCodec _accountingBackupCodec =
+      const DefaultAccountingBackupCodec();
+  final AccountingBackupStateStore _accountingBackupStateStore =
+      SharedPreferencesAccountingBackupStateStore();
+  late final AccountingBackupRestoreService _accountingBackupRestoreService =
+      DefaultAccountingBackupRestoreService(
+        _accountingRepository,
+        _walletImageStore,
+        _accountingBackupStateStore,
+      );
   late final LegacyPersistenceBridge _legacyPersistenceBridge =
       LegacyPersistenceBridge(
         _accountingRepository,
@@ -1177,6 +1194,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return deviceId;
   }
 
+  // ignore: unused_element
   bool _movementJsonNeedsSyncMetadata(Map<String, dynamic> json) {
     return textFromJson(json['id']).isEmpty ||
         DateTime.tryParse(json['createdAt']?.toString() ?? '') == null ||
@@ -1184,6 +1202,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         textFromJson(json['deviceId']).isEmpty;
   }
 
+  // ignore: unused_element
   bool _normalizeMovementSyncMetadata(
     List<Movement> movements,
     String deviceId,
@@ -1435,7 +1454,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (!mounted || !pageContext.mounted || !profileReady) return;
       final String deviceId = await _localFirebaseDeviceId();
       if (!mounted || !pageContext.mounted) return;
-      final Object? decoded = jsonDecode(_buildBackupJson());
+      final Object? decoded = jsonDecode(await _buildBackupJson());
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Payload financiero inválido');
       }
@@ -1444,22 +1463,74 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (movements is! List || snapshots is! List) {
         throw const FormatException('Payload financiero incompleto');
       }
+      final Map<String, dynamic> cloudPayload = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(decoded)) as Map,
+      );
+      final List<CloudImageChunk> cloudImageChunks = <CloudImageChunk>[];
+      final Object? walletImagesRaw = cloudPayload['walletImages'];
+      if (walletImagesRaw is List) {
+        for (final dynamic raw in walletImagesRaw) {
+          final Map<String, dynamic> image = Map<String, dynamic>.from(
+            raw as Map,
+          );
+          final Map<String, dynamic> imageRef = Map<String, dynamic>.from(
+            image['imageRef'] as Map,
+          );
+          final Uint8List bytes = Uint8List.fromList(
+            base64Decode(image.remove('bytesBase64') as String),
+          );
+          final List<CloudImageChunk> chunks = splitCloudImage(
+            imageRef['id'] as String,
+            bytes,
+          );
+          cloudImageChunks.addAll(chunks);
+          image['cloudManifest'] = CloudImageManifest(
+            imageId: imageRef['id'] as String,
+            sha256: imageRef['sha256'] as String,
+            chunkCount: chunks.length,
+            byteLength: bytes.length,
+          ).toJson();
+          final int index = walletImagesRaw.indexOf(raw);
+          walletImagesRaw[index] = image;
+        }
+      }
 
       final DateTime uploadedAt = DateTime.now();
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('cloudState')
-          .doc('current')
-          .set(<String, dynamic>{
-            'schemaVersion': 1,
-            'uploadedAt': FieldValue.serverTimestamp(),
-            'uploadedAtLocal': uploadedAt.toIso8601String(),
-            'uploadedByDeviceId': deviceId,
-            'appName': 'CriptoControlMx',
-            if (decoded['version'] != null) 'backupVersion': decoded['version'],
-            'payload': decoded,
-          }, SetOptions(merge: true));
+      final DocumentReference<Map<String, dynamic>> currentReference =
+          FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('cloudState')
+              .doc('current');
+      final CollectionReference<Map<String, dynamic>> chunkCollection =
+          currentReference.collection('walletImageChunks');
+      final QuerySnapshot<Map<String, dynamic>> priorChunks =
+          await chunkCollection.get();
+      final WriteBatch writeBatch = FirebaseFirestore.instance.batch();
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> document
+          in priorChunks.docs) {
+        writeBatch.delete(document.reference);
+      }
+      for (final CloudImageChunk chunk in cloudImageChunks) {
+        writeBatch.set(
+          chunkCollection.doc('${chunk.imageId}:${chunk.index}'),
+          <String, dynamic>{
+            'imageId': chunk.imageId,
+            'index': chunk.index,
+            'bytes': Blob(chunk.bytes),
+          },
+        );
+      }
+      writeBatch.set(currentReference, <String, dynamic>{
+        'schemaVersion': 1,
+        'uploadedAt': FieldValue.serverTimestamp(),
+        'uploadedAtLocal': uploadedAt.toIso8601String(),
+        'uploadedByDeviceId': deviceId,
+        'appName': 'CriptoControlMx',
+        if (decoded['version'] != null) 'backupVersion': decoded['version'],
+        'payload': cloudPayload,
+      }, SetOptions(merge: true));
+      await writeBatch.commit();
       if (!mounted || !pageContext.mounted) return;
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -1615,6 +1686,51 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       if (payload == null) {
         throw const FormatException('Payload cloud faltante');
       }
+      final Map<String, dynamic> portablePayload = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(payload)) as Map,
+      );
+      final Object? walletImagesRaw = portablePayload['walletImages'];
+      if (walletImagesRaw is List) {
+        final QuerySnapshot<Map<String, dynamic>> chunkSnapshot = await snapshot
+            .reference
+            .collection('walletImageChunks')
+            .get();
+        final Map<String, List<CloudImageChunk>> chunksByImage =
+            <String, List<CloudImageChunk>>{};
+        for (final QueryDocumentSnapshot<Map<String, dynamic>> chunkDocument
+            in chunkSnapshot.docs) {
+          final Map<String, dynamic> chunkJson = chunkDocument.data();
+          final String imageId = chunkJson['imageId'] as String;
+          final Blob bytes = chunkJson['bytes'] as Blob;
+          chunksByImage
+              .putIfAbsent(imageId, () => <CloudImageChunk>[])
+              .add(
+                CloudImageChunk(
+                  imageId: imageId,
+                  index: chunkJson['index'] as int,
+                  bytes: bytes.bytes,
+                ),
+              );
+        }
+        for (var index = 0; index < walletImagesRaw.length; index++) {
+          final Map<String, dynamic> image = Map<String, dynamic>.from(
+            walletImagesRaw[index] as Map,
+          );
+          final Object? manifestRaw = image.remove('cloudManifest');
+          if (manifestRaw is! Map) {
+            throw const FormatException('Manifest cloud faltante');
+          }
+          final CloudImageManifest manifest = CloudImageManifest.fromJson(
+            Map<String, Object?>.from(manifestRaw),
+          );
+          final Uint8List bytes = joinCloudImage(
+            manifest,
+            chunksByImage[manifest.imageId] ?? const <CloudImageChunk>[],
+          );
+          image['bytesBase64'] = base64Encode(bytes);
+          walletImagesRaw[index] = image;
+        }
+      }
 
       final String localDeviceId = await _localFirebaseDeviceId();
       if (!mounted || !pageContext.mounted) return;
@@ -1636,7 +1752,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       }
       if (!mounted || !pageContext.mounted) return;
 
-      final _ImportResult result = await _applyBackupJson(jsonEncode(payload));
+      final _ImportResult result = await _applyBackupJson(
+        jsonEncode(portablePayload),
+      );
       if (!mounted || !pageContext.mounted) return;
       final DateTime downloadedAt = DateTime.now();
 
@@ -2110,7 +2228,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         drive.DriveApi api,
         GoogleSignInAccount account,
       ) async {
-        final List<int> bytes = utf8.encode(_buildBackupJson());
+        final List<int> bytes = utf8.encode(await _buildBackupJson());
         final drive.File uploaded = await _uploadGoogleDriveBackup(api, bytes);
         if (!mounted || !pageContext.mounted) return;
         final DateTime updatedAt = uploaded.modifiedTime ?? DateTime.now();
@@ -4313,27 +4431,71 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     );
   }
 
-  String _buildBackupJson() {
-    final Map<String, dynamic> backup = <String, dynamic>{
-      'version': 2,
-      'exportedAt': DateTime.now().toIso8601String(),
-      'settings': <String, dynamic>{
-        'sellFeePercent': _sellFeePercent,
-        'priceModes': <String, String>{
+  Future<String> _buildBackupJson() async {
+    final AccountingDocument? document =
+        _accountingDocument ?? await _accountingRepository.read();
+    if (document == null) {
+      throw StateError('No existe un documento contable para respaldar.');
+    }
+    final imageRefs = <String, WalletImageRef>{
+      for (final Wallet wallet in document.wallets)
+        if (wallet.imageRef != null) wallet.imageRef!.id: wallet.imageRef!,
+    };
+    final walletImages = <PortableWalletImage>[];
+    for (final WalletImageRef imageRef in imageRefs.values) {
+      walletImages.add(
+        PortableWalletImage(
+          imageRef: imageRef,
+          bytes: await _walletImageStore.read(imageRef),
+        ),
+      );
+    }
+    final bundle = AccountingBackupBundle(
+      document: document,
+      snapshots: _snapshots
+          .map(
+            (PortfolioSnapshot snapshot) => BackupPortfolioSnapshot(
+              id: snapshot.id,
+              createdAt: snapshot.createdAt,
+              totalCostBase: snapshot.totalCostBase,
+              totalCurrentValue: snapshot.totalCurrentValue,
+              totalUnrealizedPL: snapshot.totalUnrealizedPL,
+              totalRealizedPL: snapshot.totalRealizedPL,
+              movementCount: snapshot.movementCount,
+              coins: snapshot.coins
+                  .map(
+                    (CoinSnapshot coin) => BackupCoinSnapshot(
+                      coin: coin.coin,
+                      quantity: coin.quantity,
+                      costBase: coin.costBase,
+                      avgPrice: coin.avgPrice,
+                      currentValue: coin.currentValue,
+                      unrealizedPL: coin.unrealizedPL,
+                      realizedPL: coin.realizedPL,
+                    ),
+                  )
+                  .toList(),
+            ),
+          )
+          .toList(),
+      currentPrices: Map<String, double>.from(_currentPrices),
+      settings: AccountingBackupSettings(
+        sellFeePercent: _sellFeePercent,
+        priceModes: <String, String>{
           for (final String coin in _coins) coin: _priceModeFor(coin),
         },
-        'manualPricesUpdatedAtMs': <String, int>{
+        manualPricesUpdatedAtMs: <String, int>{
           for (final String coin in _coins)
             if (_manualPriceUpdatedAtMs.containsKey(coin))
               coin: _manualPriceUpdatedAtMs[coin]!,
         },
-      },
-      'currentPrices': _currentPrices,
-      'movements': _movements.map((Movement m) => m.toJson()).toList(),
-      'snapshots': _snapshots.map((PortfolioSnapshot s) => s.toJson()).toList(),
-    };
-
-    return const JsonEncoder.withIndent('  ').convert(backup);
+      ),
+      walletImages: walletImages,
+      exportedAt: DateTime.now(),
+    );
+    return const JsonEncoder.withIndent(
+      '  ',
+    ).convert(_accountingBackupCodec.encodeV3(bundle));
   }
 
   String _buildMovementsCsv() {
@@ -4941,7 +5103,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       messenger: messenger,
       fileName: 'criptocontrolmx_respaldo.json',
       mimeType: 'application/json',
-      bytes: utf8.encode(_buildBackupJson()),
+      bytes: utf8.encode(await _buildBackupJson()),
       successMessage: 'Copia de seguridad lista para compartir',
     );
     unawaited(
@@ -5003,6 +5165,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     }
   }
 
+  // ignore: unused_element
   Map<String, dynamic> _validatedImportMovement(dynamic raw, int index) {
     final int number = index + 1;
     if (raw is! Map) {
@@ -5091,145 +5254,89 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     if (decoded is! Map) {
       throw const FormatException('La raíz de la copia no es un objeto válido');
     }
-    final Map<String, dynamic> backup = Map<String, dynamic>.from(decoded);
-
-    final dynamic movementsRaw = backup['movements'];
-    final dynamic pricesRaw = backup['currentPrices'];
-    final dynamic settingsRaw = backup['settings'];
-    final bool hasSnapshots = backup.containsKey('snapshots');
-    final dynamic snapshotsRaw = backup['snapshots'];
-
-    if (movementsRaw is! List) {
-      throw const FormatException('La copia no contiene movimientos válidos');
-    }
-    if (pricesRaw is! Map) {
-      throw const FormatException('La copia no contiene precios válidos');
-    }
-    if (hasSnapshots && snapshotsRaw is! List) {
-      throw const FormatException(
-        'Las instantáneas de la copia no son válidas',
-      );
-    }
-
-    var importedMovementMetadataWarning = false;
-    final List<Movement> imported = <Movement>[];
-    for (int i = 0; i < movementsRaw.length; i++) {
-      final Map<String, dynamic> json = _validatedImportMovement(
-        movementsRaw[i],
-        i,
-      );
-      importedMovementMetadataWarning =
-          importedMovementMetadataWarning ||
-          _movementJsonNeedsSyncMetadata(json);
-      imported.add(Movement.fromJson(json));
-    }
-    final String importDeviceId = await _localFirebaseDeviceId();
-    importedMovementMetadataWarning =
-        _normalizeMovementSyncMetadata(imported, importDeviceId) ||
-        importedMovementMetadataWarning;
-    final Map<String, dynamic> pricesMap = Map<String, dynamic>.from(pricesRaw);
-    final Map<String, String> importedPriceModes = <String, String>{
-      for (final String coin in _coins) coin: PriceService.automaticMode,
-    };
-    final Map<String, int> importedManualUpdatedAt = <String, int>{};
-    if (settingsRaw is Map) {
-      final Map<String, dynamic> settings = Map<String, dynamic>.from(
-        settingsRaw,
-      );
-      final dynamic modesRaw = settings['priceModes'];
-      if (modesRaw is Map) {
-        final Map<String, dynamic> modesMap = Map<String, dynamic>.from(
-          modesRaw,
-        );
-        for (final String coin in _coins) {
-          importedPriceModes[coin] =
-              modesMap[coin]?.toString() == PriceService.manualMode
-              ? PriceService.manualMode
-              : PriceService.automaticMode;
-        }
-      }
-      final dynamic manualRaw = settings['manualPricesUpdatedAtMs'];
-      if (manualRaw is Map) {
-        final Map<String, dynamic> manualMap = Map<String, dynamic>.from(
-          manualRaw,
-        );
-        for (final String coin in _coins) {
-          final dynamic value = manualMap[coin];
-          if (value is int) {
-            importedManualUpdatedAt[coin] = value;
-          } else if (value is num) {
-            importedManualUpdatedAt[coin] = value.toInt();
-          }
-        }
-      }
-    }
-    final List<PortfolioSnapshot>? importedSnapshots = hasSnapshots
-        ? (snapshotsRaw as List)
-              .map(
-                (dynamic e) => PortfolioSnapshot.fromJson(
-                  Map<String, dynamic>.from(e as Map),
-                ),
-              )
-              .toList()
-        : null;
+    final DecodedAccountingBackup backup = _accountingBackupCodec.decodeAny(
+      Map<String, Object?>.from(decoded),
+    );
+    final AccountingBackupRestoreResult restored =
+        await _accountingBackupRestoreService.restore(backup);
+    final AccountingLoadResult reopened = await _legacyPersistenceBridge.load(
+      const <Map<String, Object?>>[],
+    );
+    final List<Movement> imported = reopened.legacyView
+        .map((json) => Movement.fromJson(Map<String, dynamic>.from(json)))
+        .toList();
+    final List<PortfolioSnapshot> importedSnapshots = backup.bundle.snapshots
+        .map(
+          (BackupPortfolioSnapshot snapshot) => PortfolioSnapshot(
+            id: snapshot.id,
+            createdAt: snapshot.createdAt,
+            totalCostBase: snapshot.totalCostBase,
+            totalCurrentValue: snapshot.totalCurrentValue,
+            totalUnrealizedPL: snapshot.totalUnrealizedPL,
+            totalRealizedPL: snapshot.totalRealizedPL,
+            movementCount: snapshot.movementCount,
+            coins: snapshot.coins
+                .map(
+                  (BackupCoinSnapshot coin) => CoinSnapshot(
+                    coin: coin.coin,
+                    quantity: coin.quantity,
+                    costBase: coin.costBase,
+                    avgPrice: coin.avgPrice,
+                    currentValue: coin.currentValue,
+                    unrealizedPL: coin.unrealizedPL,
+                    realizedPL: coin.realizedPL,
+                  ),
+                )
+                .toList(),
+          ),
+        )
+        .toList();
+    final AccountingBackupSettings importedSettings = backup.bundle.settings;
+    final Map<String, double> importedPrices = backup.bundle.currentPrices;
     final List<String> warnings = <String>[
-      if (!hasSnapshots) 'Copia sin instantáneas',
-      if (importedMovementMetadataWarning) 'IDs de movimientos normalizados',
+      ...restored.warnings,
       ...FinancialEngine.diagnostics(
         coins: _coins,
         movements: imported,
-        snapshots: importedSnapshots ?? const <PortfolioSnapshot>[],
-        currentPrices: <String, double>{
-          for (final MapEntry<String, dynamic> entry in pricesMap.entries)
-            entry.key: numberFromJson(entry.value),
-        },
+        snapshots: importedSnapshots,
+        currentPrices: importedPrices,
       ),
     ];
 
     setState(() {
+      _accountingDocument = restored.document;
       _movements
         ..clear()
         ..addAll(imported);
 
       for (final String coin in _coins) {
-        _currentPrices[coin] = numberFromJson(pricesMap[coin]);
+        _currentPrices[coin] = importedPrices[coin] ?? 0;
       }
 
-      if (settingsRaw is Map && settingsRaw['sellFeePercent'] is num) {
-        _sellFeePercent = (settingsRaw['sellFeePercent'] as num).toDouble();
-      }
+      _sellFeePercent = importedSettings.sellFeePercent;
       _priceModes
         ..clear()
-        ..addAll(importedPriceModes);
+        ..addAll(<String, String>{
+          for (final String coin in _coins)
+            coin: importedSettings.priceModes[coin] == PriceService.manualMode
+                ? PriceService.manualMode
+                : PriceService.automaticMode,
+        });
       _manualPriceUpdatedAtMs
         ..clear()
-        ..addAll(importedManualUpdatedAt);
-
-      if (importedSnapshots != null) {
-        _snapshots
-          ..clear()
-          ..addAll(importedSnapshots);
-        _snapshots.sort(
-          (PortfolioSnapshot a, PortfolioSnapshot b) =>
-              b.createdAt.compareTo(a.createdAt),
-        );
-        _enforceSnapshotRetention();
-      }
+        ..addAll(importedSettings.manualPricesUpdatedAtMs);
+      _snapshots
+        ..clear()
+        ..addAll(importedSnapshots);
+      _snapshots.sort(
+        (PortfolioSnapshot a, PortfolioSnapshot b) =>
+            b.createdAt.compareTo(a.createdAt),
+      );
     });
 
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await _priceService.savePriceModes(prefs, _priceModes);
-    await _priceService.saveManualPriceUpdatedAtMs(
-      prefs,
-      _manualPriceUpdatedAtMs,
-    );
-    await _saveData();
-    if (importedSnapshots != null) {
-      await _saveSnapshots();
-    }
     return _ImportResult(
       movementCount: imported.length,
-      snapshotCount: importedSnapshots?.length ?? 0,
+      snapshotCount: importedSnapshots.length,
       warnings: warnings,
     );
   }
