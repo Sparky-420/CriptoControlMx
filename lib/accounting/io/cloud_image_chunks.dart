@@ -2,6 +2,33 @@ import 'dart:typed_data';
 
 import '../support/sha256.dart';
 
+const int maxCloudImageChunkWritesPerBatch = 10;
+const int maxCloudImageChunkDeletesPerBatch = 400;
+
+enum CloudImageUploadPhase { writeChunks, publishCurrent, deleteStaleChunks }
+
+final class CloudImageUploadPlan {
+  const CloudImageUploadPlan({
+    required this.chunkWriteBatches,
+    required this.staleChunkDeleteBatches,
+  });
+
+  final List<List<CloudImageChunk>> chunkWriteBatches;
+  final List<List<String>> staleChunkDeleteBatches;
+
+  List<CloudImageUploadPhase> get phases => const <CloudImageUploadPhase>[
+    CloudImageUploadPhase.writeChunks,
+    CloudImageUploadPhase.publishCurrent,
+    CloudImageUploadPhase.deleteStaleChunks,
+  ];
+}
+
+typedef CloudImageChunkBatchWriter =
+    Future<void> Function(List<CloudImageChunk> chunks);
+typedef CloudImageCurrentPublisher = Future<void> Function();
+typedef CloudImageStaleChunkBatchDeleter =
+    Future<void> Function(List<String> chunkIds);
+
 final class CloudImageManifest {
   const CloudImageManifest({
     required this.imageId,
@@ -41,6 +68,40 @@ final class CloudImageChunk {
   final String imageId;
   final int index;
   final Uint8List bytes;
+}
+
+CloudImageUploadPlan planCloudImageUpload(
+  List<CloudImageChunk> chunks,
+  Iterable<String> priorChunkIds,
+) {
+  final newChunkIds = <String>{
+    for (final chunk in chunks) '${chunk.imageId}:${chunk.index}',
+  };
+  final staleIds = priorChunkIds
+      .where((id) => !newChunkIds.contains(id))
+      .toList(growable: false);
+  return CloudImageUploadPlan(
+    chunkWriteBatches: _partition(chunks, maxCloudImageChunkWritesPerBatch),
+    staleChunkDeleteBatches: _partition(
+      staleIds,
+      maxCloudImageChunkDeletesPerBatch,
+    ),
+  );
+}
+
+Future<void> executeCloudImageUploadPlan(
+  CloudImageUploadPlan plan, {
+  required CloudImageChunkBatchWriter writeChunkBatch,
+  required CloudImageCurrentPublisher publishCurrent,
+  required CloudImageStaleChunkBatchDeleter deleteStaleChunkBatch,
+}) async {
+  for (final batch in plan.chunkWriteBatches) {
+    await writeChunkBatch(batch);
+  }
+  await publishCurrent();
+  for (final batch in plan.staleChunkDeleteBatches) {
+    await deleteStaleChunkBatch(batch);
+  }
 }
 
 List<CloudImageChunk> splitCloudImage(
@@ -99,4 +160,15 @@ Uint8List joinCloudImage(
     throw const FormatException('La imagen cloud no coincide con el manifest.');
   }
   return result;
+}
+
+List<List<T>> _partition<T>(List<T> values, int maximumLength) {
+  final result = <List<T>>[];
+  for (var start = 0; start < values.length; start += maximumLength) {
+    final end = start + maximumLength < values.length
+        ? start + maximumLength
+        : values.length;
+    result.add(List<T>.unmodifiable(values.sublist(start, end)));
+  }
+  return List<List<T>>.unmodifiable(result);
 }

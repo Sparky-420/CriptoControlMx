@@ -1506,31 +1506,43 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           currentReference.collection('walletImageChunks');
       final QuerySnapshot<Map<String, dynamic>> priorChunks =
           await chunkCollection.get();
-      final WriteBatch writeBatch = FirebaseFirestore.instance.batch();
-      for (final QueryDocumentSnapshot<Map<String, dynamic>> document
-          in priorChunks.docs) {
-        writeBatch.delete(document.reference);
-      }
-      for (final CloudImageChunk chunk in cloudImageChunks) {
-        writeBatch.set(
-          chunkCollection.doc('${chunk.imageId}:${chunk.index}'),
-          <String, dynamic>{
-            'imageId': chunk.imageId,
-            'index': chunk.index,
-            'bytes': Blob(chunk.bytes),
-          },
-        );
-      }
-      writeBatch.set(currentReference, <String, dynamic>{
-        'schemaVersion': 1,
-        'uploadedAt': FieldValue.serverTimestamp(),
-        'uploadedAtLocal': uploadedAt.toIso8601String(),
-        'uploadedByDeviceId': deviceId,
-        'appName': 'CriptoControlMx',
-        if (decoded['version'] != null) 'backupVersion': decoded['version'],
-        'payload': cloudPayload,
-      }, SetOptions(merge: true));
-      await writeBatch.commit();
+      final CloudImageUploadPlan uploadPlan = planCloudImageUpload(
+        cloudImageChunks,
+        priorChunks.docs.map((document) => document.id),
+      );
+      await executeCloudImageUploadPlan(
+        uploadPlan,
+        writeChunkBatch: (List<CloudImageChunk> chunkBatch) async {
+          final WriteBatch writeBatch = FirebaseFirestore.instance.batch();
+          for (final CloudImageChunk chunk in chunkBatch) {
+            writeBatch.set(
+              chunkCollection.doc('${chunk.imageId}:${chunk.index}'),
+              <String, dynamic>{
+                'imageId': chunk.imageId,
+                'index': chunk.index,
+                'bytes': Blob(chunk.bytes),
+              },
+            );
+          }
+          await writeBatch.commit();
+        },
+        publishCurrent: () => currentReference.set(<String, dynamic>{
+          'schemaVersion': 1,
+          'uploadedAt': FieldValue.serverTimestamp(),
+          'uploadedAtLocal': uploadedAt.toIso8601String(),
+          'uploadedByDeviceId': deviceId,
+          'appName': 'CriptoControlMx',
+          if (decoded['version'] != null) 'backupVersion': decoded['version'],
+          'payload': cloudPayload,
+        }, SetOptions(merge: true)),
+        deleteStaleChunkBatch: (List<String> staleBatch) async {
+          final WriteBatch deleteBatch = FirebaseFirestore.instance.batch();
+          for (final String staleId in staleBatch) {
+            deleteBatch.delete(chunkCollection.doc(staleId));
+          }
+          await deleteBatch.commit();
+        },
+      );
       if (!mounted || !pageContext.mounted) return;
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();

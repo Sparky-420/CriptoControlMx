@@ -192,6 +192,23 @@ void main() {
     expect(decoded.bundle.settings.manualPricesUpdatedAtMs, isEmpty);
   });
 
+  test('future canonical schema is rejected instead of migrated as legacy', () {
+    const codec = DefaultAccountingBackupCodec();
+    final encoded = codec.encodeV3(completeBackupBundleFixture());
+    encoded['schemaVersion'] = 4;
+
+    expect(
+      () => codec.decodeAny(encoded),
+      throwsA(
+        isA<UnsupportedAccountingSchemaException>().having(
+          (error) => error.version,
+          'version',
+          4,
+        ),
+      ),
+    );
+  });
+
   test('v3 image-free backup remains image-free after round-trip', () {
     const codec = DefaultAccountingBackupCodec();
     final source = completeBackupBundleFixture();
@@ -286,6 +303,65 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test(
+    'Firebase upload plan bounds writes and cleans stale chunks last',
+    () async {
+      final chunks = List<CloudImageChunk>.generate(
+        21,
+        (index) => CloudImageChunk(
+          imageId: 'image-${index ~/ 3}',
+          index: index % 3,
+          bytes: Uint8List.fromList(<int>[index]),
+        ),
+      );
+      final retainedId = '${chunks.first.imageId}:${chunks.first.index}';
+      final priorIds = <String>[
+        retainedId,
+        ...List<String>.generate(805, (index) => 'stale:$index'),
+      ];
+
+      final plan = planCloudImageUpload(chunks, priorIds);
+      final events = <String>[];
+
+      await executeCloudImageUploadPlan(
+        plan,
+        writeChunkBatch: (batch) async => events.add('write:${batch.length}'),
+        publishCurrent: () async => events.add('publish'),
+        deleteStaleChunkBatch: (batch) async =>
+            events.add('delete:${batch.length}'),
+      );
+
+      expect(plan.phases, <CloudImageUploadPhase>[
+        CloudImageUploadPhase.writeChunks,
+        CloudImageUploadPhase.publishCurrent,
+        CloudImageUploadPhase.deleteStaleChunks,
+      ]);
+      expect(plan.chunkWriteBatches.map((batch) => batch.length), <int>[
+        10,
+        10,
+        1,
+      ]);
+      expect(plan.staleChunkDeleteBatches.map((batch) => batch.length), <int>[
+        400,
+        400,
+        5,
+      ]);
+      expect(
+        plan.staleChunkDeleteBatches.expand((batch) => batch),
+        isNot(contains(retainedId)),
+      );
+      expect(events, <String>[
+        'write:10',
+        'write:10',
+        'write:1',
+        'publish',
+        'delete:400',
+        'delete:400',
+        'delete:5',
+      ]);
+    },
+  );
 
   test('SharedPreferences state store reopens typed backup values', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -492,6 +568,39 @@ void main() {
 
       expect(repository.value, isNull);
       expect(images.values, isEmpty);
+    },
+  );
+
+  test(
+    'failed document compensation preserves images referenced by persisted new state',
+    () async {
+      final source = completeBackupBundleFixture();
+      final previous = previousDocumentFixture();
+      final repository = _MemoryAccountingRepository()
+        ..value = previous
+        ..failWriteCalls.add(2);
+      final images = _MemoryWalletImageStore();
+      final states = _MemoryBackupStateStore()..failNextWrite = true;
+      final service = DefaultAccountingBackupRestoreService(
+        repository,
+        images,
+        states,
+      );
+
+      await expectLater(
+        service.restore(
+          const DefaultAccountingBackupCodec().decodeAny(
+            const DefaultAccountingBackupCodec().encodeV3(source),
+          ),
+        ),
+        throwsA(isA<AccountingRestoreRollbackException>()),
+      );
+
+      expect(repository.value?.toJson(), source.document.toJson());
+      expect(
+        images.values.keys,
+        contains(source.walletImages.single.imageRef.id),
+      );
     },
   );
 
@@ -708,6 +817,8 @@ AccountingBackupBundle completeBackupBundleFixture() {
 final class _MemoryAccountingRepository implements AccountingRepository {
   AccountingDocument? value;
   bool failNextWrite = false;
+  final Set<int> failWriteCalls = <int>{};
+  int writeCalls = 0;
 
   @override
   Future<void> clear() async => value = null;
@@ -717,7 +828,8 @@ final class _MemoryAccountingRepository implements AccountingRepository {
 
   @override
   Future<void> write(AccountingDocument document) async {
-    if (failNextWrite) {
+    writeCalls++;
+    if (failNextWrite || failWriteCalls.contains(writeCalls)) {
       failNextWrite = false;
       throw StateError('injected repository failure');
     }

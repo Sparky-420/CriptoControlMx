@@ -81,8 +81,19 @@ final class DefaultAccountingBackupCodec implements AccountingBackupCodec {
 
   @override
   DecodedAccountingBackup decodeAny(Map<String, Object?> json) {
-    if (json['schemaVersion'] == accountingSchemaVersion) {
-      return _decodeV3(json);
+    final schemaVersion = json['schemaVersion'];
+    if (schemaVersion != null) {
+      if (schemaVersion is! int) {
+        throw const FormatException('schemaVersion debe ser un entero.');
+      }
+      if (schemaVersion == accountingSchemaVersion) return _decodeV3(json);
+      throw UnsupportedAccountingSchemaException(schemaVersion);
+    }
+    final legacyVersion = json['version'];
+    if (legacyVersion != null && legacyVersion != 1 && legacyVersion != 2) {
+      throw FormatException(
+        'Versión de respaldo legacy no soportada: $legacyVersion',
+      );
     }
     return _decodeLegacy(json);
   }

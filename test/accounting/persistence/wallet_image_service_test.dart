@@ -128,6 +128,50 @@ void main() {
   );
 
   test(
+    'private store rejects a corrupt pre-existing hash-path before staging',
+    () async {
+      final root = await Directory.systemTemp.createTemp('wallet_images_test_');
+      addTearDown(() => root.delete(recursive: true));
+      final bytes = Uint8List.fromList(<int>[137, 80, 78, 71]);
+      final hash = sha256BytesHex(bytes);
+      final image = ProcessedWalletImage(
+        bytes,
+        WalletImageRef.create(
+          id: hash,
+          fileName: '$hash.png',
+          mimeType: 'image/png',
+          sha256: hash,
+          width: 1,
+          height: 1,
+          byteLength: bytes.length,
+        ),
+      );
+      final imageDirectory = Directory(
+        '${root.path}${Platform.pathSeparator}wallet_images',
+      )..createSync(recursive: true);
+      final target = File(
+        '${imageDirectory.path}${Platform.pathSeparator}${image.imageRef.fileName}',
+      )..writeAsBytesSync(<int>[0, 1, 2, 3]);
+      final store = PrivateWalletImageStore(
+        applicationSupportDirectory: () async => root,
+      );
+
+      await expectLater(
+        store.stageAll(<ProcessedWalletImage>[image]),
+        throwsStateError,
+      );
+
+      expect(target.readAsBytesSync(), <int>[0, 1, 2, 3]);
+      expect(
+        imageDirectory.listSync().whereType<File>().where(
+          (file) => file.path.endsWith('.tmp'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'private store rejects unsafe or manipulated durable references',
     () async {
       final root = await Directory.systemTemp.createTemp('wallet_images_test_');

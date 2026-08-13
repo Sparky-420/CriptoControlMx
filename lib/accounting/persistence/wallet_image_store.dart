@@ -49,7 +49,17 @@ final class PrivateWalletImageStore implements WalletImageStore {
     try {
       for (final image in images) {
         final target = File(_pathFor(directory, image.imageRef));
-        if (!stagedTargets.add(target.path) || await target.exists()) {
+        if (!stagedTargets.add(target.path)) {
+          continue;
+        }
+        if (await target.exists()) {
+          final existingBytes = await target.readAsBytes();
+          if (existingBytes.length != image.imageRef.byteLength ||
+              sha256BytesHex(existingBytes) != image.imageRef.sha256) {
+            throw StateError(
+              'La imagen privada preexistente no coincide con su referencia.',
+            );
+          }
           continue;
         }
         final temporary = File(

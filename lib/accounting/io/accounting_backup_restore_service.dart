@@ -84,12 +84,14 @@ final class DefaultAccountingBackupRestoreService
       );
     } catch (writeCause) {
       Object? rollbackCause;
+      var documentRollbackSucceeded = false;
       try {
         if (previousDocument == null) {
           await _repository.clear();
         } else {
           await _repository.write(previousDocument);
         }
+        documentRollbackSucceeded = true;
       } catch (error) {
         rollbackCause = error;
       }
@@ -103,6 +105,9 @@ final class DefaultAccountingBackupRestoreService
           referencedImageIds: <String>{
             for (final wallet in previousDocument?.wallets ?? const [])
               if (wallet.imageRef != null) wallet.imageRef!.id,
+            if (!documentRollbackSucceeded)
+              for (final wallet in bundle.document.wallets)
+                if (wallet.imageRef != null) wallet.imageRef!.id,
           },
         );
       } catch (error) {
