@@ -1,6 +1,7 @@
 import 'package:cripto_control_mx/accounting/application/movement_assignment_command.dart';
 import 'package:cripto_control_mx/accounting/application/movement_assignment_service.dart';
 import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
+import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
 import 'package:cripto_control_mx/accounting/domain/assignment_audit.dart';
 import 'package:cripto_control_mx/accounting/domain/movement_normalizer.dart';
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
@@ -185,6 +186,153 @@ void main() {
     expect(audit.after.destinationWalletId, isNull);
     expect(audit.after.destinationType, DestinationType.external);
   });
+
+  test(
+    'own transfer without its destination wallet stays partially assigned',
+    () {
+      final base = transferDocumentFixture();
+      final malformed = _replaceMovement(
+        base,
+        base.movements.single.copyWith(
+          sourceWalletId: walletOneId,
+          destinationWalletId: null,
+          destinationType: DestinationType.ownWallet,
+          walletAssignmentStatus: WalletAssignmentStatus.partiallyAssigned,
+        ),
+      );
+
+      final result = service.assignOne(
+        malformed,
+        command: const AssignSourceWallet('transfer-1', walletOneId),
+        operationId: 'confirm-source-op',
+        assignedAt: DateTime.utc(2026, 8, 14),
+      );
+
+      expect(
+        result.document.movements.single.walletAssignmentStatus,
+        WalletAssignmentStatus.partiallyAssigned,
+      );
+    },
+  );
+
+  test('identical command preserves a pending draft without an audit', () {
+    final base = legacyDocumentFixture();
+    final pending = _replaceMovement(
+      base,
+      base.movements.single.copyWith(
+        destinationWalletId: walletOneId,
+        walletAssignmentStatus: WalletAssignmentStatus.pending,
+      ),
+    );
+
+    final result = service.assignOne(
+      pending,
+      command: const AssignDestinationWallet('old-1', walletOneId),
+      operationId: 'pending-repeat-op',
+      assignedAt: DateTime.utc(2026, 8, 14),
+    );
+
+    expect(result.changedIds, isEmpty);
+    expect(result.unchangedIds, <String>['old-1']);
+    expect(result.document.toJson(), pending.toJson());
+  });
+
+  test('wrong-side command rejects without changing the complete document', () {
+    final before = transferDocumentFixture();
+
+    expect(
+      () => service.assignOne(
+        before,
+        command: const AssignDestinationWallet('transfer-1', walletOneId),
+        operationId: 'wrong-side-op',
+        assignedAt: DateTime.utc(2026, 8, 14),
+      ),
+      throwsArgumentError,
+    );
+    expect(before.toJson(), transferDocumentFixture().toJson());
+  });
+
+  test('archived and virtual wallets cannot be assigned', () {
+    final before = legacyDocumentFixture();
+    final archived = Wallet(
+      id: walletOneId,
+      name: 'Mercado Pago',
+      provider: 'Mercado Pago',
+      status: WalletStatus.archived,
+      createdAt: DateTime.utc(2026, 8, 11),
+      updatedAt: DateTime.utc(2026, 8, 11),
+    );
+    final archivedDocument = _withWallets(before, <Wallet>[archived]);
+    final virtualDocument = _withWallets(before, <Wallet>[
+      Wallet(
+        id: 'virtual:unassigned',
+        name: 'Unassigned',
+        provider: 'system',
+        status: WalletStatus.active,
+        createdAt: DateTime.utc(2026, 8, 11),
+        updatedAt: DateTime.utc(2026, 8, 11),
+      ),
+    ]);
+
+    expect(
+      () => service.assignOne(
+        archivedDocument,
+        command: const AssignDestinationWallet('old-1', walletOneId),
+        operationId: 'archived-op',
+        assignedAt: DateTime.utc(2026, 8, 14),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => service.assignOne(
+        virtualDocument,
+        command: const AssignDestinationWallet('old-1', 'virtual:unassigned'),
+        operationId: 'virtual-op',
+        assignedAt: DateTime.utc(2026, 8, 14),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('audit JSON sorts changed targets by enum name', () {
+    final audit = AssignmentAudit(
+      id: 'op:movement',
+      operationId: 'op',
+      movementId: 'movement',
+      changedTargets: const <WalletAssignmentTarget>{
+        WalletAssignmentTarget.source,
+        WalletAssignmentTarget.adjustment,
+        WalletAssignmentTarget.destination,
+      },
+      before: const AssignmentStateSnapshot(
+        sourceWalletId: null,
+        destinationWalletId: null,
+        adjustmentWalletId: null,
+        destinationType: null,
+        status: WalletAssignmentStatus.legacyUnassigned,
+      ),
+      after: const AssignmentStateSnapshot(
+        sourceWalletId: null,
+        destinationWalletId: null,
+        adjustmentWalletId: null,
+        destinationType: null,
+        status: WalletAssignmentStatus.legacyUnassigned,
+      ),
+      assignedAt: DateTime.utc(2026, 8, 14),
+    );
+
+    expect(audit.toJson()['changedTargets'], <String>[
+      'adjustment',
+      'destination',
+      'source',
+    ]);
+  });
+
+  test('document JSON without assignmentAudits defaults to an empty list', () {
+    final json = legacyDocumentFixture().toJson()..remove('assignmentAudits');
+
+    expect(AccountingDocument.fromJson(json).assignmentAudits, isEmpty);
+  });
 }
 
 const walletOneId = '11111111-1111-4111-8111-111111111111';
@@ -290,6 +438,38 @@ AccountingDocument _documentFromLegacy(List<Map<String, Object?>> source) {
     legacyAccountingPolicy: migrated.legacyAccountingPolicy,
   );
 }
+
+AccountingDocument _replaceMovement(
+  AccountingDocument document,
+  AccountingMovement replacement,
+) => AccountingDocument(
+  schemaVersion: document.schemaVersion,
+  wallets: document.wallets,
+  movements: [replacement],
+  appliedMigrationIds: document.appliedMigrationIds,
+  updatedAt: document.updatedAt,
+  legacyMovementMetadata: document.legacyMovementMetadata,
+  legacyMovementMigrationMetadata: document.legacyMovementMigrationMetadata,
+  legacyMigrationProblems: document.legacyMigrationProblems,
+  assignmentAudits: document.assignmentAudits,
+  legacyAccountingPolicy: document.legacyAccountingPolicy,
+);
+
+AccountingDocument _withWallets(
+  AccountingDocument document,
+  List<Wallet> wallets,
+) => AccountingDocument(
+  schemaVersion: document.schemaVersion,
+  wallets: wallets,
+  movements: document.movements,
+  appliedMigrationIds: document.appliedMigrationIds,
+  updatedAt: document.updatedAt,
+  legacyMovementMetadata: document.legacyMovementMetadata,
+  legacyMovementMigrationMetadata: document.legacyMovementMigrationMetadata,
+  legacyMigrationProblems: document.legacyMigrationProblems,
+  assignmentAudits: document.assignmentAudits,
+  legacyAccountingPolicy: document.legacyAccountingPolicy,
+);
 
 ProjectionSummary project(AccountingDocument document) {
   final projection =

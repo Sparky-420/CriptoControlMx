@@ -108,6 +108,10 @@ final class DefaultMovementAssignmentService
         }
         afterMovement = applied;
       }
+      if (changedTargets.isEmpty) {
+        unchanged.add(movementId);
+        continue;
+      }
       afterMovement = afterMovement.copyWith(
         walletAssignmentStatus: _status(afterMovement),
       );
@@ -116,10 +120,6 @@ final class DefaultMovementAssignmentService
         throw ArgumentError(
           'Una transferencia interna requiere carteras distintas.',
         );
-      }
-      if (_sameAssignment(beforeMovement, afterMovement)) {
-        unchanged.add(movementId);
-        continue;
       }
       afterMovement = afterMovement.copyWith(updatedAt: assignedAt);
       replacements[movementId] = afterMovement;
@@ -257,10 +257,17 @@ final class DefaultMovementAssignmentService
         MovementType.transferOut =>
           movement.sourceWalletId == null && movement.destinationType == null
               ? WalletAssignmentStatus.legacyUnassigned
-              : movement.sourceWalletId != null &&
-                    movement.destinationType != null
+              : _hasCompleteTransferEndpoints(movement)
               ? WalletAssignmentStatus.assigned
               : WalletAssignmentStatus.partiallyAssigned,
+      };
+
+  bool _hasCompleteTransferEndpoints(AccountingMovement movement) =>
+      movement.sourceWalletId != null &&
+      switch (movement.destinationType) {
+        DestinationType.ownWallet => movement.destinationWalletId != null,
+        DestinationType.external => movement.destinationWalletId == null,
+        null => false,
       };
 
   AssignmentStateSnapshot _snapshot(AccountingMovement movement) =>
