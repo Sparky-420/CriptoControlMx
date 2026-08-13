@@ -117,6 +117,7 @@ final class LegacyPersistenceBridge {
       legacyMovementMetadata: metadata,
       legacyMovementMigrationMetadata: migrationMetadata,
       legacyMigrationProblems: current.legacyMigrationProblems,
+      assignmentAudits: current.assignmentAudits,
       legacyAccountingPolicy: current.legacyAccountingPolicy,
     );
     await repository.write(document);

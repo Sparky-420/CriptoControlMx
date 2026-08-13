@@ -2,6 +2,7 @@ import 'package:cripto_control_mx/accounting/adapters/legacy_movement_adapter.da
 import 'package:cripto_control_mx/accounting/adapters/legacy_persistence_bridge.dart';
 import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
 import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
+import 'package:cripto_control_mx/accounting/domain/assignment_audit.dart';
 import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
 import 'package:cripto_control_mx/accounting/migration/accounting_migrator.dart';
@@ -112,6 +113,10 @@ void main() {
       expect(
         saved.legacyMigrationProblems.map((problem) => problem.toJson()),
         current.legacyMigrationProblems.map((problem) => problem.toJson()),
+      );
+      expect(
+        saved.assignmentAudits.map((audit) => audit.toJson()),
+        current.assignmentAudits.map((audit) => audit.toJson()),
       );
       expect((await repository.read())!.toJson(), saved.toJson());
       final preferences = await SharedPreferences.getInstance();
@@ -395,6 +400,31 @@ AccountingDocument assignedDocumentFixture() {
         kind: LegacyMigrationProblemKind.unconvertible,
         sourceIndex: 1,
         primaryPayload: const <String, Object?>{'id': 'broken'},
+      ),
+    ],
+    assignmentAudits: <AssignmentAudit>[
+      AssignmentAudit(
+        id: 'assignment-op:old-1',
+        operationId: 'assignment-op',
+        movementId: 'old-1',
+        changedTargets: const <WalletAssignmentTarget>{
+          WalletAssignmentTarget.destination,
+        },
+        before: const AssignmentStateSnapshot(
+          sourceWalletId: null,
+          destinationWalletId: null,
+          adjustmentWalletId: null,
+          destinationType: null,
+          status: WalletAssignmentStatus.legacyUnassigned,
+        ),
+        after: AssignmentStateSnapshot(
+          sourceWalletId: null,
+          destinationWalletId: walletId,
+          adjustmentWalletId: null,
+          destinationType: DestinationType.ownWallet,
+          status: WalletAssignmentStatus.assigned,
+        ),
+        assignedAt: updatedAt,
       ),
     ],
   );

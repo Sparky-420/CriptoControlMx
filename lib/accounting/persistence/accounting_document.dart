@@ -1,4 +1,5 @@
 import '../domain/accounting_movement.dart';
+import '../domain/assignment_audit.dart';
 import '../domain/wallet.dart';
 import '../migration/legacy_migration_problem.dart';
 
@@ -26,6 +27,7 @@ final class AccountingDocument {
         const <String, Map<String, Object?>>{},
     List<LegacyMigrationProblem> legacyMigrationProblems =
         const <LegacyMigrationProblem>[],
+    List<AssignmentAudit> assignmentAudits = const <AssignmentAudit>[],
     LegacyAccountingPolicy legacyAccountingPolicy =
         LegacyAccountingPolicy.preservePreviousGlobal,
   }) {
@@ -41,6 +43,7 @@ final class AccountingDocument {
       legacyMovementMetadata: legacyMovementMetadata,
       legacyMovementMigrationMetadata: legacyMovementMigrationMetadata,
       legacyMigrationProblems: legacyMigrationProblems,
+      assignmentAudits: assignmentAudits,
       legacyAccountingPolicy: legacyAccountingPolicy,
     );
   }
@@ -54,6 +57,7 @@ final class AccountingDocument {
     required this.legacyMovementMetadata,
     required this.legacyMovementMigrationMetadata,
     required this.legacyMigrationProblems,
+    required this.assignmentAudits,
     required this.legacyAccountingPolicy,
   });
 
@@ -65,6 +69,7 @@ final class AccountingDocument {
   final Map<String, Map<String, Object?>> legacyMovementMetadata;
   final Map<String, Map<String, Object?>> legacyMovementMigrationMetadata;
   final List<LegacyMigrationProblem> legacyMigrationProblems;
+  final List<AssignmentAudit> assignmentAudits;
   final LegacyAccountingPolicy legacyAccountingPolicy;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -77,6 +82,9 @@ final class AccountingDocument {
     'legacyMovementMigrationMetadata': legacyMovementMigrationMetadata,
     'legacyMigrationProblems': legacyMigrationProblems
         .map((problem) => problem.toJson())
+        .toList(),
+    'assignmentAudits': assignmentAudits
+        .map((audit) => audit.toJson())
         .toList(),
     'legacyAccountingPolicy': legacyAccountingPolicy.name,
   };
@@ -130,6 +138,13 @@ final class AccountingDocument {
                 ),
               )
               .toList(),
+      assignmentAudits: (json['assignmentAudits'] as List? ?? const <Object?>[])
+          .map(
+            (audit) => AssignmentAudit.fromJson(
+              Map<String, Object?>.from(audit as Map),
+            ),
+          )
+          .toList(),
       legacyAccountingPolicy: json['legacyAccountingPolicy'] == null
           ? LegacyAccountingPolicy.preservePreviousGlobal
           : LegacyAccountingPolicy.values.byName(
