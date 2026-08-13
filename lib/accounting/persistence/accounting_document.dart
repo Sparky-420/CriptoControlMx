@@ -1,5 +1,6 @@
 import '../domain/accounting_movement.dart';
 import '../domain/wallet.dart';
+import '../migration/legacy_migration_problem.dart';
 
 const int accountingSchemaVersion = 3;
 
@@ -19,6 +20,14 @@ final class AccountingDocument {
     required List<AccountingMovement> movements,
     required Set<String> appliedMigrationIds,
     required DateTime updatedAt,
+    Map<String, Map<String, Object?>> legacyMovementMetadata =
+        const <String, Map<String, Object?>>{},
+    Map<String, Map<String, Object?>> legacyMovementMigrationMetadata =
+        const <String, Map<String, Object?>>{},
+    List<LegacyMigrationProblem> legacyMigrationProblems =
+        const <LegacyMigrationProblem>[],
+    LegacyAccountingPolicy legacyAccountingPolicy =
+        LegacyAccountingPolicy.preservePreviousGlobal,
   }) {
     if (schemaVersion != accountingSchemaVersion) {
       throw UnsupportedAccountingSchemaException(schemaVersion);
@@ -29,6 +38,10 @@ final class AccountingDocument {
       movements: movements,
       appliedMigrationIds: appliedMigrationIds,
       updatedAt: updatedAt,
+      legacyMovementMetadata: legacyMovementMetadata,
+      legacyMovementMigrationMetadata: legacyMovementMigrationMetadata,
+      legacyMigrationProblems: legacyMigrationProblems,
+      legacyAccountingPolicy: legacyAccountingPolicy,
     );
   }
 
@@ -38,6 +51,10 @@ final class AccountingDocument {
     required this.movements,
     required this.appliedMigrationIds,
     required this.updatedAt,
+    required this.legacyMovementMetadata,
+    required this.legacyMovementMigrationMetadata,
+    required this.legacyMigrationProblems,
+    required this.legacyAccountingPolicy,
   });
 
   final int schemaVersion;
@@ -45,6 +62,10 @@ final class AccountingDocument {
   final List<AccountingMovement> movements;
   final Set<String> appliedMigrationIds;
   final DateTime updatedAt;
+  final Map<String, Map<String, Object?>> legacyMovementMetadata;
+  final Map<String, Map<String, Object?>> legacyMovementMigrationMetadata;
+  final List<LegacyMigrationProblem> legacyMigrationProblems;
+  final LegacyAccountingPolicy legacyAccountingPolicy;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
@@ -52,6 +73,12 @@ final class AccountingDocument {
     'movements': movements.map((movement) => movement.toJson()).toList(),
     'appliedMigrationIds': appliedMigrationIds.toList()..sort(),
     'updatedAt': updatedAt.toIso8601String(),
+    'legacyMovementMetadata': legacyMovementMetadata,
+    'legacyMovementMigrationMetadata': legacyMovementMigrationMetadata,
+    'legacyMigrationProblems': legacyMigrationProblems
+        .map((problem) => problem.toJson())
+        .toList(),
+    'legacyAccountingPolicy': legacyAccountingPolicy.name,
   };
 
   factory AccountingDocument.fromJson(Map<String, Object?> json) {
@@ -78,6 +105,36 @@ final class AccountingDocument {
           .cast<String>()
           .toSet(),
       updatedAt: DateTime.parse(json['updatedAt']! as String),
+      legacyMovementMetadata:
+          (json['legacyMovementMetadata'] as Map? ?? const <String, Object?>{})
+              .map(
+                (key, value) => MapEntry(
+                  key as String,
+                  Map<String, Object?>.from(value as Map),
+                ),
+              ),
+      legacyMovementMigrationMetadata:
+          (json['legacyMovementMigrationMetadata'] as Map? ??
+                  const <String, Object?>{})
+              .map(
+                (key, value) => MapEntry(
+                  key as String,
+                  Map<String, Object?>.from(value as Map),
+                ),
+              ),
+      legacyMigrationProblems:
+          (json['legacyMigrationProblems'] as List? ?? const <Object?>[])
+              .map(
+                (problem) => LegacyMigrationProblem.fromJson(
+                  Map<String, Object?>.from(problem as Map),
+                ),
+              )
+              .toList(),
+      legacyAccountingPolicy: json['legacyAccountingPolicy'] == null
+          ? LegacyAccountingPolicy.preservePreviousGlobal
+          : LegacyAccountingPolicy.values.byName(
+              json['legacyAccountingPolicy']! as String,
+            ),
     );
   }
 }

@@ -23,6 +23,19 @@ final class LegacyConversionIssue {
   final LegacyConversionIssueCode code;
   final String message;
   final Object? rawValue;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'code': code.name,
+    'message': message,
+    'rawValue': rawValue,
+  };
+
+  factory LegacyConversionIssue.fromJson(Map<String, Object?> json) =>
+      LegacyConversionIssue(
+        code: LegacyConversionIssueCode.values.byName(json['code']! as String),
+        message: json['message']! as String,
+        rawValue: json['rawValue'],
+      );
 }
 
 final class LegacyMovementConversion {

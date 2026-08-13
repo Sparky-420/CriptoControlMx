@@ -14,6 +14,25 @@ import 'package:cripto_control_mx/cripto_control_app.dart' as legacy;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('legacy conversion issue JSON is lossless for migration quarantine', () {
+    const issue = LegacyConversionIssue(
+      code: LegacyConversionIssueCode.unknownMovementType,
+      message: 'tipo no reconocido',
+      rawValue: <String, Object?>{
+        'nested': <Object?>[1, true],
+      },
+    );
+
+    expect(
+      LegacyConversionIssue.fromJson(issue.toJson()).rawValue,
+      issue.rawValue,
+    );
+    expect(LegacyConversionIssue.fromJson(issue.toJson()).code, issue.code);
+    expect(
+      LegacyConversionIssue.fromJson(issue.toJson()).message,
+      issue.message,
+    );
+  });
   test('H1-08 malformed legacy input stays raw without semantic movement', () {
     final raw = <String, Object?>{
       'id': 'broken-legacy',

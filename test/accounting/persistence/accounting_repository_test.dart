@@ -215,6 +215,18 @@ void main() {
     );
   });
 
+  test('PERSIST-1 document remains readable without migration problems', () {
+    final persistedV1 = documentFixture(schemaVersion: 3).toJson()
+      ..remove('legacyMovementMetadata')
+      ..remove('legacyMigrationProblems')
+      ..remove('legacyAccountingPolicy');
+
+    final restored = AccountingDocument.fromJson(persistedV1);
+
+    expect(restored.legacyMigrationProblems, isEmpty);
+    expect(restored.toJson()['legacyMigrationProblems'], isEmpty);
+  });
+
   test(
     'repository round-trip preserves multiple movement event order',
     () async {
