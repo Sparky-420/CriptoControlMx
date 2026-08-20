@@ -359,18 +359,71 @@ void main() {
     );
   });
 
-  test('native image channel samples before decoding the full bitmap', () {
-    final source = File(
-      'android/app/src/main/kotlin/mx/criptocontrolmx/app/WalletImageChannel.kt',
-    ).readAsStringSync();
-
-    expect(source, contains('inJustDecodeBounds'));
-    expect(source, contains('inSampleSize'));
+  test('native image decode planner computes bounded sample sizes', () async {
+    final compileResult = await Process.run(
+      r'.\gradlew.bat',
+      <String>[':app:compileDebugKotlin'],
+      workingDirectory: 'android',
+      runInShell: true,
+    );
     expect(
-      source.indexOf('inJustDecodeBounds'),
-      lessThan(
-        source.indexOf('decodeByteArray(source, 0, source.size, options)'),
-      ),
+      compileResult.exitCode,
+      0,
+      reason: '${compileResult.stdout}\n${compileResult.stderr}',
+    );
+
+    final classes = Directory('build/app/tmp/kotlin-classes/debug');
+    expect(classes.existsSync(), isTrue);
+    final root = await Directory.systemTemp.createTemp(
+      'wallet_image_decode_plan_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final runner = File('${root.path}/WalletImageDecodePlannerRunner.java');
+    await runner.writeAsString('''
+package mx.criptocontrolmx.app;
+
+public final class WalletImageDecodePlannerRunner {
+  public static void main(String[] args) {
+    expect(1, WalletImageDecodePlanner.INSTANCE.inSampleSize(1024, 640, 1024));
+    expect(8, WalletImageDecodePlanner.INSTANCE.inSampleSize(12000, 8000, 1024));
+    expect(4, WalletImageDecodePlanner.INSTANCE.inSampleSize(3000, 8000, 1024));
+    try {
+      WalletImageDecodePlanner.INSTANCE.inSampleSize(0, 9000, 1024);
+      throw new AssertionError("invalid bounds accepted");
+    } catch (IllegalArgumentException expected) {
+      expect("Image bounds must be positive", expected.getMessage());
+    }
+  }
+
+  private static void expect(Object expected, Object actual) {
+    if (!expected.equals(actual)) {
+      throw new AssertionError("Expected " + expected + " but was " + actual);
+    }
+  }
+}
+''');
+
+    final javacResult = await Process.run('javac', <String>[
+      '-cp',
+      classes.path,
+      '-d',
+      root.path,
+      runner.path,
+    ]);
+    expect(
+      javacResult.exitCode,
+      0,
+      reason: '${javacResult.stdout}\n${javacResult.stderr}',
+    );
+    final javaResult = await Process.run('java', <String>[
+      '-cp',
+      '${root.path}${Platform.isWindows ? ';' : ':'}${classes.path}',
+      'mx.criptocontrolmx.app.WalletImageDecodePlannerRunner',
+    ]);
+    expect(
+      javaResult.exitCode,
+      0,
+      reason: '${javaResult.stdout}\n${javaResult.stderr}',
     );
   });
 }

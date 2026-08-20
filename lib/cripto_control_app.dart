@@ -9,7 +9,7 @@ import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sig
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'accounting/adapters/legacy_financial_adapter.dart';
@@ -102,6 +102,29 @@ const Set<String> _safeAnalyticsEvents = <String>{
   'financial_reset_opened',
   'financial_reset_completed',
 };
+
+@visibleForTesting
+Future<AccountingDocument> persistMovementsForApp({
+  required LegacyPersistenceBridge bridge,
+  required AccountingDocument currentDocument,
+  required Iterable<Movement> movements,
+  Set<String> deletedMovementIds = const <String>{},
+}) {
+  return bridge.saveLegacyView(
+    currentDocument,
+    movements.map((Movement movement) => movement.toJson()).toList(),
+    deletedIds: deletedMovementIds,
+  );
+}
+
+@visibleForTesting
+Future<void> clearFinancialResetAccountingState({
+  required LegacyPersistenceBridge bridge,
+  required VoidCallback clearRuntimeDocument,
+}) async {
+  await bridge.clearCanonicalDocument();
+  clearRuntimeDocument();
+}
 
 enum GoogleDriveSessionStatus {
   accountChecking,
@@ -3154,10 +3177,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         (await _legacyPersistenceBridge.load(
           const <Map<String, Object?>>[],
         )).document;
-    _accountingDocument = await _legacyPersistenceBridge.saveLegacyView(
-      current,
-      _movements.map((movement) => movement.toJson()).toList(),
-      deletedIds: deletedMovementIds,
+    _accountingDocument = await persistMovementsForApp(
+      bridge: _legacyPersistenceBridge,
+      currentDocument: current,
+      movements: _movements,
+      deletedMovementIds: deletedMovementIds,
     );
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
@@ -5581,11 +5605,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       ]) {
         await prefs.remove(key);
       }
-      await _legacyPersistenceBridge.clearCanonicalDocument();
+      await clearFinancialResetAccountingState(
+        bridge: _legacyPersistenceBridge,
+        clearRuntimeDocument: () => _accountingDocument = null,
+      );
 
       if (!mounted) return false;
       setState(() {
-        _accountingDocument = null;
         _movements.clear();
         _snapshots.clear();
         _currentPrices

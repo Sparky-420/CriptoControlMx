@@ -46,7 +46,11 @@ internal class WalletImageChannel(messenger: BinaryMessenger) {
         BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Invalid image bytes" }
         val options = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maxLongEdge)
+            inSampleSize = WalletImageDecodePlanner.inSampleSize(
+                bounds.outWidth,
+                bounds.outHeight,
+                maxLongEdge,
+            )
         }
         val decoded = BitmapFactory.decodeByteArray(source, 0, source.size, options)
             ?: throw IllegalArgumentException("Invalid image bytes")
@@ -83,14 +87,6 @@ internal class WalletImageChannel(messenger: BinaryMessenger) {
             (bitmap.height * ratio).toInt().coerceAtLeast(1),
             true,
         )
-    }
-
-    private fun sampleSize(width: Int, height: Int, maxLongEdge: Int): Int {
-        var sample = 1
-        while (max(width, height) / sample > maxLongEdge * 2) {
-            sample *= 2
-        }
-        return sample
     }
 
     private companion object {

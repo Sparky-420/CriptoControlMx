@@ -1,6 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:cripto_control_mx/accounting/adapters/legacy_movement_adapter.dart';
+import 'package:cripto_control_mx/accounting/adapters/legacy_persistence_bridge.dart';
+import 'package:cripto_control_mx/accounting/application/wallet_lifecycle_coordinator.dart';
+import 'package:cripto_control_mx/accounting/application/wallet_lifecycle_service.dart';
+import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
+import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
+import 'package:cripto_control_mx/accounting/domain/wallet.dart';
+import 'package:cripto_control_mx/accounting/migration/accounting_migrator.dart';
+import 'package:cripto_control_mx/accounting/persistence/accounting_document.dart';
+import 'package:cripto_control_mx/accounting/persistence/shared_preferences_accounting_repository.dart';
 import 'package:cripto_control_mx/cripto_control_app.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('movement parser keeps stored JSON values compatible', () {
@@ -48,6 +59,60 @@ void main() {
     expect(numberFromJson(null), 0);
     expect(numberFromJson('bad'), 0);
   });
+
+  test(
+    'app movement persistence forwards deleted movement ids to v3',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final document = _accountingDocumentForAppSeamTest();
+      final repository = SharedPreferencesAccountingRepository();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(LegacyMovementAdapter()),
+        const LegacyMovementAdapter(),
+        _NoopLifecycleCoordinator(),
+      );
+
+      final saved = await persistMovementsForApp(
+        bridge: bridge,
+        currentDocument: document,
+        movements: const <Movement>[],
+        deletedMovementIds: const <String>{'movement-to-delete'},
+      );
+
+      expect(saved.movements, isEmpty);
+      expect(
+        saved.legacyMovementMetadata.containsKey('movement-to-delete'),
+        isFalse,
+      );
+      expect((await repository.read())!.toJson(), saved.toJson());
+    },
+  );
+
+  test(
+    'financial reset seam clears canonical v3 and runtime document',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final document = _accountingDocumentForAppSeamTest();
+      final repository = SharedPreferencesAccountingRepository();
+      await repository.write(document);
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(LegacyMovementAdapter()),
+        const LegacyMovementAdapter(),
+        _NoopLifecycleCoordinator(),
+      );
+      AccountingDocument? runtimeDocument = document;
+
+      await clearFinancialResetAccountingState(
+        bridge: bridge,
+        clearRuntimeDocument: () => runtimeDocument = null,
+      );
+
+      expect(await repository.read(), isNull);
+      expect(runtimeDocument, isNull);
+    },
+  );
 
   group('Mercado Pago OCR amount ranking', () {
     test('separates total, commission, unit price and crypto quantity', () {
@@ -273,3 +338,69 @@ Map<String, Object?> _parseOcrForTest(String text) {
 }
 
 void _noop() {}
+
+AccountingDocument _accountingDocumentForAppSeamTest() {
+  final createdAt = DateTime.utc(2026, 8, 20);
+  const walletId = '11111111-1111-4111-8111-111111111111';
+  return AccountingDocument(
+    schemaVersion: accountingSchemaVersion,
+    wallets: <Wallet>[
+      Wallet.create(
+        id: walletId,
+        name: 'Mercado Pago',
+        provider: 'Mercado Pago',
+        createdAt: createdAt,
+      ),
+    ],
+    movements: <AccountingMovement>[
+      AccountingMovement(
+        id: 'movement-to-delete',
+        type: MovementType.buy,
+        asset: 'BTC',
+        occurredAt: createdAt,
+        quantity: AccountingAmount.parse('0.5'),
+        unitPriceFiat: AccountingAmount.fromInt(100000),
+        fiatFeeAmount: AccountingAmount.zero,
+        destinationWalletId: walletId,
+        destinationType: DestinationType.ownWallet,
+        walletAssignmentStatus: WalletAssignmentStatus.assigned,
+        reconciliationLinks: const <ReconciliationLink>[],
+        cryptoFeeAmount: AccountingAmount.zero,
+        fiatFeeTreatment: FiatFeeTreatment.none,
+        createdAt: createdAt,
+        updatedAt: createdAt,
+      ),
+    ],
+    appliedMigrationIds: const <String>{},
+    updatedAt: createdAt,
+    legacyMovementMetadata: const <String, Map<String, Object?>>{
+      'movement-to-delete': <String, Object?>{
+        'id': 'movement-to-delete',
+        'type': 'buy',
+        'coin': 'BTC',
+        'date': '2026-08-20T00:00:00.000Z',
+        'quantity': '0.5',
+        'unitPrice': '100000',
+        'fee': '0',
+      },
+    },
+  );
+}
+
+final class _NoopLifecycleCoordinator implements WalletLifecycleCoordinator {
+  @override
+  Future<WalletDeleteCommitResult> commitDelete(
+    PreparedWalletDeletion prepared,
+  ) {
+    throw UnsupportedError('not used by app seam tests');
+  }
+
+  @override
+  Future<WalletImageCleanupResult> recoverPendingCleanup() async {
+    return const WalletImageCleanupResult(
+      deletedImageIds: <String>{},
+      stillReferencedImageIds: <String>{},
+      pendingRetryImageIds: <String>{},
+    );
+  }
+}
