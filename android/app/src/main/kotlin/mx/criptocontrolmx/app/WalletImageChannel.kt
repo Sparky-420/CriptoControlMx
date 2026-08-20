@@ -24,6 +24,8 @@ internal class WalletImageChannel(messenger: BinaryMessenger) {
                 result.success(process(source, preserveAlpha, maxLongEdge, jpegQuality))
             } catch (error: IllegalArgumentException) {
                 result.error("invalid_image", error.message, null)
+            } catch (error: OutOfMemoryError) {
+                result.error("image_processing_failed", error.message, null)
             } catch (error: Exception) {
                 result.error("image_processing_failed", error.message, null)
             }
@@ -38,7 +40,15 @@ internal class WalletImageChannel(messenger: BinaryMessenger) {
     ): Map<String, Any> {
         require(source.isNotEmpty()) { "bytes is required" }
         require(maxLongEdge > 0) { "maxLongEdge must be positive" }
-        val decoded = BitmapFactory.decodeByteArray(source, 0, source.size)
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Invalid image bytes" }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, maxLongEdge)
+        }
+        val decoded = BitmapFactory.decodeByteArray(source, 0, source.size, options)
             ?: throw IllegalArgumentException("Invalid image bytes")
         val bitmap = scaleIfNeeded(decoded, maxLongEdge)
         if (bitmap !== decoded) decoded.recycle()
@@ -73,6 +83,14 @@ internal class WalletImageChannel(messenger: BinaryMessenger) {
             (bitmap.height * ratio).toInt().coerceAtLeast(1),
             true,
         )
+    }
+
+    private fun sampleSize(width: Int, height: Int, maxLongEdge: Int): Int {
+        var sample = 1
+        while (max(width, height) / sample > maxLongEdge * 2) {
+            sample *= 2
+        }
+        return sample
     }
 
     private companion object {

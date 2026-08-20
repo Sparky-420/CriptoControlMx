@@ -133,6 +133,13 @@ final class LegacyPersistenceBridge {
     return document;
   }
 
+  Future<AccountingDocument> deleteLegacyIds(
+    AccountingDocument current,
+    Set<String> deletedIds,
+  ) => saveLegacyView(current, _legacyView(current), deletedIds: deletedIds);
+
+  Future<void> clearCanonicalDocument() => repository.clear();
+
   List<Map<String, Object?>> _legacyView(AccountingDocument document) =>
       document.movements
           .map(

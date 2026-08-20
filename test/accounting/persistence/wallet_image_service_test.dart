@@ -128,6 +128,85 @@ void main() {
   );
 
   test(
+    'commit cleans a staged temporary when an equivalent target appears first',
+    () async {
+      final root = await Directory.systemTemp.createTemp('wallet_images_test_');
+      addTearDown(() => root.delete(recursive: true));
+      final bytes = Uint8List.fromList(<int>[137, 80, 78, 71]);
+      final hash = sha256BytesHex(bytes);
+      final image = ProcessedWalletImage(
+        bytes,
+        WalletImageRef.create(
+          id: hash,
+          fileName: '$hash.png',
+          mimeType: 'image/png',
+          sha256: hash,
+          width: 1,
+          height: 1,
+          byteLength: bytes.length,
+        ),
+      );
+      final store = PrivateWalletImageStore(
+        applicationSupportDirectory: () async => root,
+      );
+
+      final first = await store.stageAll(<ProcessedWalletImage>[image]);
+      final second = await store.stageAll(<ProcessedWalletImage>[image]);
+      await first.commit();
+      await second.commit();
+
+      final files = await Directory(
+        '${root.path}${Platform.pathSeparator}wallet_images',
+      ).list().toList();
+      expect(
+        files.map((file) => file.path).where((path) => path.endsWith('.tmp')),
+        isEmpty,
+      );
+      expect(files, hasLength(1));
+      expect(await store.read(image.imageRef), image.bytes);
+    },
+  );
+
+  test('commit rejects a corrupt target that appears after staging', () async {
+    final root = await Directory.systemTemp.createTemp('wallet_images_test_');
+    addTearDown(() => root.delete(recursive: true));
+    final bytes = Uint8List.fromList(<int>[137, 80, 78, 71]);
+    final hash = sha256BytesHex(bytes);
+    final image = ProcessedWalletImage(
+      bytes,
+      WalletImageRef.create(
+        id: hash,
+        fileName: '$hash.png',
+        mimeType: 'image/png',
+        sha256: hash,
+        width: 1,
+        height: 1,
+        byteLength: bytes.length,
+      ),
+    );
+    final store = PrivateWalletImageStore(
+      applicationSupportDirectory: () async => root,
+    );
+
+    final batch = await store.stageAll(<ProcessedWalletImage>[image]);
+    final imageDirectory = Directory(
+      '${root.path}${Platform.pathSeparator}wallet_images',
+    );
+    final target = File(
+      '${imageDirectory.path}${Platform.pathSeparator}${image.imageRef.fileName}',
+    )..writeAsBytesSync(<int>[0, 1, 2, 3], flush: true);
+
+    await expectLater(batch.commit(), throwsStateError);
+    expect(target.readAsBytesSync(), <int>[0, 1, 2, 3]);
+    expect(
+      imageDirectory.listSync().whereType<File>().where(
+        (file) => file.path.endsWith('.tmp'),
+      ),
+      isEmpty,
+    );
+  });
+
+  test(
     'private store rejects a corrupt pre-existing hash-path before staging',
     () async {
       final root = await Directory.systemTemp.createTemp('wallet_images_test_');
@@ -277,6 +356,21 @@ void main() {
         preserveAlpha: false,
       ),
       throwsA(isA<WalletImageProcessingException>()),
+    );
+  });
+
+  test('native image channel samples before decoding the full bitmap', () {
+    final source = File(
+      'android/app/src/main/kotlin/mx/criptocontrolmx/app/WalletImageChannel.kt',
+    ).readAsStringSync();
+
+    expect(source, contains('inJustDecodeBounds'));
+    expect(source, contains('inSampleSize'));
+    expect(
+      source.indexOf('inJustDecodeBounds'),
+      lessThan(
+        source.indexOf('decodeByteArray(source, 0, source.size, options)'),
+      ),
     );
   });
 }

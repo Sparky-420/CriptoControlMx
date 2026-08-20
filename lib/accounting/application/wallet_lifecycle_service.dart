@@ -165,9 +165,16 @@ final class DefaultWalletLifecycleService implements WalletLifecycleService {
     required DateTime updatedAt,
   }) {
     final source = _wallet(document, sourceWalletId);
-    _wallet(document, targetWalletId);
+    final target = _wallet(document, targetWalletId);
     if (sourceWalletId == targetWalletId) {
       throw ArgumentError('Las carteras origen y destino deben ser distintas.');
+    }
+    if (target.status != WalletStatus.active) {
+      throw ArgumentError.value(
+        targetWalletId,
+        'targetWalletId',
+        'La cartera destino debe estar activa.',
+      );
     }
     final replacements = <AccountingMovement>[];
     for (final movement in document.movements) {

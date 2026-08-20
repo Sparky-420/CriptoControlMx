@@ -3144,7 +3144,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _priceRefreshTimer = null;
   }
 
-  Future<void> _saveData() async {
+  Future<void> _saveData({
+    Set<String> deletedMovementIds = const <String>{},
+  }) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
 
     final current =
@@ -3155,6 +3157,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     _accountingDocument = await _legacyPersistenceBridge.saveLegacyView(
       current,
       _movements.map((movement) => movement.toJson()).toList(),
+      deletedIds: deletedMovementIds,
     );
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
@@ -3236,9 +3239,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await _saveSnapshots();
   }
 
-  Future<void> _saveMovementAndMaybeSnapshot(SnapshotTrigger trigger) async {
+  Future<void> _saveMovementAndMaybeSnapshot(
+    SnapshotTrigger trigger, {
+    Set<String> deletedMovementIds = const <String>{},
+  }) async {
     await _captureAutomaticSnapshotIfNeeded(trigger);
-    await _saveData();
+    await _saveData(deletedMovementIds: deletedMovementIds);
   }
 
   Map<String, CoinStats> _computeStats() {
@@ -5575,9 +5581,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       ]) {
         await prefs.remove(key);
       }
+      await _legacyPersistenceBridge.clearCanonicalDocument();
 
       if (!mounted) return false;
       setState(() {
+        _accountingDocument = null;
         _movements.clear();
         _snapshots.clear();
         _currentPrices
@@ -5828,7 +5836,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             ),
             onDelete: (Movement movement) {
               setState(() => _movements.remove(movement));
-              _saveMovementAndMaybeSnapshot(SnapshotTrigger.movementChange);
+              _saveMovementAndMaybeSnapshot(
+                SnapshotTrigger.movementChange,
+                deletedMovementIds: <String>{movement.id},
+              );
             },
           );
 

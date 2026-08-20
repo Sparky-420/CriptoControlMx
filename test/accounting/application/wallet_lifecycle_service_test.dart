@@ -291,6 +291,22 @@ void main() {
     },
   );
 
+  test('reassign rejects an archived target wallet', () {
+    const sourceId = '11111111-1111-4111-8111-111111111111';
+    const targetId = '22222222-2222-4222-8222-222222222222';
+    final document = documentWithArchivedTarget();
+
+    expect(
+      () => service.prepareReassignAndDelete(
+        document,
+        sourceWalletId: sourceId,
+        targetWalletId: targetId,
+        updatedAt: clock,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test(
     'cleanup journal deduplicates ids and repeated replace is byte-equivalent',
     () async {
@@ -794,6 +810,30 @@ AccountingDocument reassignableDocument({List<AccountingMovement>? movements}) {
     legacyMovementMetadata: const <String, Map<String, Object?>>{
       'source-1': <String, Object?>{'platform': 'preserved'},
     },
+  );
+}
+
+AccountingDocument documentWithArchivedTarget() {
+  final document = reassignableDocument();
+  final archivedTarget = Wallet(
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Target',
+    provider: 'Provider B',
+    status: WalletStatus.archived,
+    createdAt: DateTime.utc(2026, 8, 11),
+    updatedAt: DateTime.utc(2026, 8, 12),
+  );
+  return AccountingDocument(
+    schemaVersion: document.schemaVersion,
+    wallets: <Wallet>[document.wallets.first, archivedTarget],
+    movements: document.movements,
+    appliedMigrationIds: document.appliedMigrationIds,
+    updatedAt: document.updatedAt,
+    legacyMovementMetadata: document.legacyMovementMetadata,
+    legacyMovementMigrationMetadata: document.legacyMovementMigrationMetadata,
+    legacyMigrationProblems: document.legacyMigrationProblems,
+    assignmentAudits: document.assignmentAudits,
+    legacyAccountingPolicy: document.legacyAccountingPolicy,
   );
 }
 

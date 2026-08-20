@@ -66,7 +66,7 @@ final class PrivateWalletImageStore implements WalletImageStore {
           '${target.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
         );
         await temporary.writeAsBytes(image.bytes, flush: true);
-        staged.add(_StagedImage(temporary, target, image.imageRef.id));
+        staged.add(_StagedImage(temporary, target, image.imageRef));
       }
     } catch (_) {
       for (final item in staged) {
@@ -161,10 +161,10 @@ final class PrivateWalletImageStore implements WalletImageStore {
 }
 
 final class _StagedImage {
-  const _StagedImage(this.temporary, this.target, this.imageId);
+  const _StagedImage(this.temporary, this.target, this.imageRef);
   final File temporary;
   final File target;
-  final String imageId;
+  final WalletImageRef imageRef;
 }
 
 final class _PrivateWalletImageWriteBatch implements WalletImageWriteBatch {
@@ -177,13 +177,27 @@ final class _PrivateWalletImageWriteBatch implements WalletImageWriteBatch {
   @override
   Future<void> commit() async {
     if (_committed || _rolledBack) return;
-    for (final item in _staged) {
-      if (await item.temporary.exists() && !await item.target.exists()) {
+    try {
+      for (final item in _staged) {
+        if (!await item.temporary.exists()) {
+          if (await item.target.exists()) await _verifyTarget(item);
+          continue;
+        }
+        if (await item.target.exists()) {
+          await _verifyTarget(item);
+          await item.temporary.delete();
+          continue;
+        }
         await item.temporary.rename(item.target.path);
         _promoted.add(item);
       }
+      _committed = true;
+    } catch (_) {
+      for (final item in _staged) {
+        if (await item.temporary.exists()) await item.temporary.delete();
+      }
+      rethrow;
     }
-    _committed = true;
   }
 
   @override
@@ -195,11 +209,21 @@ final class _PrivateWalletImageWriteBatch implements WalletImageWriteBatch {
       if (await item.temporary.exists()) await item.temporary.delete();
     }
     for (final item in _promoted) {
-      if (!referencedImageIds.contains(item.imageId) &&
+      if (!referencedImageIds.contains(item.imageRef.id) &&
           await item.target.exists()) {
         await item.target.delete();
       }
     }
     _rolledBack = true;
+  }
+
+  Future<void> _verifyTarget(_StagedImage item) async {
+    final bytes = await item.target.readAsBytes();
+    if (bytes.length != item.imageRef.byteLength ||
+        sha256BytesHex(bytes) != item.imageRef.sha256) {
+      throw StateError(
+        'La imagen privada preexistente no coincide con su referencia.',
+      );
+    }
   }
 }

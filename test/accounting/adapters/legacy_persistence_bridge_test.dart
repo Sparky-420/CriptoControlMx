@@ -240,6 +240,51 @@ void main() {
   );
 
   test(
+    'deleteLegacyIds persists removal without requiring the deleted legacy row',
+    () async {
+      final current = assignedDocumentFixture();
+      final repository = SharedPreferencesAccountingRepository();
+      final bridge = LegacyPersistenceBridge(
+        repository,
+        const AccountingMigrator(adapter),
+        adapter,
+        RecordingLifecycleCoordinator(),
+      );
+
+      final saved = await bridge.deleteLegacyIds(current, const <String>{
+        'old-1',
+      });
+
+      expect(saved.movements, isEmpty);
+      expect(saved.legacyMovementMetadata.containsKey('old-1'), isFalse);
+      expect(
+        saved.legacyMovementMigrationMetadata.containsKey('old-1'),
+        isFalse,
+      );
+      expect((await repository.read())!.toJson(), saved.toJson());
+    },
+  );
+
+  test('clearCanonicalDocument removes authoritative v3 state', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final current = assignedDocumentFixture();
+    final repository = SharedPreferencesAccountingRepository();
+    await repository.write(current);
+    final bridge = LegacyPersistenceBridge(
+      repository,
+      const AccountingMigrator(adapter),
+      adapter,
+      RecordingLifecycleCoordinator(),
+    );
+
+    await bridge.clearCanonicalDocument();
+
+    expect(await repository.read(), isNull);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.containsKey(accountingDocumentKey), isFalse);
+  });
+
+  test(
     'load keeps persisted v3 authoritative over conflicting legacy source',
     () async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
