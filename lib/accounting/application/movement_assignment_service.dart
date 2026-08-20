@@ -179,7 +179,7 @@ final class DefaultMovementAssignmentService
       AssignDestinationWallet() =>
         movement.type == MovementType.buy ||
             (movement.type == MovementType.transferIn &&
-                movement.destinationType == DestinationType.external),
+                movement.destinationType == null),
       AssignSourceWallet() =>
         movement.type == MovementType.sell ||
             movement.type == MovementType.transferOut,

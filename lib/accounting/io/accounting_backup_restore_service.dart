@@ -131,7 +131,7 @@ final class DefaultAccountingBackupRestoreService
 
 void _validateBundle(AccountingBackupBundle bundle) {
   final walletIds = <String>{};
-  final imageRefs = <String, Object?>{};
+  final imageRefs = <String, Map<String, Object?>>{};
   for (final wallet in bundle.document.wallets) {
     if (wallet.id.trim().isEmpty || !walletIds.add(wallet.id)) {
       throw const FormatException('ID de cartera inválido o duplicado.');
@@ -143,14 +143,23 @@ void _validateBundle(AccountingBackupBundle bundle) {
       'image/jpeg' => 'jpg',
       _ => null,
     };
+    final imageRefJson = imageRef.toJson();
+    final existingImageRefJson = imageRefs[imageRef.id];
     if (extension == null ||
         imageRef.id != imageRef.sha256 ||
         imageRef.fileName != '${imageRef.sha256}.$extension' ||
-        !RegExp(r'^[0-9a-f]{64}$').hasMatch(imageRef.sha256) ||
-        imageRefs.containsKey(imageRef.id)) {
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(imageRef.sha256)) {
       throw const FormatException('Referencia de imagen inválida o duplicada.');
     }
-    imageRefs[imageRef.id] = imageRef.toJson();
+    if (existingImageRefJson != null) {
+      if (canonicalJson(existingImageRefJson) != canonicalJson(imageRefJson)) {
+        throw const FormatException(
+          'Referencia de imagen inválida o duplicada.',
+        );
+      }
+      continue;
+    }
+    imageRefs[imageRef.id] = imageRefJson;
   }
   final movementIds = <String>{};
   for (final movement in bundle.document.movements) {

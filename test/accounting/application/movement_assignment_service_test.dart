@@ -104,6 +104,47 @@ void main() {
     expect(external.document.movements.single.destinationWalletId, isNull);
   });
 
+  test('assigns legacy transferIn destination without destination type', () {
+    final before = _documentFromLegacy(<Map<String, Object?>>[
+      <String, Object?>{
+        'id': 'incoming-1',
+        'type': 'transfer_in',
+        'coin': 'UNI',
+        'date': '2026-08-11T12:00:00Z',
+        'quantity': '3',
+        'unitPrice': '80',
+        'fee': '0',
+      },
+    ]);
+
+    expect(
+      () => service.assignOne(
+        before,
+        command: const AssignSourceWallet('incoming-1', walletOneId),
+        operationId: 'incoming-wrong-side-op',
+        assignedAt: DateTime.utc(2026, 8, 15),
+      ),
+      throwsArgumentError,
+    );
+
+    final result = service.assignOne(
+      before,
+      command: const AssignDestinationWallet('incoming-1', walletOneId),
+      operationId: 'incoming-destination-op',
+      assignedAt: DateTime.utc(2026, 8, 15),
+    );
+
+    final movement = result.document.movements.single;
+    expect(result.changedIds, <String>['incoming-1']);
+    expect(movement.destinationWalletId, walletOneId);
+    expect(movement.destinationType, isNull);
+    expect(movement.walletAssignmentStatus, WalletAssignmentStatus.assigned);
+    expect(
+      result.document.assignmentAudits.single.after.destinationType,
+      isNull,
+    );
+  });
+
   test('assignMany is atomic and records one audit per changed movement', () {
     final before = twoTransferDocumentFixture();
     final beforeJson = before.toJson();

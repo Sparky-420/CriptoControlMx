@@ -51,6 +51,126 @@ void main() {
     expect(reopened.settings.toJson(), source.settings.toJson());
   });
 
+  test(
+    'restore accepts multiple wallets sharing the same valid image',
+    () async {
+      final source = completeBackupBundleFixture();
+      final sharedImage = source.walletImages.single;
+      final secondWallet = Wallet.create(
+        id: '55555555-5555-4555-8555-555555555555',
+        name: 'Secundaria',
+        provider: 'Bitso',
+        createdAt: source.exportedAt,
+        imageRef: sharedImage.imageRef,
+      );
+      final document = AccountingDocument(
+        schemaVersion: source.document.schemaVersion,
+        wallets: <Wallet>[...source.document.wallets, secondWallet],
+        movements: source.document.movements,
+        appliedMigrationIds: source.document.appliedMigrationIds,
+        updatedAt: source.document.updatedAt,
+        legacyMovementMetadata: source.document.legacyMovementMetadata,
+        legacyMovementMigrationMetadata:
+            source.document.legacyMovementMigrationMetadata,
+        legacyMigrationProblems: source.document.legacyMigrationProblems,
+        assignmentAudits: source.document.assignmentAudits,
+        legacyAccountingPolicy: source.document.legacyAccountingPolicy,
+      );
+      final sharedBundle = AccountingBackupBundle(
+        document: document,
+        snapshots: source.snapshots,
+        currentPrices: source.currentPrices,
+        settings: source.settings,
+        walletImages: <PortableWalletImage>[sharedImage],
+        exportedAt: source.exportedAt,
+        preservedTopLevelFields: source.preservedTopLevelFields,
+      );
+      final repository = _MemoryAccountingRepository();
+      final images = _MemoryWalletImageStore();
+      final states = _MemoryBackupStateStore();
+      final service = DefaultAccountingBackupRestoreService(
+        repository,
+        images,
+        states,
+      );
+
+      final restored = await service.restore(
+        const DefaultAccountingBackupCodec().decodeAny(
+          const DefaultAccountingBackupCodec().encodeV3(sharedBundle),
+        ),
+      );
+
+      expect(restored.document.wallets, hasLength(2));
+      expect(images.values, hasLength(1));
+      expect(await images.read(sharedImage.imageRef), sharedImage.bytes);
+    },
+  );
+
+  test(
+    'restore rejects shared image ids with contradictory metadata before staging',
+    () async {
+      final source = completeBackupBundleFixture();
+      final sharedImage = source.walletImages.single;
+      final contradictoryImageRef = WalletImageRef.create(
+        id: sharedImage.imageRef.id,
+        fileName: '${sharedImage.imageRef.sha256}.jpg',
+        mimeType: 'image/jpeg',
+        sha256: sharedImage.imageRef.sha256,
+        width: sharedImage.imageRef.width,
+        height: sharedImage.imageRef.height,
+        byteLength: sharedImage.imageRef.byteLength,
+      );
+      final secondWallet = Wallet.create(
+        id: '55555555-5555-4555-8555-555555555555',
+        name: 'Secundaria',
+        provider: 'Bitso',
+        createdAt: source.exportedAt,
+        imageRef: contradictoryImageRef,
+      );
+      final document = AccountingDocument(
+        schemaVersion: source.document.schemaVersion,
+        wallets: <Wallet>[...source.document.wallets, secondWallet],
+        movements: source.document.movements,
+        appliedMigrationIds: source.document.appliedMigrationIds,
+        updatedAt: source.document.updatedAt,
+        legacyMovementMetadata: source.document.legacyMovementMetadata,
+        legacyMovementMigrationMetadata:
+            source.document.legacyMovementMigrationMetadata,
+        legacyMigrationProblems: source.document.legacyMigrationProblems,
+        assignmentAudits: source.document.assignmentAudits,
+        legacyAccountingPolicy: source.document.legacyAccountingPolicy,
+      );
+      final repository = _MemoryAccountingRepository();
+      final images = _MemoryWalletImageStore();
+      final states = _MemoryBackupStateStore();
+      final service = DefaultAccountingBackupRestoreService(
+        repository,
+        images,
+        states,
+      );
+
+      await expectLater(
+        service.restore(
+          DecodedAccountingBackup(
+            bundle: AccountingBackupBundle(
+              document: document,
+              snapshots: source.snapshots,
+              currentPrices: source.currentPrices,
+              settings: source.settings,
+              walletImages: <PortableWalletImage>[sharedImage],
+              exportedAt: source.exportedAt,
+              preservedTopLevelFields: source.preservedTopLevelFields,
+            ),
+            origin: AccountingBackupOrigin.schemaV3,
+            warnings: const <String>[],
+          ),
+        ),
+        throwsFormatException,
+      );
+      expect(images.stageCalls, 0);
+    },
+  );
+
   test('v3 codec preserves the complete canonical bundle and extensions', () {
     final source = completeBackupBundleFixture();
     const codec = DefaultAccountingBackupCodec();
