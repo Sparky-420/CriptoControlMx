@@ -19,7 +19,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "mx.criptocontrolmx.app"
-    compileSdk = 35
+    compileSdk = 36
     // Pin a stable NDK version instead of using flutter.ndkVersion. This avoids builds
     // failing when a locally cached Flutter-selected NDK folder is malformed/corrupt.
     ndkVersion = "27.0.12077973"
@@ -36,7 +36,7 @@ android {
     defaultConfig {
         applicationId = "mx.criptocontrolmx.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
