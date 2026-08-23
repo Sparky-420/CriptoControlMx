@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
 import 'package:cripto_control_mx/accounting/persistence/accounting_document.dart';
 import 'package:cripto_control_mx/accounting/persistence/accounting_repository.dart';
+import 'package:cripto_control_mx/accounting/persistence/wallet_image_processor.dart';
+import 'package:cripto_control_mx/accounting/persistence/wallet_image_store.dart';
 import 'package:cripto_control_mx/wallets/application/wallet_edit_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -59,6 +63,77 @@ void main() {
         expect(repository.written, same(result.document));
       },
     );
+
+    test('updates wallet image through processor and private store', () async {
+      final repository = _MemoryAccountingRepository();
+      final processor = _FakeWalletImageProcessor();
+      final store = _FakeWalletImageStore();
+      final service = DefaultWalletEditService(
+        repository,
+        imageProcessor: processor,
+        imageStore: store,
+      );
+      final existing = Wallet.create(
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'Bitso',
+        provider: 'Bitso',
+        createdAt: DateTime.utc(2026, 8, 23),
+      );
+
+      final result = await service.updateWallet(
+        _document(wallets: <Wallet>[existing]),
+        walletId: existing.id,
+        name: 'Bitso',
+        provider: 'Bitso',
+        imageBytes: Uint8List.fromList(<int>[1, 2, 3]),
+        now: DateTime.utc(2026, 8, 24),
+      );
+
+      expect(processor.sources, <List<int>>[
+        <int>[1, 2, 3],
+      ]);
+      expect(store.staged, <ProcessedWalletImage>[processor.image]);
+      expect(store.batch.committed, isTrue);
+      expect(store.batch.rolledBack, isFalse);
+      expect(result.wallet.imageRef, processor.image.imageRef);
+      expect(
+        repository.written!.wallets.single.imageRef,
+        processor.image.imageRef,
+      );
+    });
+
+    test('rolls back staged image when canonical write fails', () async {
+      final repository = _MemoryAccountingRepository(failWrite: true);
+      final processor = _FakeWalletImageProcessor();
+      final store = _FakeWalletImageStore();
+      final service = DefaultWalletEditService(
+        repository,
+        imageProcessor: processor,
+        imageStore: store,
+      );
+      final existing = Wallet.create(
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'Bitso',
+        provider: 'Bitso',
+        createdAt: DateTime.utc(2026, 8, 23),
+      );
+
+      await expectLater(
+        service.updateWallet(
+          _document(wallets: <Wallet>[existing]),
+          walletId: existing.id,
+          name: 'Bitso',
+          provider: 'Bitso',
+          imageBytes: Uint8List.fromList(<int>[1]),
+          now: DateTime.utc(2026, 8, 24),
+        ),
+        throwsStateError,
+      );
+
+      expect(store.batch.committed, isTrue);
+      expect(store.batch.rolledBack, isTrue);
+      expect(repository.written, isNull);
+    });
   });
 }
 
@@ -72,6 +147,9 @@ AccountingDocument _document({required List<Wallet> wallets}) =>
     );
 
 final class _MemoryAccountingRepository implements AccountingRepository {
+  _MemoryAccountingRepository({this.failWrite = false});
+
+  final bool failWrite;
   AccountingDocument? written;
 
   @override
@@ -82,6 +160,78 @@ final class _MemoryAccountingRepository implements AccountingRepository {
 
   @override
   Future<void> write(AccountingDocument document) async {
+    if (failWrite) throw StateError('write failed');
     written = document;
+  }
+}
+
+final class _FakeWalletImageProcessor implements WalletImageProcessor {
+  final sources = <List<int>>[];
+  final image = ProcessedWalletImage(
+    Uint8List.fromList(<int>[9, 8, 7]),
+    WalletImageRef.create(
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      fileName:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+      mimeType: 'image/png',
+      sha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      width: 24,
+      height: 24,
+      byteLength: 3,
+    ),
+  );
+
+  @override
+  Future<ProcessedWalletImage> process(
+    Uint8List source, {
+    required bool preserveAlpha,
+    int maxLongEdge = 1024,
+    int jpegQuality = 82,
+  }) async {
+    sources.add(source.toList());
+    return image;
+  }
+}
+
+final class _FakeWalletImageStore implements WalletImageStore {
+  final staged = <ProcessedWalletImage>[];
+  final batch = _FakeWalletImageWriteBatch();
+
+  @override
+  Future<void> deleteIfUnreferenced(
+    WalletImageRef imageRef,
+    Set<String> referencedImageIds,
+  ) async {}
+
+  @override
+  Future<Uint8List> read(WalletImageRef imageRef) async => Uint8List(0);
+
+  @override
+  Future<WalletImageWriteBatch> stageAll(
+    List<ProcessedWalletImage> images,
+  ) async {
+    staged.addAll(images);
+    return batch;
+  }
+
+  @override
+  Future<void> write(ProcessedWalletImage image) async {}
+}
+
+final class _FakeWalletImageWriteBatch implements WalletImageWriteBatch {
+  bool committed = false;
+  bool rolledBack = false;
+
+  @override
+  Future<void> commit() async {
+    committed = true;
+  }
+
+  @override
+  Future<void> rollback({
+    Set<String> referencedImageIds = const <String>{},
+  }) async {
+    rolledBack = true;
   }
 }

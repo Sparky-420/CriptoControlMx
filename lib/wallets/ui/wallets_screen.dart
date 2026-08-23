@@ -1,15 +1,25 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../accounting/domain/wallet.dart';
 
 typedef CreateWalletCallback =
-    Future<Wallet> Function({required String name, required String provider});
+    Future<Wallet> Function({
+      required String name,
+      required String provider,
+      Uint8List? imageBytes,
+    });
 typedef UpdateWalletCallback =
     Future<Wallet> Function(
       Wallet wallet, {
       required String name,
       required String provider,
+      Uint8List? imageBytes,
     });
+typedef WalletImageResolver =
+    Future<Uint8List> Function(WalletImageRef imageRef);
+typedef WalletImagePicker = Future<Uint8List?> Function();
 
 class WalletsScreen extends StatefulWidget {
   const WalletsScreen({
@@ -17,11 +27,15 @@ class WalletsScreen extends StatefulWidget {
     required this.wallets,
     required this.onCreateWallet,
     required this.onUpdateWallet,
+    this.imageResolver,
+    this.imagePicker,
   });
 
   final List<Wallet> wallets;
   final CreateWalletCallback onCreateWallet;
   final UpdateWalletCallback onUpdateWallet;
+  final WalletImageResolver? imageResolver;
+  final WalletImagePicker? imagePicker;
 
   @override
   State<WalletsScreen> createState() => _WalletsScreenState();
@@ -60,12 +74,22 @@ class _WalletsScreenState extends State<WalletsScreen> {
       context: context,
       builder: (dialogContext) => _WalletFormDialog(
         wallet: wallet,
-        onSubmit: ({required name, required provider}) {
+        onSubmit: ({required name, required provider, imageBytes}) {
           if (wallet == null) {
-            return widget.onCreateWallet(name: name, provider: provider);
+            return widget.onCreateWallet(
+              name: name,
+              provider: provider,
+              imageBytes: imageBytes,
+            );
           }
-          return widget.onUpdateWallet(wallet, name: name, provider: provider);
+          return widget.onUpdateWallet(
+            wallet,
+            name: name,
+            provider: provider,
+            imageBytes: imageBytes,
+          );
         },
+        imagePicker: widget.imagePicker,
       ),
     );
   }
@@ -87,8 +111,11 @@ class _WalletsScreenState extends State<WalletsScreen> {
             const _EmptyWalletsState()
           else
             ..._wallets.map(
-              (wallet) =>
-                  _WalletTile(wallet, onEdit: () => _editWallet(wallet)),
+              (wallet) => _WalletTile(
+                wallet,
+                imageResolver: widget.imageResolver,
+                onEdit: () => _editWallet(wallet),
+              ),
             ),
         ],
       ),
@@ -132,22 +159,22 @@ class _EmptyWalletsState extends StatelessWidget {
 }
 
 class _WalletTile extends StatelessWidget {
-  const _WalletTile(this.wallet, {required this.onEdit});
+  const _WalletTile(
+    this.wallet, {
+    required this.onEdit,
+    required this.imageResolver,
+  });
 
   final Wallet wallet;
   final VoidCallback onEdit;
+  final WalletImageResolver? imageResolver;
 
   @override
   Widget build(BuildContext context) {
     final archived = wallet.status == WalletStatus.archived;
     return Card(
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: archived
-              ? Theme.of(context).colorScheme.surfaceContainerHighest
-              : Theme.of(context).colorScheme.primaryContainer,
-          child: Text(_initials(wallet.name)),
-        ),
+        leading: _WalletAvatar(wallet: wallet, imageResolver: imageResolver),
         title: Text(wallet.name),
         subtitle: Text(wallet.provider),
         trailing: Row(
@@ -175,10 +202,15 @@ class _WalletTile extends StatelessWidget {
 }
 
 class _WalletFormDialog extends StatefulWidget {
-  const _WalletFormDialog({required this.wallet, required this.onSubmit});
+  const _WalletFormDialog({
+    required this.wallet,
+    required this.onSubmit,
+    required this.imagePicker,
+  });
 
   final Wallet? wallet;
   final CreateWalletCallback onSubmit;
+  final WalletImagePicker? imagePicker;
 
   @override
   State<_WalletFormDialog> createState() => _WalletFormDialogState();
@@ -193,6 +225,9 @@ class _WalletFormDialogState extends State<_WalletFormDialog> {
     text: widget.wallet?.provider ?? '',
   );
   bool _saving = false;
+  bool _pickingImage = false;
+  Uint8List? _selectedImageBytes;
+  String? _imageError;
 
   @override
   void dispose() {
@@ -204,12 +239,46 @@ class _WalletFormDialogState extends State<_WalletFormDialog> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
-    final wallet = await widget.onSubmit(
-      name: _nameController.text.trim(),
-      provider: _providerController.text.trim(),
-    );
+    Wallet wallet;
+    try {
+      wallet = await widget.onSubmit(
+        name: _nameController.text.trim(),
+        provider: _providerController.text.trim(),
+        imageBytes: _selectedImageBytes,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _imageError = 'No se pudo procesar la imagen.';
+      });
+      return;
+    }
     if (!mounted) return;
     Navigator.of(context).pop(wallet);
+  }
+
+  Future<void> _pickImage() async {
+    final picker = widget.imagePicker;
+    if (picker == null) return;
+    setState(() {
+      _pickingImage = true;
+      _imageError = null;
+    });
+    try {
+      final bytes = await picker();
+      if (!mounted) return;
+      setState(() {
+        _selectedImageBytes = bytes;
+        _pickingImage = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _pickingImage = false;
+        _imageError = 'No se pudo procesar la imagen.';
+      });
+    }
   }
 
   @override
@@ -222,6 +291,37 @@ class _WalletFormDialogState extends State<_WalletFormDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed:
+                    _saving || _pickingImage || widget.imagePicker == null
+                    ? null
+                    : _pickImage,
+                icon: _pickingImage
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.image_outlined),
+                label: Text(
+                  _selectedImageBytes == null
+                      ? 'Cambiar imagen'
+                      : 'Imagen seleccionada',
+                ),
+              ),
+            ),
+            if (_imageError != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _imageError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
             TextFormField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: 'Nombre'),
@@ -251,6 +351,49 @@ class _WalletFormDialogState extends State<_WalletFormDialog> {
           child: Text(isEditing ? 'Guardar' : 'Crear'),
         ),
       ],
+    );
+  }
+}
+
+class _WalletAvatar extends StatelessWidget {
+  const _WalletAvatar({required this.wallet, required this.imageResolver});
+
+  final Wallet wallet;
+  final WalletImageResolver? imageResolver;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageRef = wallet.imageRef;
+    final resolver = imageResolver;
+    if (imageRef == null || resolver == null) {
+      return _InitialsAvatar(wallet: wallet);
+    }
+    return FutureBuilder<Uint8List>(
+      future: resolver(imageRef),
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (snapshot.connectionState != ConnectionState.done || bytes == null) {
+          return _InitialsAvatar(wallet: wallet);
+        }
+        return CircleAvatar(backgroundImage: MemoryImage(bytes));
+      },
+    );
+  }
+}
+
+class _InitialsAvatar extends StatelessWidget {
+  const _InitialsAvatar({required this.wallet});
+
+  final Wallet wallet;
+
+  @override
+  Widget build(BuildContext context) {
+    final archived = wallet.status == WalletStatus.archived;
+    return CircleAvatar(
+      backgroundColor: archived
+          ? Theme.of(context).colorScheme.surfaceContainerHighest
+          : Theme.of(context).colorScheme.primaryContainer,
+      child: Text(_initials(wallet.name)),
     );
   }
 }

@@ -27,6 +27,7 @@ import 'accounting/io/cloud_image_chunks.dart';
 import 'accounting/io/shared_preferences_accounting_backup_state_store.dart';
 import 'accounting/migration/accounting_migrator.dart';
 import 'accounting/persistence/accounting_document.dart';
+import 'accounting/persistence/method_channel_wallet_image_processor.dart';
 import 'accounting/persistence/accounting_repository.dart';
 import 'accounting/persistence/shared_preferences_accounting_repository.dart';
 import 'accounting/persistence/wallet_image_store.dart';
@@ -507,9 +508,15 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   final List<Movement> _movements = <Movement>[];
   final AccountingRepository _accountingRepository =
       SharedPreferencesAccountingRepository();
-  late final DefaultWalletEditService _walletEditService =
-      DefaultWalletEditService(_accountingRepository);
   final WalletImageStore _walletImageStore = PrivateWalletImageStore();
+  final MethodChannelWalletImageProcessor _walletImageProcessor =
+      MethodChannelWalletImageProcessor();
+  late final DefaultWalletEditService _walletEditService =
+      DefaultWalletEditService(
+        _accountingRepository,
+        imageProcessor: _walletImageProcessor,
+        imageStore: _walletImageStore,
+      );
   final AccountingBackupCodec _accountingBackupCodec =
       const DefaultAccountingBackupCodec();
   final AccountingBackupStateStore _accountingBackupStateStore =
@@ -3301,6 +3308,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   Future<Wallet> _createWalletFromUi({
     required String name,
     required String provider,
+    Uint8List? imageBytes,
   }) async {
     final now = DateTime.now().toUtc();
     final result = await _walletEditService.createWallet(
@@ -3308,6 +3316,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       id: _newWalletId(),
       name: name,
       provider: provider,
+      imageBytes: imageBytes,
       now: now,
     );
     if (mounted) setState(() => _accountingDocument = result.document);
@@ -3318,16 +3327,31 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     Wallet wallet, {
     required String name,
     required String provider,
+    Uint8List? imageBytes,
   }) async {
     final result = await _walletEditService.updateWallet(
       await _currentAccountingDocumentForWalletEdit(),
       walletId: wallet.id,
       name: name,
       provider: provider,
+      imageBytes: imageBytes,
       now: DateTime.now().toUtc(),
     );
     if (mounted) setState(() => _accountingDocument = result.document);
     return result.wallet;
+  }
+
+  Future<Uint8List?> _pickWalletImageFromUi() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return null;
+    final bytes = result.files.single.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      throw StateError('No se pudo leer la imagen seleccionada.');
+    }
+    return bytes;
   }
 
   Map<String, CoinStats> _computeStats() {
@@ -5942,6 +5966,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   wallets: _accountingDocument?.wallets ?? const <Wallet>[],
                   onCreateWallet: _createWalletFromUi,
                   onUpdateWallet: _updateWalletFromUi,
+                  imageResolver: _walletImageStore.read,
+                  imagePicker: _pickWalletImageFromUi,
                 ),
               ),
             );
