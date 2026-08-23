@@ -45,6 +45,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
+import 'wallets/application/wallet_edit_service.dart';
 import 'wallets/ui/wallets_screen.dart';
 
 const List<MovementType> _legacyMovementTypes = <MovementType>[
@@ -125,6 +126,19 @@ Future<void> clearFinancialResetAccountingState({
 }) async {
   await bridge.clearCanonicalDocument();
   clearRuntimeDocument();
+}
+
+String _newWalletId() {
+  final random = math.Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+      .join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+      '${hex.substring(20)}';
 }
 
 enum GoogleDriveSessionStatus {
@@ -493,6 +507,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
   final List<Movement> _movements = <Movement>[];
   final AccountingRepository _accountingRepository =
       SharedPreferencesAccountingRepository();
+  late final DefaultWalletEditService _walletEditService =
+      DefaultWalletEditService(_accountingRepository);
   final WalletImageStore _walletImageStore = PrivateWalletImageStore();
   final AccountingBackupCodec _accountingBackupCodec =
       const DefaultAccountingBackupCodec();
@@ -3272,6 +3288,48 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     await _saveData(deletedMovementIds: deletedMovementIds);
   }
 
+  Future<AccountingDocument> _currentAccountingDocumentForWalletEdit() async {
+    final persisted = _accountingDocument ?? await _accountingRepository.read();
+    if (persisted != null) return persisted;
+    final accounting = await _legacyPersistenceBridge.load(
+      _movements.map((movement) => movement.toJson()).toList(),
+    );
+    if (mounted) setState(() => _accountingDocument = accounting.document);
+    return accounting.document;
+  }
+
+  Future<Wallet> _createWalletFromUi({
+    required String name,
+    required String provider,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final result = await _walletEditService.createWallet(
+      await _currentAccountingDocumentForWalletEdit(),
+      id: _newWalletId(),
+      name: name,
+      provider: provider,
+      now: now,
+    );
+    if (mounted) setState(() => _accountingDocument = result.document);
+    return result.wallet;
+  }
+
+  Future<Wallet> _updateWalletFromUi(
+    Wallet wallet, {
+    required String name,
+    required String provider,
+  }) async {
+    final result = await _walletEditService.updateWallet(
+      await _currentAccountingDocumentForWalletEdit(),
+      walletId: wallet.id,
+      name: name,
+      provider: provider,
+      now: DateTime.now().toUtc(),
+    );
+    if (mounted) setState(() => _accountingDocument = result.document);
+    return result.wallet;
+  }
+
   Map<String, CoinStats> _computeStats() {
     return FinancialEngine.computeStats(
       coins: _coins,
@@ -5882,6 +5940,8 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               MaterialPageRoute<void>(
                 builder: (_) => WalletsScreen(
                   wallets: _accountingDocument?.wallets ?? const <Wallet>[],
+                  onCreateWallet: _createWalletFromUi,
+                  onUpdateWallet: _updateWalletFromUi,
                 ),
               ),
             );
