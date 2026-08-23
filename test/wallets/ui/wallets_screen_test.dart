@@ -405,6 +405,105 @@ void main() {
       expect(find.text('No se pudo asignar la cartera.'), findsOneWidget);
       expect(find.text('UNI · Compra'), findsOneWidget);
     });
+
+    testWidgets(
+      'shows empty portfolio summary for a wallet without movements',
+      (tester) async {
+        await tester.pumpWidget(
+          _WalletsTestApp(wallets: <Wallet>[_wallet(name: 'Bitso')]),
+        );
+
+        expect(find.text('Resumen por cartera'), findsOneWidget);
+        expect(find.text('Sin movimientos asignados'), findsOneWidget);
+      },
+    );
+
+    testWidgets('shows movement count and assets in wallet summary', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[
+            _wallet(name: 'Bitso'),
+            _wallet(id: walletTwoId, name: 'Ledger'),
+          ],
+          pendingMovements: <AccountingMovement>[
+            _movement(
+              id: 'bitso-uni',
+              type: MovementType.buy,
+              destinationWalletId: walletOneId,
+              unitPriceFiat: '10',
+            ),
+            _movement(
+              id: 'ledger-btc',
+              type: MovementType.buy,
+              asset: 'BTC',
+              destinationWalletId: walletTwoId,
+              unitPriceFiat: '100',
+            ),
+          ],
+        ),
+      );
+
+      expect(find.text('1 movimiento asignado'), findsWidgets);
+      expect(find.text('Activos: UNI'), findsOneWidget);
+      expect(find.text('Costo conocido: 15'), findsOneWidget);
+      expect(find.text('Tenencia UNI: 1.5'), findsOneWidget);
+      expect(find.text('Activos: BTC'), findsOneWidget);
+    });
+
+    testWidgets('shows incomplete data warning without inventing PnL', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[_wallet(name: 'Mercado Pago')],
+          pendingMovements: <AccountingMovement>[
+            _movement(
+              id: 'unknown-in',
+              type: MovementType.transferIn,
+              destinationWalletId: walletOneId,
+            ),
+          ],
+        ),
+      );
+
+      expect(find.text('Costo pendiente o datos incompletos'), findsOneWidget);
+      expect(find.text('P&L'), findsNothing);
+      expect(find.text('Valor actual'), findsNothing);
+    });
+
+    testWidgets('keeps archived wallet summary separate from active wallets', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[
+            _wallet(name: 'Bitso'),
+            _wallet(
+              id: walletTwoId,
+              name: 'Fría',
+              status: WalletStatus.archived,
+            ),
+          ],
+          pendingMovements: <AccountingMovement>[
+            _movement(
+              id: 'archived-eth',
+              type: MovementType.buy,
+              asset: 'ETH',
+              destinationWalletId: walletTwoId,
+              unitPriceFiat: '50',
+            ),
+          ],
+        ),
+      );
+
+      expect(find.text('Bitso'), findsOneWidget);
+      expect(find.text('Fría'), findsOneWidget);
+      expect(find.text('Sin movimientos asignados'), findsOneWidget);
+      expect(find.text('Activos: ETH'), findsOneWidget);
+      expect(find.text('Archivada'), findsWidgets);
+    });
   });
 }
 
@@ -498,14 +597,23 @@ Future<AccountingDocument> _defaultAssignMovement({
 AccountingMovement _movement({
   required String id,
   required MovementType type,
+  String asset = 'UNI',
   WalletAssignmentStatus status = WalletAssignmentStatus.pending,
+  String? sourceWalletId,
+  String? destinationWalletId,
+  String? unitPriceFiat,
 }) => AccountingMovement(
   id: id,
   type: type,
-  asset: 'UNI',
+  asset: asset,
   occurredAt: DateTime.utc(2026, 8, 23),
   quantity: AccountingAmount.parse('1.5'),
+  unitPriceFiat: unitPriceFiat == null
+      ? null
+      : AccountingAmount.parse(unitPriceFiat),
   fiatFeeAmount: AccountingAmount.zero,
+  sourceWalletId: sourceWalletId,
+  destinationWalletId: destinationWalletId,
   walletAssignmentStatus: status,
   cryptoFeeAmount: AccountingAmount.zero,
   fiatFeeTreatment: FiatFeeTreatment.none,

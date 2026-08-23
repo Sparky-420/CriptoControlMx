@@ -7,6 +7,7 @@ import '../../accounting/domain/movement_type.dart';
 import '../../accounting/domain/wallet.dart';
 import '../../accounting/persistence/accounting_document.dart';
 import '../application/wallet_movement_assignment_service.dart';
+import '../application/wallet_portfolio_summary_service.dart';
 
 typedef CreateWalletCallback =
     Future<Wallet> Function({
@@ -56,6 +57,8 @@ class WalletsScreen extends StatefulWidget {
 }
 
 class _WalletsScreenState extends State<WalletsScreen> {
+  static const _summaryService = DefaultWalletPortfolioSummaryService();
+
   late List<Wallet> _wallets = <Wallet>[...widget.wallets];
   late List<AccountingMovement> _movements = <AccountingMovement>[
     ...widget.movements,
@@ -144,6 +147,15 @@ class _WalletsScreenState extends State<WalletsScreen> {
     final pendingMovements = _movements
         .where((movement) => walletPendingAssignmentRoles(movement).isNotEmpty)
         .toList(growable: false);
+    final summaries = _summaryService.summarize(
+      AccountingDocument(
+        schemaVersion: accountingSchemaVersion,
+        wallets: _wallets,
+        movements: _movements,
+        appliedMigrationIds: const <String>{},
+        updatedAt: DateTime.now().toUtc(),
+      ),
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('Carteras')),
       body: ListView(
@@ -177,6 +189,8 @@ class _WalletsScreenState extends State<WalletsScreen> {
               }
             },
           ),
+          const SizedBox(height: 24),
+          _WalletPortfolioSummarySection(summaries: summaries),
         ],
       ),
     );
@@ -454,6 +468,85 @@ class _MovementAssignmentDialogState extends State<_MovementAssignmentDialog> {
   }
 }
 
+class _WalletPortfolioSummarySection extends StatelessWidget {
+  const _WalletPortfolioSummarySection({required this.summaries});
+
+  final List<WalletPortfolioSummary> summaries;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'Resumen por cartera',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        if (summaries.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Sin carteras para resumir'),
+            ),
+          )
+        else
+          ...summaries.map(
+            (summary) => _WalletPortfolioSummaryCard(summary: summary),
+          ),
+      ],
+    );
+  }
+}
+
+class _WalletPortfolioSummaryCard extends StatelessWidget {
+  const _WalletPortfolioSummaryCard({required this.summary});
+
+  final WalletPortfolioSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final wallet = summary.wallet;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(child: Text('Resumen ${wallet.name}')),
+                Chip(
+                  label: Text(
+                    wallet.status == WalletStatus.archived
+                        ? 'Resumen archivada'
+                        : 'Resumen activa',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(_movementCountLabel(summary.assignedMovementCount)),
+            if (!summary.hasAssignedMovements)
+              const Text('Sin movimientos asignados')
+            else ...<Widget>[
+              Text('Activos: ${summary.assets.join(', ')}'),
+              Text('Costo conocido: ${summary.knownCostBasis.toJson()}'),
+              for (final position in summary.positions)
+                Text(
+                  'Tenencia ${position.asset}: '
+                  '${position.reconciledQuantity.toJson()}',
+                ),
+              if (summary.hasIncompleteData)
+                const Text('Costo pendiente o datos incompletos'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _WalletFormDialog extends StatefulWidget {
   const _WalletFormDialog({
     required this.wallet,
@@ -691,3 +784,6 @@ String _roleLabel(WalletMovementAssignmentRole role) => switch (role) {
   WalletMovementAssignmentRole.destination => 'Destino pendiente',
   WalletMovementAssignmentRole.adjustment => 'Cartera de ajuste pendiente',
 };
+
+String _movementCountLabel(int count) =>
+    count == 1 ? '1 movimiento asignado' : '$count movimientos asignados';
