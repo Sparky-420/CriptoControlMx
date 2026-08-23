@@ -45,6 +45,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
+import 'wallets/ui/wallets_screen.dart';
 
 const List<MovementType> _legacyMovementTypes = <MovementType>[
   MovementType.buy,
@@ -5876,6 +5877,16 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             );
           }
 
+          void openWallets() {
+            Navigator.of(pageContext).push(
+              MaterialPageRoute<void>(
+                builder: (_) => WalletsScreen(
+                  wallets: _accountingDocument?.wallets ?? const <Wallet>[],
+                ),
+              ),
+            );
+          }
+
           Widget buildSettingsTab({
             VoidCallback? refresh,
             SettingsView view = SettingsView.all,
@@ -6103,6 +6114,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                   .length,
               motorCoins: _coins,
               motorSellFeePercent: _sellFeePercent,
+              onOpenWallets: openWallets,
               onOpenCharts: () => openMorePage(
                 'Gráficas',
                 (VoidCallback refresh) => buildChartsTab(refresh: refresh),
@@ -19291,6 +19303,7 @@ class MoreTab extends StatelessWidget {
   final int chartDataCount;
   final List<String> motorCoins;
   final double motorSellFeePercent;
+  final VoidCallback onOpenWallets;
   final VoidCallback onOpenCharts;
   final VoidCallback onOpenMovements;
   final VoidCallback onOpenPriceSettings;
@@ -19379,6 +19392,7 @@ class MoreTab extends StatelessWidget {
     required this.chartDataCount,
     required this.motorCoins,
     required this.motorSellFeePercent,
+    required this.onOpenWallets,
     required this.onOpenCharts,
     required this.onOpenMovements,
     required this.onOpenPriceSettings,
@@ -19494,6 +19508,18 @@ class MoreTab extends StatelessWidget {
             themeStyle: themeStyle,
           ),
           const SizedBox(height: 14),
+          _CommandSection(
+            title: 'CARTERAS',
+            children: <Widget>[
+              _MoreActionTile(
+                icon: Icons.account_balance_wallet_outlined,
+                title: 'Carteras',
+                subtitle: 'Consulta carteras activas y archivadas.',
+                badge: 'Nuevo',
+                onTap: onOpenWallets,
+              ),
+            ],
+          ),
           _CommandSection(
             title: 'CUENTA Y NUBE',
             children: <Widget>[
