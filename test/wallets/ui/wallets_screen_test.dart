@@ -1,7 +1,12 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cripto_control_mx/accounting/domain/accounting_amount.dart';
+import 'package:cripto_control_mx/accounting/domain/accounting_movement.dart';
+import 'package:cripto_control_mx/accounting/domain/movement_type.dart';
 import 'package:cripto_control_mx/accounting/domain/wallet.dart';
+import 'package:cripto_control_mx/accounting/persistence/accounting_document.dart';
+import 'package:cripto_control_mx/wallets/application/wallet_movement_assignment_service.dart';
 import 'package:cripto_control_mx/wallets/ui/wallets_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -235,6 +240,171 @@ void main() {
       expect(find.widgetWithText(TextFormField, 'Nombre'), findsOneWidget);
       expect(find.text('Bitso'), findsWidgets);
     });
+
+    testWidgets('shows empty state when there are no movements to assign', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(wallets: <Wallet>[_wallet(name: 'Bitso')]),
+      );
+
+      expect(find.text('Movimientos por asignar'), findsOneWidget);
+      expect(
+        find.text('No hay movimientos pendientes por asignar'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('renders a pending legacy movement with assignment details', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[_wallet(name: 'Bitso')],
+          pendingMovements: <AccountingMovement>[
+            _movement(
+              id: 'legacy-1',
+              type: MovementType.buy,
+              status: WalletAssignmentStatus.legacyUnassigned,
+            ),
+          ],
+        ),
+      );
+
+      expect(find.text('Movimientos por asignar'), findsOneWidget);
+      expect(find.text('UNI · Compra'), findsOneWidget);
+      expect(find.textContaining('Cantidad: 1.5'), findsOneWidget);
+      expect(find.textContaining('Legacy sin asignar'), findsOneWidget);
+      expect(find.textContaining('Destino pendiente'), findsOneWidget);
+    });
+
+    testWidgets('assignment selector lists active wallets only', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[
+            _wallet(name: 'Bitso'),
+            _wallet(
+              id: walletTwoId,
+              name: 'Archivada',
+              status: WalletStatus.archived,
+            ),
+          ],
+          pendingMovements: <AccountingMovement>[
+            _movement(id: 'buy-1', type: MovementType.buy),
+          ],
+        ),
+      );
+
+      await tester.tap(find.text('Asignar cartera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<Wallet>).first);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is DropdownMenuItem<Wallet> &&
+              widget.value?.id == walletOneId,
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is DropdownMenuItem<Wallet> &&
+              widget.value?.id == walletTwoId,
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('assigns selected wallet through the injected seam', (
+      tester,
+    ) async {
+      final wallet = _wallet(name: 'Bitso');
+      final movement = _movement(id: 'buy-1', type: MovementType.buy);
+      final calls =
+          <
+            ({
+              String movementId,
+              String walletId,
+              WalletMovementAssignmentRole role,
+            })
+          >[];
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[wallet],
+          pendingMovements: <AccountingMovement>[movement],
+          onAssignMovement:
+              ({required movement, required wallet, required role}) async {
+                calls.add((
+                  movementId: movement.id,
+                  walletId: wallet.id,
+                  role: role,
+                ));
+                return _document(
+                  wallets: <Wallet>[wallet],
+                  movements: <AccountingMovement>[
+                    movement.copyWith(
+                      destinationWalletId: wallet.id,
+                      walletAssignmentStatus: WalletAssignmentStatus.assigned,
+                    ),
+                  ],
+                );
+              },
+        ),
+      );
+
+      await tester.tap(find.text('Asignar cartera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Asignar').last);
+      await tester.pumpAndSettle();
+
+      expect(calls, <
+        ({
+          String movementId,
+          String walletId,
+          WalletMovementAssignmentRole role,
+        })
+      >[
+        (
+          movementId: 'buy-1',
+          walletId: wallet.id,
+          role: WalletMovementAssignmentRole.destination,
+        ),
+      ]);
+      expect(
+        find.text('No hay movimientos pendientes por asignar'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('assignment failure shows an error without removing movement', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _WalletsTestApp(
+          wallets: <Wallet>[_wallet(name: 'Bitso')],
+          pendingMovements: <AccountingMovement>[
+            _movement(id: 'buy-1', type: MovementType.buy),
+          ],
+          onAssignMovement:
+              ({required movement, required wallet, required role}) {
+                throw StateError('assignment failed');
+              },
+        ),
+      );
+
+      await tester.tap(find.text('Asignar cartera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Asignar').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('No se pudo asignar la cartera.'), findsOneWidget);
+      expect(find.text('UNI · Compra'), findsOneWidget);
+    });
   });
 }
 
@@ -245,6 +415,8 @@ class _WalletsTestApp extends StatelessWidget {
     this.onUpdateWallet,
     this.imageResolver,
     this.imagePicker,
+    this.pendingMovements = const <AccountingMovement>[],
+    this.onAssignMovement,
   });
 
   final List<Wallet> wallets;
@@ -252,6 +424,8 @@ class _WalletsTestApp extends StatelessWidget {
   final UpdateWalletCallback? onUpdateWallet;
   final WalletImageResolver? imageResolver;
   final WalletImagePicker? imagePicker;
+  final List<AccountingMovement> pendingMovements;
+  final AssignMovementToWalletCallback? onAssignMovement;
 
   @override
   Widget build(BuildContext context) {
@@ -262,12 +436,15 @@ class _WalletsTestApp extends StatelessWidget {
         onUpdateWallet: onUpdateWallet ?? _defaultUpdateWallet,
         imageResolver: imageResolver,
         imagePicker: imagePicker,
+        movements: pendingMovements,
+        onAssignMovement: onAssignMovement ?? _defaultAssignMovement,
       ),
     );
   }
 }
 
 Wallet _wallet({
+  String id = walletOneId,
   required String name,
   String provider = 'Proveedor',
   WalletStatus status = WalletStatus.active,
@@ -275,7 +452,7 @@ Wallet _wallet({
 }) {
   final now = DateTime.utc(2026, 8, 23);
   final wallet = Wallet.create(
-    id: '11111111-1111-4111-8111-111111111111',
+    id: id,
     name: name,
     provider: provider,
     imageRef: imageRef,
@@ -308,6 +485,48 @@ Future<Wallet> _defaultUpdateWallet(
   required String provider,
   Uint8List? imageBytes,
 }) async => _wallet(name: name, provider: provider);
+
+Future<AccountingDocument> _defaultAssignMovement({
+  required AccountingMovement movement,
+  required Wallet wallet,
+  required WalletMovementAssignmentRole role,
+}) async => _document(
+  wallets: <Wallet>[wallet],
+  movements: <AccountingMovement>[movement],
+);
+
+AccountingMovement _movement({
+  required String id,
+  required MovementType type,
+  WalletAssignmentStatus status = WalletAssignmentStatus.pending,
+}) => AccountingMovement(
+  id: id,
+  type: type,
+  asset: 'UNI',
+  occurredAt: DateTime.utc(2026, 8, 23),
+  quantity: AccountingAmount.parse('1.5'),
+  fiatFeeAmount: AccountingAmount.zero,
+  walletAssignmentStatus: status,
+  cryptoFeeAmount: AccountingAmount.zero,
+  fiatFeeTreatment: FiatFeeTreatment.none,
+  reconciliationLinks: const <ReconciliationLink>[],
+  createdAt: DateTime.utc(2026, 8, 23),
+  updatedAt: DateTime.utc(2026, 8, 23),
+);
+
+AccountingDocument _document({
+  required List<Wallet> wallets,
+  required List<AccountingMovement> movements,
+}) => AccountingDocument(
+  schemaVersion: accountingSchemaVersion,
+  wallets: wallets,
+  movements: movements,
+  appliedMigrationIds: const <String>{},
+  updatedAt: DateTime.utc(2026, 8, 23),
+);
+
+const walletOneId = '11111111-1111-4111-8111-111111111111';
+const walletTwoId = '22222222-2222-4222-8222-222222222222';
 
 final imageRef = WalletImageRef.create(
   id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',

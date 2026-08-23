@@ -47,6 +47,7 @@ import 'services/price_alert_service.dart';
 import 'services/price_service.dart';
 import 'ui/app_theme.dart' as ccmx;
 import 'wallets/application/wallet_edit_service.dart';
+import 'wallets/application/wallet_movement_assignment_service.dart';
 import 'wallets/ui/wallets_screen.dart';
 
 const List<MovementType> _legacyMovementTypes = <MovementType>[
@@ -517,6 +518,10 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         imageProcessor: _walletImageProcessor,
         imageStore: _walletImageStore,
       );
+  late final DefaultWalletMovementAssignmentService
+  _walletMovementAssignmentService = DefaultWalletMovementAssignmentService(
+    _accountingRepository,
+  );
   final AccountingBackupCodec _accountingBackupCodec =
       const DefaultAccountingBackupCodec();
   final AccountingBackupStateStore _accountingBackupStateStore =
@@ -3354,6 +3359,21 @@ class _CriptoControlAppState extends State<CriptoControlApp>
     return bytes;
   }
 
+  Future<AccountingDocument> _assignMovementWalletFromUi({
+    required AccountingMovement movement,
+    required Wallet wallet,
+    required WalletMovementAssignmentRole role,
+  }) async {
+    final document = await _walletMovementAssignmentService.assignWallet(
+      await _currentAccountingDocumentForWalletEdit(),
+      movementId: movement.id,
+      walletId: wallet.id,
+      role: role,
+    );
+    if (mounted) setState(() => _accountingDocument = document);
+    return document;
+  }
+
   Map<String, CoinStats> _computeStats() {
     return FinancialEngine.computeStats(
       coins: _coins,
@@ -5964,8 +5984,12 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               MaterialPageRoute<void>(
                 builder: (_) => WalletsScreen(
                   wallets: _accountingDocument?.wallets ?? const <Wallet>[],
+                  movements:
+                      _accountingDocument?.movements ??
+                      const <AccountingMovement>[],
                   onCreateWallet: _createWalletFromUi,
                   onUpdateWallet: _updateWalletFromUi,
+                  onAssignMovement: _assignMovementWalletFromUi,
                   imageResolver: _walletImageStore.read,
                   imagePicker: _pickWalletImageFromUi,
                 ),

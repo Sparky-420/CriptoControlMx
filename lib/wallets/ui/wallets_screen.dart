@@ -2,7 +2,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../accounting/domain/accounting_movement.dart';
+import '../../accounting/domain/movement_type.dart';
 import '../../accounting/domain/wallet.dart';
+import '../../accounting/persistence/accounting_document.dart';
+import '../application/wallet_movement_assignment_service.dart';
 
 typedef CreateWalletCallback =
     Future<Wallet> Function({
@@ -20,6 +24,12 @@ typedef UpdateWalletCallback =
 typedef WalletImageResolver =
     Future<Uint8List> Function(WalletImageRef imageRef);
 typedef WalletImagePicker = Future<Uint8List?> Function();
+typedef AssignMovementToWalletCallback =
+    Future<AccountingDocument> Function({
+      required AccountingMovement movement,
+      required Wallet wallet,
+      required WalletMovementAssignmentRole role,
+    });
 
 class WalletsScreen extends StatefulWidget {
   const WalletsScreen({
@@ -27,6 +37,8 @@ class WalletsScreen extends StatefulWidget {
     required this.wallets,
     required this.onCreateWallet,
     required this.onUpdateWallet,
+    required this.movements,
+    required this.onAssignMovement,
     this.imageResolver,
     this.imagePicker,
   });
@@ -34,6 +46,8 @@ class WalletsScreen extends StatefulWidget {
   final List<Wallet> wallets;
   final CreateWalletCallback onCreateWallet;
   final UpdateWalletCallback onUpdateWallet;
+  final List<AccountingMovement> movements;
+  final AssignMovementToWalletCallback onAssignMovement;
   final WalletImageResolver? imageResolver;
   final WalletImagePicker? imagePicker;
 
@@ -43,12 +57,19 @@ class WalletsScreen extends StatefulWidget {
 
 class _WalletsScreenState extends State<WalletsScreen> {
   late List<Wallet> _wallets = <Wallet>[...widget.wallets];
+  late List<AccountingMovement> _movements = <AccountingMovement>[
+    ...widget.movements,
+  ];
+  String? _assignmentError;
 
   @override
   void didUpdateWidget(WalletsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.wallets != widget.wallets) {
       _wallets = <Wallet>[...widget.wallets];
+    }
+    if (oldWidget.movements != widget.movements) {
+      _movements = <AccountingMovement>[...widget.movements];
     }
   }
 
@@ -94,8 +115,35 @@ class _WalletsScreenState extends State<WalletsScreen> {
     );
   }
 
+  Future<void> _assignMovement(AccountingMovement movement) async {
+    final assigned = await showDialog<AccountingDocument>(
+      context: context,
+      builder: (dialogContext) => _MovementAssignmentDialog(
+        movement: movement,
+        activeWallets: _wallets
+            .where((wallet) => wallet.status == WalletStatus.active)
+            .toList(growable: false),
+        onAssign: widget.onAssignMovement,
+      ),
+    );
+    if (assigned == null || !mounted) return;
+    setState(() {
+      _assignmentError = null;
+      _wallets = <Wallet>[...assigned.wallets];
+      _movements = <AccountingMovement>[...assigned.movements];
+    });
+  }
+
+  void _showAssignmentError() {
+    if (!mounted) return;
+    setState(() => _assignmentError = 'No se pudo asignar la cartera.');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final pendingMovements = _movements
+        .where((movement) => walletPendingAssignmentRoles(movement).isNotEmpty)
+        .toList(growable: false);
     return Scaffold(
       appBar: AppBar(title: const Text('Carteras')),
       body: ListView(
@@ -117,6 +165,18 @@ class _WalletsScreenState extends State<WalletsScreen> {
                 onEdit: () => _editWallet(wallet),
               ),
             ),
+          const SizedBox(height: 24),
+          _PendingMovementsSection(
+            movements: pendingMovements,
+            assignmentError: _assignmentError,
+            onAssign: (movement) async {
+              try {
+                await _assignMovement(movement);
+              } catch (_) {
+                _showAssignmentError();
+              }
+            },
+          ),
         ],
       ),
     );
@@ -197,6 +257,199 @@ class _WalletTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PendingMovementsSection extends StatelessWidget {
+  const _PendingMovementsSection({
+    required this.movements,
+    required this.assignmentError,
+    required this.onAssign,
+  });
+
+  final List<AccountingMovement> movements;
+  final String? assignmentError;
+  final ValueChanged<AccountingMovement> onAssign;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'Movimientos por asignar',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        if (assignmentError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              assignmentError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        if (movements.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No hay movimientos pendientes por asignar'),
+            ),
+          )
+        else
+          ...movements.map(
+            (movement) => _PendingMovementTile(
+              movement: movement,
+              onAssign: () => onAssign(movement),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _PendingMovementTile extends StatelessWidget {
+  const _PendingMovementTile({required this.movement, required this.onAssign});
+
+  final AccountingMovement movement;
+  final VoidCallback onAssign;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        title: Text('${movement.asset} · ${_movementTypeLabel(movement.type)}'),
+        subtitle: Text(
+          'Cantidad: ${movement.quantity?.toJson() ?? '-'} · '
+          '${_statusLabel(movement.walletAssignmentStatus)} · '
+          '${_pendingRolesLabel(walletPendingAssignmentRoles(movement))}',
+        ),
+        trailing: TextButton(
+          onPressed: onAssign,
+          child: const Text('Asignar cartera'),
+        ),
+      ),
+    );
+  }
+}
+
+class _MovementAssignmentDialog extends StatefulWidget {
+  const _MovementAssignmentDialog({
+    required this.movement,
+    required this.activeWallets,
+    required this.onAssign,
+  });
+
+  final AccountingMovement movement;
+  final List<Wallet> activeWallets;
+  final AssignMovementToWalletCallback onAssign;
+
+  @override
+  State<_MovementAssignmentDialog> createState() =>
+      _MovementAssignmentDialogState();
+}
+
+class _MovementAssignmentDialogState extends State<_MovementAssignmentDialog> {
+  late final List<WalletMovementAssignmentRole> _roles =
+      walletPendingAssignmentRoles(widget.movement);
+  Wallet? _selectedWallet;
+  late WalletMovementAssignmentRole _selectedRole = _roles.first;
+  bool _saving = false;
+  String? _error;
+
+  Future<void> _assign() async {
+    final wallet =
+        _selectedWallet ??
+        (widget.activeWallets.isEmpty ? null : widget.activeWallets.first);
+    if (wallet == null) return;
+    setState(() => _saving = true);
+    try {
+      final document = await widget.onAssign(
+        movement: widget.movement,
+        wallet: wallet,
+        role: _selectedRole,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(document);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'No se pudo asignar la cartera.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final activeWallets = widget.activeWallets;
+    return AlertDialog(
+      title: const Text('Asignar movimiento'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (_roles.length > 1) ...<Widget>[
+            DropdownButtonFormField<WalletMovementAssignmentRole>(
+              initialValue: _selectedRole,
+              decoration: const InputDecoration(labelText: 'Campo pendiente'),
+              items: _roles
+                  .map(
+                    (role) => DropdownMenuItem<WalletMovementAssignmentRole>(
+                      value: role,
+                      child: Text(_roleLabel(role)),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: _saving
+                  ? null
+                  : (role) {
+                      if (role == null) return;
+                      setState(() => _selectedRole = role);
+                    },
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (activeWallets.isEmpty)
+            const Text('No hay carteras activas disponibles.')
+          else
+            DropdownButtonFormField<Wallet>(
+              initialValue: _selectedWallet ?? activeWallets.first,
+              decoration: const InputDecoration(labelText: 'Cartera'),
+              items: activeWallets
+                  .map(
+                    (wallet) => DropdownMenuItem<Wallet>(
+                      value: wallet,
+                      child: Text(wallet.name),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: _saving
+                  ? null
+                  : (wallet) => setState(() => _selectedWallet = wallet),
+            ),
+          if (_error != null) ...<Widget>[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _saving || activeWallets.isEmpty ? null : _assign,
+          child: const Text('Asignar'),
+        ),
+      ],
     );
   }
 }
@@ -414,3 +667,27 @@ String _initials(String value) {
       .join()
       .toUpperCase();
 }
+
+String _movementTypeLabel(MovementType type) => switch (type) {
+  MovementType.buy => 'Compra',
+  MovementType.sell => 'Venta',
+  MovementType.transferIn => 'Transferencia entrante',
+  MovementType.transferOut => 'Transferencia saliente',
+  MovementType.balanceAdjustment => 'Ajuste de saldo',
+};
+
+String _statusLabel(WalletAssignmentStatus status) => switch (status) {
+  WalletAssignmentStatus.assigned => 'Asignado',
+  WalletAssignmentStatus.partiallyAssigned => 'Parcialmente asignado',
+  WalletAssignmentStatus.pending => 'Asignación pendiente',
+  WalletAssignmentStatus.legacyUnassigned => 'Legacy sin asignar',
+};
+
+String _pendingRolesLabel(List<WalletMovementAssignmentRole> roles) =>
+    roles.map(_roleLabel).join(', ');
+
+String _roleLabel(WalletMovementAssignmentRole role) => switch (role) {
+  WalletMovementAssignmentRole.source => 'Origen pendiente',
+  WalletMovementAssignmentRole.destination => 'Destino pendiente',
+  WalletMovementAssignmentRole.adjustment => 'Cartera de ajuste pendiente',
+};
