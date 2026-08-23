@@ -64,6 +64,32 @@ void main() {
       },
     );
 
+    test(
+      'updates wallet text without clearing an existing image ref',
+      () async {
+        final repository = _MemoryAccountingRepository();
+        final service = DefaultWalletEditService(repository);
+        final existing = Wallet.create(
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Bitso',
+          provider: 'Bitso',
+          imageRef: _imageRef,
+          createdAt: DateTime.utc(2026, 8, 23),
+        );
+
+        final result = await service.updateWallet(
+          _document(wallets: <Wallet>[existing]),
+          walletId: existing.id,
+          name: 'Bitso Principal',
+          provider: 'Bitso México',
+          now: DateTime.utc(2026, 8, 24),
+        );
+
+        expect(result.wallet.imageRef, same(_imageRef));
+        expect(repository.written!.wallets.single.imageRef, same(_imageRef));
+      },
+    );
+
     test('updates wallet image through processor and private store', () async {
       final repository = _MemoryAccountingRepository();
       final processor = _FakeWalletImageProcessor();
@@ -134,6 +160,45 @@ void main() {
       expect(store.batch.rolledBack, isTrue);
       expect(repository.written, isNull);
     });
+
+    test(
+      'image processing failure preserves the previous wallet image',
+      () async {
+        final repository = _MemoryAccountingRepository();
+        final processor = _FakeWalletImageProcessor(fail: true);
+        final store = _FakeWalletImageStore();
+        final service = DefaultWalletEditService(
+          repository,
+          imageProcessor: processor,
+          imageStore: store,
+        );
+        final existing = Wallet.create(
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Bitso',
+          provider: 'Bitso',
+          imageRef: _imageRef,
+          createdAt: DateTime.utc(2026, 8, 23),
+        );
+        final current = _document(wallets: <Wallet>[existing]);
+        repository.written = current;
+
+        await expectLater(
+          service.updateWallet(
+            current,
+            walletId: existing.id,
+            name: 'Bitso',
+            provider: 'Bitso',
+            imageBytes: Uint8List.fromList(<int>[1]),
+            now: DateTime.utc(2026, 8, 24),
+          ),
+          throwsStateError,
+        );
+
+        expect(repository.written, same(current));
+        expect(repository.written!.wallets.single.imageRef, same(_imageRef));
+        expect(store.staged, isEmpty);
+      },
+    );
   });
 }
 
@@ -166,6 +231,9 @@ final class _MemoryAccountingRepository implements AccountingRepository {
 }
 
 final class _FakeWalletImageProcessor implements WalletImageProcessor {
+  _FakeWalletImageProcessor({this.fail = false});
+
+  final bool fail;
   final sources = <List<int>>[];
   final image = ProcessedWalletImage(
     Uint8List.fromList(<int>[9, 8, 7]),
@@ -189,10 +257,22 @@ final class _FakeWalletImageProcessor implements WalletImageProcessor {
     int maxLongEdge = 1024,
     int jpegQuality = 82,
   }) async {
+    if (fail) throw StateError('processing failed');
     sources.add(source.toList());
     return image;
   }
 }
+
+final _imageRef = WalletImageRef.create(
+  id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  fileName:
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png',
+  mimeType: 'image/png',
+  sha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  width: 24,
+  height: 24,
+  byteLength: 3,
+);
 
 final class _FakeWalletImageStore implements WalletImageStore {
   final staged = <ProcessedWalletImage>[];

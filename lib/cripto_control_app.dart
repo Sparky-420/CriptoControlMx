@@ -130,6 +130,26 @@ Future<void> clearFinancialResetAccountingState({
   clearRuntimeDocument();
 }
 
+@visibleForTesting
+Future<AccountingDocument> loadWalletsScreenDocumentForApp({
+  required LegacyPersistenceBridge bridge,
+  required AccountingRepository repository,
+  required AccountingDocument? runtimeDocument,
+  required Iterable<Movement> legacyMovements,
+  required ValueChanged<AccountingDocument> updateRuntimeDocument,
+}) async {
+  final persisted = runtimeDocument ?? await repository.read();
+  if (persisted != null) {
+    updateRuntimeDocument(persisted);
+    return persisted;
+  }
+  final accounting = await bridge.load(
+    legacyMovements.map((movement) => movement.toJson()).toList(),
+  );
+  updateRuntimeDocument(accounting.document);
+  return accounting.document;
+}
+
 String _newWalletId() {
   final random = math.Random.secure();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
@@ -5980,21 +6000,34 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           }
 
           void openWallets() {
-            Navigator.of(pageContext).push(
-              MaterialPageRoute<void>(
-                builder: (_) => WalletsScreen(
-                  wallets: _accountingDocument?.wallets ?? const <Wallet>[],
-                  movements:
-                      _accountingDocument?.movements ??
-                      const <AccountingMovement>[],
-                  onCreateWallet: _createWalletFromUi,
-                  onUpdateWallet: _updateWalletFromUi,
-                  onAssignMovement: _assignMovementWalletFromUi,
-                  imageResolver: _walletImageStore.read,
-                  imagePicker: _pickWalletImageFromUi,
+            final navigator = Navigator.of(pageContext);
+            unawaited(() async {
+              final document = await loadWalletsScreenDocumentForApp(
+                bridge: _legacyPersistenceBridge,
+                repository: _accountingRepository,
+                runtimeDocument: _accountingDocument,
+                legacyMovements: _movements,
+                updateRuntimeDocument: (document) {
+                  if (mounted) {
+                    setState(() => _accountingDocument = document);
+                  }
+                },
+              );
+              if (!mounted) return;
+              navigator.push(
+                MaterialPageRoute<void>(
+                  builder: (_) => WalletsScreen(
+                    wallets: document.wallets,
+                    movements: document.movements,
+                    onCreateWallet: _createWalletFromUi,
+                    onUpdateWallet: _updateWalletFromUi,
+                    onAssignMovement: _assignMovementWalletFromUi,
+                    imageResolver: _walletImageStore.read,
+                    imagePicker: _pickWalletImageFromUi,
+                  ),
                 ),
-              ),
-            );
+              );
+            }());
           }
 
           Widget buildSettingsTab({

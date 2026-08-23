@@ -20,6 +20,11 @@ void main() {
       expect(find.text('Aún no tienes carteras configuradas.'), findsOneWidget);
       expect(find.text('Nueva cartera'), findsOneWidget);
       expect(
+        find.text('No hay movimientos pendientes por asignar'),
+        findsOneWidget,
+      );
+      expect(find.text('Sin carteras para resumir'), findsOneWidget);
+      expect(
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNotNull,
       );

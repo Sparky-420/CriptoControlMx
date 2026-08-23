@@ -114,6 +114,32 @@ void main() {
     },
   );
 
+  test('wallet screen seam loads canonical v3 before navigation', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final document = _accountingDocumentForAppSeamTest();
+    final repository = SharedPreferencesAccountingRepository();
+    await repository.write(document);
+    final bridge = LegacyPersistenceBridge(
+      repository,
+      const AccountingMigrator(LegacyMovementAdapter()),
+      const LegacyMovementAdapter(),
+      _NoopLifecycleCoordinator(),
+    );
+    AccountingDocument? runtimeDocument;
+
+    final loaded = await loadWalletsScreenDocumentForApp(
+      bridge: bridge,
+      repository: repository,
+      runtimeDocument: runtimeDocument,
+      legacyMovements: const <Movement>[],
+      updateRuntimeDocument: (document) => runtimeDocument = document,
+    );
+
+    expect(loaded.wallets.single.name, 'Mercado Pago');
+    expect(loaded.movements.single.id, 'movement-to-delete');
+    expect(runtimeDocument, same(loaded));
+  });
+
   group('Mercado Pago OCR amount ranking', () {
     test('separates total, commission, unit price and crypto quantity', () {
       final Map<String, Object?> parsed = _parseOcrForTest('''
