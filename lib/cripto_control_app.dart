@@ -2664,9 +2664,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
         } catch (_) {}
       }
 
-      _sellFeePercent =
-          prefs.getDouble(_sellFeePercentKey) ??
-          FinancialEngine.defaultExitFeePercent;
+      _sellFeePercent = await loadExitFeePercentForApp(prefs: prefs);
       final String? savedVisualMode = prefs.getString(_themeModeKey);
       if (savedVisualMode != null) {
         _visualMode = appVisualModeFromName(savedVisualMode);
@@ -3239,7 +3237,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       prefs,
       _manualPriceUpdatedAtMs,
     );
-    await prefs.setDouble(_sellFeePercentKey, _sellFeePercent);
+    await saveExitFeePercentForApp(_sellFeePercent, prefs: prefs);
     await prefs.setString(_themeModeKey, _visualMode.name);
     await prefs.setString(_themeStyleKey, _themeStyle.name);
     await prefs.setString(_accentColorKey, _themeStyle.name);
@@ -3520,49 +3518,79 @@ class _CriptoControlAppState extends State<CriptoControlApp>
 
     await showDialog<void>(
       context: pageContext,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Comisión de salida'),
-        content: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: EdgeInsets.only(
-              bottom: math.min(
-                MediaQuery.of(dialogContext).viewInsets.bottom,
-                24.0,
-              ),
-            ),
-            child: TextField(
-              controller: controller,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Porcentaje',
-                helperText: 'Ejemplo: 1.5',
-                prefixIcon: Icon(Icons.percent_outlined),
-              ),
-            ),
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final double? value = double.tryParse(controller.text.trim());
-              if (value == null || value < 0 || value >= 100) return;
+      builder: (BuildContext dialogContext) {
+        String? errorText;
 
-              setState(() => _sellFeePercent = value);
-              _saveData();
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) =>
+              AlertDialog(
+                title: const Text('Comisión estimada de salida'),
+                content: SafeArea(
+                  top: false,
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.only(
+                      bottom: math.min(
+                        MediaQuery.of(dialogContext).viewInsets.bottom,
+                        24.0,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          'Porcentaje estimado utilizado para calcular el '
+                          'precio de equilibrio neto, simulaciones y otros '
+                          'cálculos de salida. Puedes ajustarlo según la '
+                          'comisión de la plataforma que utilices.',
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: controller,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'Porcentaje',
+                            helperText: 'Ejemplo: 1.5',
+                            errorText: errorText,
+                            prefixIcon: const Icon(Icons.percent_outlined),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancelar'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      final double? value = parseExitFeePercentForApp(
+                        controller.text,
+                      );
+                      if (value == null) {
+                        setDialogState(() {
+                          errorText =
+                              'Ingresa un porcentaje válido de 0 a 99.99';
+                        });
+                        return;
+                      }
+
+                      setState(() => _sellFeePercent = value);
+                      _saveData();
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text('Guardar'),
+                  ),
+                ],
+              ),
+        );
+      },
     );
+    controller.dispose();
   }
 
   void _showEditPriceDialog(BuildContext pageContext, String coin) {
@@ -5065,7 +5093,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
           ),
           pw.SizedBox(height: 6),
           pw.Text('Generado: ${DateTime.now().toIso8601String()}'),
-          pw.Text('Comisión de salida: ${pct(_sellFeePercent)}'),
+          pw.Text(portfolioReportExitFeeLabelForApp(_sellFeePercent)),
           pw.Text(
             'Costo promedio ponderado. P&L no realizado bruto; equilibrio neto considera comisión de salida.',
           ),
@@ -10481,6 +10509,7 @@ class _SimulationTabState extends State<SimulationTab> {
   void initState() {
     super.initState();
     _mode = widget.initialMode;
+    _applyDefaultExitFeePercent();
     unawaited(_loadSavedSimulations());
   }
 
@@ -10490,6 +10519,23 @@ class _SimulationTabState extends State<SimulationTab> {
     if (widget.initialMode != oldWidget.initialMode) {
       _mode = widget.initialMode;
     }
+    if (widget.defaultFeePercent != oldWidget.defaultFeePercent) {
+      _applyDefaultExitFeePercent(previous: oldWidget.defaultFeePercent);
+    }
+  }
+
+  void _applyDefaultExitFeePercent({double? previous}) {
+    final String next = compact(widget.defaultFeePercent);
+    final String? old = previous == null ? null : compact(previous);
+    void applyIfUnedited(TextEditingController controller) {
+      if (old == null || controller.text == old) {
+        controller.text = next;
+      }
+    }
+
+    applyIfUnedited(_buySellFeeController);
+    applyIfUnedited(_sellFeeController);
+    applyIfUnedited(_rotationSellFeeController);
   }
 
   @override
@@ -22360,13 +22406,16 @@ class SettingsTab extends StatelessWidget {
             ),
           if (showAdvanced)
             CardPanel(
-              title: 'Cálculo',
-              subtitle: 'Comisión de salida actual: ${pct(sellFeePercent)}',
+              title: 'Comisión estimada de salida',
+              subtitle:
+                  '${pct(sellFeePercent)} · Porcentaje estimado utilizado '
+                  'para calcular el precio de equilibrio neto, simulaciones '
+                  'y otros cálculos de salida.',
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton.tonal(
                   onPressed: onEditSellFee,
-                  child: const Text('Editar comisión'),
+                  child: const Text('Editar comisión estimada'),
                 ),
               ),
             ),
@@ -24513,6 +24562,36 @@ double? parseFlexibleDecimal(String raw) {
   }
   return double.tryParse(value);
 }
+
+double? parseExitFeePercentForApp(String raw) {
+  final double? value = parseFlexibleDecimal(raw);
+  if (value == null || !value.isFinite || value < 0 || value >= 100) {
+    return null;
+  }
+  return value;
+}
+
+Future<double> loadExitFeePercentForApp({SharedPreferences? prefs}) async {
+  final SharedPreferences preferences =
+      prefs ?? await SharedPreferences.getInstance();
+  return preferences.getDouble(_CriptoControlAppState._sellFeePercentKey) ??
+      FinancialEngine.defaultExitFeePercent;
+}
+
+Future<void> saveExitFeePercentForApp(
+  double value, {
+  SharedPreferences? prefs,
+}) async {
+  if (parseExitFeePercentForApp(value.toString()) == null) {
+    throw ArgumentError.value(value, 'value', 'Invalid exit fee percent');
+  }
+  final SharedPreferences preferences =
+      prefs ?? await SharedPreferences.getInstance();
+  await preferences.setDouble(_CriptoControlAppState._sellFeePercentKey, value);
+}
+
+String portfolioReportExitFeeLabelForApp(double sellFeePercent) =>
+    'Comisión estimada de salida: ${pct(sellFeePercent)}';
 
 class TransferAmounts {
   final double? receivedAmount;

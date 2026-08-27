@@ -52,6 +52,65 @@ void main() {
     expect(stats.isAtOrAboveNetBreakEven(1), isTrue);
   });
 
+  test('coin stats net break-even changes with configured exit fee', () {
+    final CoinStats stats = CoinStats(
+      coin: 'BTC',
+      quantity: 2,
+      costBase: 1000,
+      currentPrice: 600,
+    );
+
+    expect(stats.netBreakEvenPrice(0), closeTo(500, 0.0001));
+    expect(stats.netBreakEvenPrice(1.5), closeTo(507.6142, 0.0001));
+    expect(stats.netBreakEvenPrice(3), closeTo(515.4639, 0.0001));
+  });
+
+  test(
+    'exit fee setting defaults to zero without a saved preference',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+
+      expect(await loadExitFeePercentForApp(), 0);
+    },
+  );
+
+  test('exit fee setting loads an existing saved preference', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'sell_fee_percent': 1.5,
+    });
+
+    expect(await loadExitFeePercentForApp(), 1.5);
+  });
+
+  test('exit fee setting persists edits and can return to zero', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+
+    await saveExitFeePercentForApp(0.8);
+    expect(await loadExitFeePercentForApp(), 0.8);
+
+    await saveExitFeePercentForApp(0);
+    expect(await loadExitFeePercentForApp(), 0);
+  });
+
+  test('exit fee setting validates user input', () {
+    expect(parseExitFeePercentForApp(''), isNull);
+    expect(parseExitFeePercentForApp('-0.1'), isNull);
+    expect(parseExitFeePercentForApp('abc'), isNull);
+    expect(parseExitFeePercentForApp('NaN'), isNull);
+    expect(parseExitFeePercentForApp('Infinity'), isNull);
+    expect(parseExitFeePercentForApp('0'), 0);
+    expect(parseExitFeePercentForApp('0.80'), 0.8);
+    expect(parseExitFeePercentForApp('1,50'), 1.5);
+    expect(parseExitFeePercentForApp('100'), isNull);
+  });
+
+  test('portfolio PDF exit fee label identifies the value as estimated', () {
+    expect(
+      portfolioReportExitFeeLabelForApp(0.8),
+      'Comisión estimada de salida: 0.80%',
+    );
+  });
+
   test('json number parser accepts nums, strings and missing values', () {
     expect(numberFromJson(12), 12);
     expect(numberFromJson(12.5), 12.5);
@@ -138,6 +197,92 @@ void main() {
     expect(loaded.wallets.single.name, 'Mercado Pago');
     expect(loaded.movements.single.id, 'movement-to-delete');
     expect(runtimeDocument, same(loaded));
+  });
+
+  testWidgets('settings exposes estimated exit fee control', (tester) async {
+    bool editRequested = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SettingsTab(
+            view: SettingsView.all,
+            visualMode: AppVisualMode.system,
+            themeStyle: AppThemeStyle.proDark,
+            visiblePositions: VisiblePositions.three,
+            positionSortMode: PositionSortMode.largestValue,
+            snapshotAutomationMode: SnapshotAutomationMode.manual,
+            snapshotRetention: SnapshotRetention.last30,
+            refreshPricesOnOpen: true,
+            refreshPricesAfterMovement: false,
+            priceRefreshForegroundMode: PriceRefreshForegroundMode.manual,
+            sellFeePercent: 1.5,
+            snapshotCount: 0,
+            automaticLocalAlertsEnabled: false,
+            automaticLocalAlertsIntervalMinutes: 60,
+            notificationsAllowed: false,
+            onVisualModeChanged: (_) {},
+            onThemeStyleChanged: (_) {},
+            onVisiblePositionsChanged: (_) {},
+            onPositionSortModeChanged: (_) {},
+            onSnapshotAutomationModeChanged: (_) {},
+            onSnapshotRetentionChanged: (_) {},
+            onRefreshPricesOnOpenChanged: (_) {},
+            onRefreshPricesAfterMovementChanged: (_) {},
+            onPriceRefreshForegroundModeChanged: (_) {},
+            onEditSellFee: () => editRequested = true,
+            onOpenAlerts: () {},
+            onAutomaticLocalAlertsChanged: (_) {},
+            onAutomaticLocalAlertIntervalChanged: (_) {},
+            onSaveSnapshot: () {},
+            onViewSnapshots: () {},
+            onExportSnapshotsCsv: () {},
+            onExportXlsx: () {},
+            onExportPdf: () {},
+            onExportBackup: () {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.drag(find.byType(ListView), const Offset(0, -1200));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Comisión estimada de salida'), findsAtLeastNWidgets(1));
+    expect(find.textContaining('1.50%'), findsOneWidget);
+    expect(find.textContaining('precio de equilibrio neto'), findsOneWidget);
+
+    await tester.tap(find.text('Editar comisión estimada'));
+    expect(editRequested, isTrue);
+  });
+
+  testWidgets('simulation tab initializes exit fee input from setting', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SimulationTab(
+            coins: const <String>['BTC'],
+            stats: <String, CoinStats>{
+              'BTC': CoinStats(
+                coin: 'BTC',
+                quantity: 1,
+                costBase: 100,
+                currentPrice: 120,
+              ),
+            },
+            defaultFeePercent: 1.5,
+            targetExitFeePercent: 1.5,
+          ),
+        ),
+      ),
+    );
+
+    final editable = find.byWidgetPredicate(
+      (widget) => widget is EditableText && widget.controller.text == '1.5',
+    );
+    expect(editable, findsOneWidget);
   });
 
   group('Mercado Pago OCR amount ranking', () {
