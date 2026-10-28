@@ -9773,6 +9773,13 @@ class _SimulationTabState extends State<SimulationTab> {
     };
   }
 
+  String _strategyLabelForScore(int score) {
+    if (score >= 80) return 'Alta prioridad';
+    if (score >= 70) return 'Interesante';
+    if (score >= 55) return 'Revisar';
+    return 'No prioritaria';
+  }
+
   String _currentSimulationAlertLabel(bool valid) {
     if (!valid) return 'Sin alerta';
     return switch (_mode) {
@@ -9782,13 +9789,6 @@ class _SimulationTabState extends State<SimulationTab> {
             ? 'Alerta de compra'
             : 'Alerta de venta',
     };
-  }
-
-  String _strategyLabelForScore(int score) {
-    if (score >= 80) return 'Alta prioridad';
-    if (score >= 70) return 'Interesante';
-    if (score >= 55) return 'Revisar';
-    return 'No prioritaria';
   }
 
   Future<void> _saveCurrentSimulation({
@@ -9815,9 +9815,9 @@ class _SimulationTabState extends State<SimulationTab> {
         feeLabel: _activeFeeLabel,
         primaryLabel: primaryLabel,
         primaryValue: primaryValue,
-        alertLabel: _currentSimulationAlertLabel(valid),
         strategyScore: _currentStrategyScore(valid),
         strategyLabel: _strategyLabelForScore(_currentStrategyScore(valid)),
+        alertLabel: _currentSimulationAlertLabel(valid),
       ),
     );
     if (!mounted) return;
@@ -12241,6 +12241,48 @@ class _SimulationResultModalCard extends StatelessWidget {
   }
 }
 
+class _SimulationAlertBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _SimulationAlertBadge({
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(Icons.notifications_active_outlined, color: color, size: 16),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _SimulationStrategyBadge extends StatelessWidget {
   final int score;
   final String label;
@@ -12285,44 +12327,6 @@ class _SimulationStrategyBadge extends StatelessWidget {
   }
 }
 
-class _SimulationAlertBadge extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _SimulationAlertBadge({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.34)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(Icons.notifications_active_outlined, color: color, size: 16),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SavedSimulationRecord {
   final String id;
   final DateTime createdAt;
@@ -12332,9 +12336,9 @@ class _SavedSimulationRecord {
   final String feeLabel;
   final String primaryLabel;
   final String primaryValue;
-  final String alertLabel;
   final int strategyScore;
   final String strategyLabel;
+  final String alertLabel;
 
   const _SavedSimulationRecord({
     required this.id,
@@ -12345,9 +12349,9 @@ class _SavedSimulationRecord {
     required this.feeLabel,
     required this.primaryLabel,
     required this.primaryValue,
-    required this.alertLabel,
     this.strategyScore = 0,
     this.strategyLabel = 'Sin score',
+    this.alertLabel = 'Sin alerta',
   });
 
   Map<String, Object> toJson() => <String, Object>{
@@ -12359,9 +12363,9 @@ class _SavedSimulationRecord {
     'feeLabel': feeLabel,
     'primaryLabel': primaryLabel,
     'primaryValue': primaryValue,
-    'alertLabel': alertLabel,
     'strategyScore': strategyScore,
     'strategyLabel': strategyLabel,
+    'alertLabel': alertLabel,
   };
 
   _SavedSimulationRecord copyAsNew() => _SavedSimulationRecord(
@@ -12373,9 +12377,9 @@ class _SavedSimulationRecord {
     feeLabel: feeLabel,
     primaryLabel: primaryLabel,
     primaryValue: primaryValue,
-    alertLabel: alertLabel,
     strategyScore: strategyScore,
     strategyLabel: strategyLabel,
+    alertLabel: alertLabel,
   );
 
   static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
@@ -12384,34 +12388,20 @@ class _SavedSimulationRecord {
       (json['createdAt'] ?? '').toString(),
     );
     if (id.isEmpty || createdAt == null) return null;
-    final String modeLabel = (json['modeLabel'] ?? '').toString();
-    final String storedAlertLabel = (json['alertLabel'] ?? '').toString();
     return _SavedSimulationRecord(
       id: id,
       createdAt: createdAt,
-      modeLabel: modeLabel,
+      modeLabel: (json['modeLabel'] ?? '').toString(),
       selectedAsset: (json['selectedAsset'] ?? '').toString(),
       scenario: (json['scenario'] ?? '').toString(),
       feeLabel: (json['feeLabel'] ?? '').toString(),
       primaryLabel: (json['primaryLabel'] ?? '').toString(),
       primaryValue: (json['primaryValue'] ?? '').toString(),
-      alertLabel: storedAlertLabel.trim().isEmpty
-          ? _alertLabelFromModeLabel(modeLabel)
-          : storedAlertLabel,
       strategyScore:
           int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
       strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
+      alertLabel: (json['alertLabel'] ?? 'Sin alerta').toString(),
     );
-  }
-
-  static String _alertLabelFromModeLabel(String modeLabel) {
-    final String normalized = modeLabel.trim().toLowerCase();
-    if (normalized.contains('compra')) return 'Alerta de compra';
-    if (normalized.contains('venta')) return 'Alerta de venta';
-    if (normalized.contains('rotación') || normalized.contains('rotacion')) {
-      return 'Alerta de rotación';
-    }
-    return 'Sin alerta';
   }
 }
 
@@ -12876,11 +12866,7 @@ class _SimulationComparisonMatrix extends StatelessWidget {
         right.selectedAsset,
       ),
       _SimulationComparisonRowData('Modo', left.modeLabel, right.modeLabel),
-      _SimulationComparisonRowData(
-        'Alerta',
-        left.alertLabel,
-        right.alertLabel,
-      ),
+      _SimulationComparisonRowData('Alerta', left.alertLabel, right.alertLabel),
       _SimulationComparisonRowData('Escenario', left.scenario, right.scenario),
       _SimulationComparisonRowData(
         'Score',
