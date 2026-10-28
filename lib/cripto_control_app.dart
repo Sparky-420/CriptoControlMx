@@ -12388,10 +12388,13 @@ class _SavedSimulationRecord {
       (json['createdAt'] ?? '').toString(),
     );
     if (id.isEmpty || createdAt == null) return null;
+    final String modeLabel = (json['modeLabel'] ?? '').toString();
+    final String storedAlertLabel = (json['alertLabel'] ?? '').toString();
+    final String normalizedAlertLabel = storedAlertLabel.trim();
     return _SavedSimulationRecord(
       id: id,
       createdAt: createdAt,
-      modeLabel: (json['modeLabel'] ?? '').toString(),
+      modeLabel: modeLabel,
       selectedAsset: (json['selectedAsset'] ?? '').toString(),
       scenario: (json['scenario'] ?? '').toString(),
       feeLabel: (json['feeLabel'] ?? '').toString(),
@@ -12400,8 +12403,20 @@ class _SavedSimulationRecord {
       strategyScore:
           int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
       strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
-      alertLabel: (json['alertLabel'] ?? 'Sin alerta').toString(),
+      alertLabel: normalizedAlertLabel.isNotEmpty
+          ? normalizedAlertLabel
+          : _alertLabelFromModeLabel(modeLabel),
     );
+  }
+
+  static String _alertLabelFromModeLabel(String modeLabel) {
+    final String normalized = modeLabel.trim().toLowerCase();
+    if (normalized.contains('compra')) return 'Alerta de compra';
+    if (normalized.contains('venta')) return 'Alerta de venta';
+    if (normalized.contains('rotación') || normalized.contains('rotacion')) {
+      return 'Alerta de rotación';
+    }
+    return 'Sin alerta';
   }
 }
 
