@@ -39,6 +39,15 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.4"
+
+      - name: Generate Android Gradle wrapper
+        working-directory: android
+        run: gradle wrapper --gradle-version 8.14.4 --distribution-type all
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
