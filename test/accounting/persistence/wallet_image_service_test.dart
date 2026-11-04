@@ -361,7 +361,7 @@ void main() {
 
   test('native image decode planner computes bounded sample sizes', () async {
     final compileResult = await Process.run(
-      r'.\gradlew.bat',
+      Platform.isWindows ? r'.\gradlew.bat' : './gradlew',
       <String>[':app:compileDebugKotlin'],
       workingDirectory: 'android',
       runInShell: true,
