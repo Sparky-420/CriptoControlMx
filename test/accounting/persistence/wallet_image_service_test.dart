@@ -5,7 +5,6 @@ import 'package:cripto_control_mx/accounting/persistence/wallet_image_processor.
 import 'package:cripto_control_mx/accounting/persistence/wallet_image_store.dart';
 import 'package:cripto_control_mx/accounting/support/sha256.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:test/test.dart' show Timeout;
 import 'package:flutter/services.dart';
 
 void main() {
