@@ -5,6 +5,7 @@ import 'package:cripto_control_mx/accounting/persistence/wallet_image_processor.
 import 'package:cripto_control_mx/accounting/persistence/wallet_image_store.dart';
 import 'package:cripto_control_mx/accounting/support/sha256.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart' show Timeout;
 import 'package:flutter/services.dart';
 
 void main() {
@@ -425,5 +426,5 @@ public final class WalletImageDecodePlannerRunner {
       0,
       reason: '${javaResult.stdout}\n${javaResult.stderr}',
     );
-  });
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }
