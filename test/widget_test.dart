@@ -564,39 +564,86 @@ Date 2 jul 2026 12:00
       expect(find.text('Alerta de rotación'), findsOneWidget);
     });
 
-    Future<void> tapAfterScroll(WidgetTester tester, Finder finder) async {
-      await tester.ensureVisible(finder);
+    Future<void> enterSimulationValue(
+      WidgetTester tester,
+      String label,
+      String value,
+    ) async {
+      final Finder field = find.byWidgetPredicate(
+        (Widget widget) =>
+            widget is TextField && widget.decoration?.labelText == label,
+        description: 'TextField "$label"',
+      );
+      expect(field, findsOneWidget, reason: 'Debe existir el campo $label.');
+      await tester.ensureVisible(field);
       await tester.pumpAndSettle();
-      await tester.tap(finder);
+      await tester.enterText(field, value);
       await tester.pumpAndSettle();
+    }
+
+    Future<void> verifyValidResultAndSave(WidgetTester tester) async {
+      expect(find.text('Resultado'), findsOneWidget);
+      expect(
+        find.text('Sin resultado'),
+        findsNothing,
+        reason: 'La simulación debe ser válida antes de guardarse.',
+      );
+
+      final Finder saveButton = find.widgetWithText(TextButton, 'Guardar');
+      expect(saveButton, findsOneWidget);
+      final TextButton button = tester.widget<TextButton>(saveButton);
+      expect(
+        button.onPressed,
+        isNotNull,
+        reason: 'Guardar debe estar habilitado para un resultado válido.',
+      );
+
+      await tester.ensureVisible(saveButton);
+      await tester.pumpAndSettle();
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+    }
+
+    Future<List<Map<String, dynamic>>> readPersistedSimulations() async {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      return (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
     }
 
     testWidgets('new simulations persist alert labels for buy, sell and rotation', (tester) async {
       await pumpSimulation(tester);
 
-      await tapAfterScroll(tester, find.text('Guardar').first);
+      // Compra: introducir valores válidos antes de buscar el botón Guardar.
+      await enterSimulationValue(tester, 'Monto bruto MXN', '3000');
+      await enterSimulationValue(tester, 'Precio de compra MXN', '120');
+      await verifyValidResultAndSave(tester);
 
-      var prefs = await SharedPreferences.getInstance();
-      var records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
-          .cast<Map<String, dynamic>>();
+      var records = await readPersistedSimulations();
+      expect(records, hasLength(1));
       expect(records.first['alertLabel'], 'Alerta de compra');
 
-      await tapAfterScroll(tester, find.text('Venta')); 
-      await tapAfterScroll(tester, find.text('Guardar').first);
+      // Venta: 50% de una posición de 10 LINK a un precio válido.
+      await tester.tap(find.text('Venta'));
+      await tester.pumpAndSettle();
+      await enterSimulationValue(tester, 'Precio de venta MXN', '120');
+      await verifyValidResultAndSave(tester);
 
-      prefs = await SharedPreferences.getInstance();
-      records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
-          .cast<Map<String, dynamic>>();
+      records = await readPersistedSimulations();
+      expect(records, hasLength(2));
       expect(records.first['alertLabel'], 'Alerta de venta');
 
-      await tapAfterScroll(tester, find.text('Rotar'));
-      await tapAfterScroll(tester, find.text('Guardar').first);
+      // Rotación: LINK -> BTC, ambos precios y comisiones válidos.
+      await tester.tap(find.text('Rotar'));
+      await tester.pumpAndSettle();
+      await enterSimulationValue(tester, 'Precio LINK MXN', '120');
+      await enterSimulationValue(tester, 'Precio BTC MXN', '120');
+      await verifyValidResultAndSave(tester);
 
-      prefs = await SharedPreferences.getInstance();
-      records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
-          .cast<Map<String, dynamic>>();
-      expect(records.first['alertLabel'], 'Alerta de rotación');
+      records = await readPersistedSimulations();
       expect(records, hasLength(3));
+      expect(records[0]['alertLabel'], 'Alerta de rotación');
+      expect(records[1]['alertLabel'], 'Alerta de venta');
+      expect(records[2]['alertLabel'], 'Alerta de compra');
     });
 
     testWidgets('duplicating a historical simulation preserves its fallback label', (tester) async {
