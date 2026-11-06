@@ -494,6 +494,143 @@ Date 2 jul 2026 12:00
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  group('Fase 4.7 simulation alert labels', () {
+    Map<String, Object?> savedSimulation({
+      required String id,
+      required String modeLabel,
+      String? alertLabel,
+    }) => <String, Object?>{
+      'id': id,
+      'createdAt': '2026-10-01T12:00:00.000',
+      'modeLabel': modeLabel,
+      'selectedAsset': 'BTC',
+      'scenario': 'Escenario de prueba',
+      'feeLabel': '0.00%',
+      'primaryLabel': 'Nuevo promedio',
+      'primaryValue': r'$100.00',
+      if (alertLabel != null) 'alertLabel': alertLabel,
+      'strategyScore': 76,
+      'strategyLabel': 'Interesante',
+    };
+
+    Future<void> pumpSimulation(
+      WidgetTester tester, {
+      List<Map<String, Object?>> saved = const <Map<String, Object?>>[],
+      SimulationMode initialMode = SimulationMode.operation,
+    }) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'saved_simulations_v1_json': jsonEncode(saved),
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SimulationTab(
+              coins: const <String>['BTC', 'LINK', 'UNI', 'ETH'],
+              stats: <String, CoinStats>{
+                'BTC': CoinStats(coin: 'BTC', quantity: 1, costBase: 100, currentPrice: 120),
+                'LINK': CoinStats(coin: 'LINK', quantity: 10, costBase: 1000, currentPrice: 120),
+                'UNI': CoinStats(coin: 'UNI', quantity: 10, costBase: 1000, currentPrice: 120),
+                'ETH': CoinStats(coin: 'ETH', quantity: 1, costBase: 100, currentPrice: 120),
+              },
+              defaultFeePercent: 0,
+              targetExitFeePercent: 0,
+              initialMode: initialMode,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('historical JSON without alertLabel falls back by operation mode', (tester) async {
+      await pumpSimulation(tester, saved: <Map<String, Object?>>[
+        savedSimulation(id: 'buy-old', modeLabel: 'Compra'),
+        savedSimulation(id: 'sell-old', modeLabel: 'Venta'),
+        savedSimulation(id: 'rotation-old', modeLabel: 'Rotación'),
+      ]);
+
+      await tester.tap(find.text('Historial (3)'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Alerta de compra'), findsOneWidget);
+      expect(find.text('Alerta de venta'), findsOneWidget);
+      expect(find.text('Alerta de rotación'), findsOneWidget);
+    });
+
+    testWidgets('new simulations persist alert labels for buy, sell and rotation', (tester) async {
+      await pumpSimulation(tester);
+
+      await tester.tap(find.text('Guardar').first);
+      await tester.pumpAndSettle();
+
+      var prefs = await SharedPreferences.getInstance();
+      var records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
+      expect(records.first['alertLabel'], 'Alerta de compra');
+
+      await tester.tap(find.text('Venta'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Guardar').first);
+      await tester.pumpAndSettle();
+
+      prefs = await SharedPreferences.getInstance();
+      records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
+      expect(records.first['alertLabel'], 'Alerta de venta');
+
+      await tester.tap(find.text('Rotar'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Guardar').first);
+      await tester.pumpAndSettle();
+
+      prefs = await SharedPreferences.getInstance();
+      records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
+      expect(records.first['alertLabel'], 'Alerta de rotación');
+      expect(records, hasLength(3));
+    });
+
+    testWidgets('duplicating a historical simulation preserves its fallback label', (tester) async {
+      await pumpSimulation(tester, saved: <Map<String, Object?>>[
+        savedSimulation(id: 'legacy-sale', modeLabel: 'Venta'),
+      ]);
+
+      await tester.tap(find.text('Historial (1)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Duplicar'));
+      await tester.pumpAndSettle();
+
+      final prefs = await SharedPreferences.getInstance();
+      final records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
+      expect(records, hasLength(2));
+      expect(records.first['alertLabel'], 'Alerta de venta');
+      expect(records.last['alertLabel'], 'Alerta de venta');
+    });
+
+    testWidgets('history and A/B comparator show the alert badge for both records', (tester) async {
+      await pumpSimulation(tester, saved: <Map<String, Object?>>[
+        savedSimulation(id: 'new-rotation', modeLabel: 'Rotación', alertLabel: 'Alerta de rotación'),
+        savedSimulation(id: 'new-buy', modeLabel: 'Compra', alertLabel: 'Alerta de compra'),
+      ]);
+
+      await tester.tap(find.text('Historial (2)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Alerta de rotación'), findsOneWidget);
+      expect(find.text('Alerta de compra'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Comparar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Alerta de rotación'), findsOneWidget);
+      expect(find.text('Alerta de compra'), findsOneWidget);
+    });
+  });
+
 }
 
 Map<String, Object?> _parseOcrForTest(String text) {
