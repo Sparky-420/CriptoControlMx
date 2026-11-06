@@ -556,34 +556,41 @@ Date 2 jul 2026 12:00
 
       expect(find.text('Alerta de compra'), findsOneWidget);
       expect(find.text('Alerta de venta'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Alerta de rotación'),
+        250,
+        scrollable: find.byType(Scrollable).last,
+      );
       expect(find.text('Alerta de rotación'), findsOneWidget);
     });
+
+    Future<void> tapAfterScroll(WidgetTester tester, Finder finder) async {
+      await tester.ensureVisible(finder);
+      await tester.pumpAndSettle();
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+    }
 
     testWidgets('new simulations persist alert labels for buy, sell and rotation', (tester) async {
       await pumpSimulation(tester);
 
-      await tester.tap(find.text('Guardar').first);
-      await tester.pumpAndSettle();
+      await tapAfterScroll(tester, find.text('Guardar').first);
 
       var prefs = await SharedPreferences.getInstance();
       var records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
           .cast<Map<String, dynamic>>();
       expect(records.first['alertLabel'], 'Alerta de compra');
 
-      await tester.tap(find.text('Venta'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Guardar').first);
-      await tester.pumpAndSettle();
+      await tapAfterScroll(tester, find.text('Venta')); 
+      await tapAfterScroll(tester, find.text('Guardar').first);
 
       prefs = await SharedPreferences.getInstance();
       records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
           .cast<Map<String, dynamic>>();
       expect(records.first['alertLabel'], 'Alerta de venta');
 
-      await tester.tap(find.text('Rotar'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Guardar').first);
-      await tester.pumpAndSettle();
+      await tapAfterScroll(tester, find.text('Rotar'));
+      await tapAfterScroll(tester, find.text('Guardar').first);
 
       prefs = await SharedPreferences.getInstance();
       records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
@@ -622,7 +629,7 @@ Date 2 jul 2026 12:00
       await tester.pumpAndSettle();
       expect(find.text('Alerta de rotación'), findsOneWidget);
       expect(find.text('Alerta de compra'), findsOneWidget);
-      await tester.pageBack();
+      await tester.tap(find.byTooltip('Cerrar').last);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Comparar'));
