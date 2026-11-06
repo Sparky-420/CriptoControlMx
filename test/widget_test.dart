@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cripto_control_mx/accounting/adapters/legacy_movement_adapter.dart';
@@ -494,6 +495,197 @@ Date 2 jul 2026 12:00
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  group('Fase 4.7 simulation alert labels', () {
+    Map<String, Object?> savedSimulation({
+      required String id,
+      required String modeLabel,
+      String? alertLabel,
+    }) => <String, Object?>{
+      'id': id,
+      'createdAt': '2026-10-01T12:00:00.000',
+      'modeLabel': modeLabel,
+      'selectedAsset': 'BTC',
+      'scenario': 'Escenario de prueba',
+      'feeLabel': '0.00%',
+      'primaryLabel': 'Nuevo promedio',
+      'primaryValue': r'$100.00',
+      if (alertLabel != null) 'alertLabel': alertLabel,
+      'strategyScore': 76,
+      'strategyLabel': 'Interesante',
+    };
+
+    Future<void> pumpSimulation(
+      WidgetTester tester, {
+      List<Map<String, Object?>> saved = const <Map<String, Object?>>[],
+      SimulationMode initialMode = SimulationMode.operation,
+    }) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'saved_simulations_v1_json': jsonEncode(saved),
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SimulationTab(
+              coins: const <String>['BTC', 'LINK', 'UNI', 'ETH'],
+              stats: <String, CoinStats>{
+                'BTC': CoinStats(coin: 'BTC', quantity: 1, costBase: 100, currentPrice: 120),
+                'LINK': CoinStats(coin: 'LINK', quantity: 10, costBase: 1000, currentPrice: 120),
+                'UNI': CoinStats(coin: 'UNI', quantity: 10, costBase: 1000, currentPrice: 120),
+                'ETH': CoinStats(coin: 'ETH', quantity: 1, costBase: 100, currentPrice: 120),
+              },
+              defaultFeePercent: 0,
+              targetExitFeePercent: 0,
+              initialMode: initialMode,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('historical JSON without alertLabel falls back by operation mode', (tester) async {
+      await pumpSimulation(tester, saved: <Map<String, Object?>>[
+        savedSimulation(id: 'buy-old', modeLabel: 'Compra'),
+        savedSimulation(id: 'sell-old', modeLabel: 'Venta'),
+        savedSimulation(id: 'rotation-old', modeLabel: 'Rotación'),
+      ]);
+
+      await tester.tap(find.text('Historial (3)'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Alerta de compra'), findsOneWidget);
+      expect(find.text('Alerta de venta'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Alerta de rotación'),
+        250,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('Alerta de rotación'), findsOneWidget);
+    });
+
+    Future<void> enterSimulationValue(
+      WidgetTester tester,
+      String label,
+      String value,
+    ) async {
+      final Finder field = find.byWidgetPredicate(
+        (Widget widget) =>
+            widget is TextField && widget.decoration?.labelText == label,
+        description: 'TextField "$label"',
+      );
+      expect(field, findsOneWidget, reason: 'Debe existir el campo $label.');
+      await tester.ensureVisible(field);
+      await tester.pumpAndSettle();
+      await tester.enterText(field, value);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> verifyValidResultAndSave(WidgetTester tester) async {
+      expect(find.text('Resultado'), findsOneWidget);
+      expect(
+        find.text('Sin resultado'),
+        findsNothing,
+        reason: 'La simulación debe ser válida antes de guardarse.',
+      );
+
+      final Finder saveButton = find.widgetWithText(TextButton, 'Guardar');
+      expect(saveButton, findsOneWidget);
+      final TextButton button = tester.widget<TextButton>(saveButton);
+      expect(
+        button.onPressed,
+        isNotNull,
+        reason: 'Guardar debe estar habilitado para un resultado válido.',
+      );
+
+      await tester.ensureVisible(saveButton);
+      await tester.pumpAndSettle();
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+    }
+
+    Future<List<Map<String, dynamic>>> readPersistedSimulations() async {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      return (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
+    }
+
+    testWidgets('new simulations persist alert labels for buy, sell and rotation', (tester) async {
+      await pumpSimulation(tester);
+
+      // Compra: introducir valores válidos antes de buscar el botón Guardar.
+      await enterSimulationValue(tester, 'Monto bruto MXN', '3000');
+      await enterSimulationValue(tester, 'Precio de compra MXN', '120');
+      await verifyValidResultAndSave(tester);
+
+      var records = await readPersistedSimulations();
+      expect(records, hasLength(1));
+      expect(records.first['alertLabel'], 'Alerta de compra');
+
+      // Venta: 50% de una posición de 10 LINK a un precio válido.
+      await tester.tap(find.text('Venta'));
+      await tester.pumpAndSettle();
+      await enterSimulationValue(tester, 'Precio de venta MXN', '120');
+      await verifyValidResultAndSave(tester);
+
+      records = await readPersistedSimulations();
+      expect(records, hasLength(2));
+      expect(records.first['alertLabel'], 'Alerta de venta');
+
+      // Rotación: LINK -> BTC, ambos precios y comisiones válidos.
+      await tester.tap(find.text('Rotar'));
+      await tester.pumpAndSettle();
+      await enterSimulationValue(tester, 'Precio LINK MXN', '120');
+      await enterSimulationValue(tester, 'Precio BTC MXN', '120');
+      await verifyValidResultAndSave(tester);
+
+      records = await readPersistedSimulations();
+      expect(records, hasLength(3));
+      expect(records[0]['alertLabel'], 'Alerta de rotación');
+      expect(records[1]['alertLabel'], 'Alerta de venta');
+      expect(records[2]['alertLabel'], 'Alerta de compra');
+    });
+
+    testWidgets('duplicating a historical simulation preserves its fallback label', (tester) async {
+      await pumpSimulation(tester, saved: <Map<String, Object?>>[
+        savedSimulation(id: 'legacy-sale', modeLabel: 'Venta'),
+      ]);
+
+      await tester.tap(find.text('Historial (1)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Duplicar'));
+      await tester.pumpAndSettle();
+
+      final prefs = await SharedPreferences.getInstance();
+      final records = (jsonDecode(prefs.getString('saved_simulations_v1_json')!) as List)
+          .cast<Map<String, dynamic>>();
+      expect(records, hasLength(2));
+      expect(records.first['alertLabel'], 'Alerta de venta');
+      expect(records.last['alertLabel'], 'Alerta de venta');
+    });
+
+    testWidgets('history and A/B comparator show the alert badge for both records', (tester) async {
+      await pumpSimulation(tester, saved: <Map<String, Object?>>[
+        savedSimulation(id: 'new-rotation', modeLabel: 'Rotación', alertLabel: 'Alerta de rotación'),
+        savedSimulation(id: 'new-buy', modeLabel: 'Compra', alertLabel: 'Alerta de compra'),
+      ]);
+
+      await tester.tap(find.text('Historial (2)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Alerta de rotación'), findsOneWidget);
+      expect(find.text('Alerta de compra'), findsOneWidget);
+      await tester.tap(find.byTooltip('Cerrar').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Comparar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Alerta de rotación'), findsOneWidget);
+      expect(find.text('Alerta de compra'), findsOneWidget);
+    });
+  });
+
 }
 
 Map<String, Object?> _parseOcrForTest(String text) {
