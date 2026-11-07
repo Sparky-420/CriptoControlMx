@@ -631,7 +631,7 @@ Date 2 jul 2026 12:00
           tester.widget<SegmentedButton<OperationSimulationMode>>(
         operationModeFinder,
       );
-      operationMode.onSelectionChanged(<OperationSimulationMode>{
+      operationMode.onSelectionChanged!(<OperationSimulationMode>{
         OperationSimulationMode.sell,
       });
       await tester.pumpAndSettle();
@@ -650,7 +650,7 @@ Date 2 jul 2026 12:00
           tester.widget<SegmentedButton<SimulationMode>>(
         simulationModeFinder,
       );
-      simulationMode.onSelectionChanged(<SimulationMode>{
+      simulationMode.onSelectionChanged!(<SimulationMode>{
         SimulationMode.rotation,
       });
       await tester.pumpAndSettle();
