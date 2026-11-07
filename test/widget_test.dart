@@ -642,9 +642,19 @@ Date 2 jul 2026 12:00
       expect(records, hasLength(2));
       expect(records.first['alertLabel'], 'Alerta de venta');
 
-      // Rotación: LINK -> BTC, ambos precios y comisiones válidos.
-      await tester.tap(find.text('Rotar'));
+      // Rotación: cambiar al modo superior mediante su callback tipado.
+      final Finder simulationModeFinder =
+          find.byType(SegmentedButton<SimulationMode>);
+      expect(simulationModeFinder, findsOneWidget);
+      final SegmentedButton<SimulationMode> simulationMode =
+          tester.widget<SegmentedButton<SimulationMode>>(
+        simulationModeFinder,
+      );
+      simulationMode.onSelectionChanged(<SimulationMode>{
+        SimulationMode.rotation,
+      });
       await tester.pumpAndSettle();
+      // LINK -> BTC, ambos precios y comisiones válidos.
       await enterSimulationValue(tester, 'Precio LINK MXN', '120');
       await enterSimulationValue(tester, 'Precio BTC MXN', '120');
       await verifyValidResultAndSave(tester);
