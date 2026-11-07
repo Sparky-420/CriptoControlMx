@@ -623,11 +623,8 @@ Date 2 jul 2026 12:00
       expect(records.first['alertLabel'], 'Alerta de compra');
 
       // Venta: regresar al selector superior y usar el control visible.
-      await tester.scrollUntilVisible(
-        find.text('Venta'),
-        -250,
-        scrollable: find.byType(Scrollable).last,
-      );
+      await tester.drag(find.byType(ListView), const Offset(0, 1200));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Venta'));
       await tester.pumpAndSettle();
       await enterSimulationValue(tester, 'Precio de venta MXN', '120');
@@ -638,11 +635,8 @@ Date 2 jul 2026 12:00
       expect(records.first['alertLabel'], 'Alerta de venta');
 
       // Rotación: volver al selector superior y tocar el segmento visible.
-      await tester.scrollUntilVisible(
-        find.text('Rotar'),
-        -250,
-        scrollable: find.byType(Scrollable).last,
-      );
+      await tester.drag(find.byType(ListView), const Offset(0, 1200));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Rotar'));
       await tester.pumpAndSettle();
       // LINK -> BTC, ambos precios y comisiones válidos.
