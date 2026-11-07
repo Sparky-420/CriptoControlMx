@@ -622,8 +622,18 @@ Date 2 jul 2026 12:00
       expect(records, hasLength(1));
       expect(records.first['alertLabel'], 'Alerta de compra');
 
-      // Venta: 50% de una posición de 10 LINK a un precio válido.
-      await tester.tap(find.text('Venta'));
+      // Venta: cambiar el modo mediante el callback tipado del control.
+      // El botón segmentado puede quedar fuera del viewport tras revelar Guardar.
+      final Finder operationModeFinder =
+          find.byType(SegmentedButton<OperationSimulationMode>);
+      expect(operationModeFinder, findsOneWidget);
+      final SegmentedButton<OperationSimulationMode> operationMode =
+          tester.widget<SegmentedButton<OperationSimulationMode>>(
+        operationModeFinder,
+      );
+      operationMode.onSelectionChanged(<OperationSimulationMode>{
+        OperationSimulationMode.sell,
+      });
       await tester.pumpAndSettle();
       await enterSimulationValue(tester, 'Precio de venta MXN', '120');
       await verifyValidResultAndSave(tester);
