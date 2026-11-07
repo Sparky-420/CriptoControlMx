@@ -622,18 +622,13 @@ Date 2 jul 2026 12:00
       expect(records, hasLength(1));
       expect(records.first['alertLabel'], 'Alerta de compra');
 
-      // Venta: cambiar el modo mediante el callback tipado del control.
-      // El botón segmentado puede quedar fuera del viewport tras revelar Guardar.
-      final Finder operationModeFinder =
-          find.byType(SegmentedButton<OperationSimulationMode>);
-      expect(operationModeFinder, findsOneWidget);
-      final SegmentedButton<OperationSimulationMode> operationMode =
-          tester.widget<SegmentedButton<OperationSimulationMode>>(
-        operationModeFinder,
+      // Venta: regresar al selector superior y usar el control visible.
+      await tester.scrollUntilVisible(
+        find.text('Venta'),
+        -250,
+        scrollable: find.byType(Scrollable).last,
       );
-      operationMode.onSelectionChanged!(<OperationSimulationMode>{
-        OperationSimulationMode.sell,
-      });
+      await tester.tap(find.text('Venta'));
       await tester.pumpAndSettle();
       await enterSimulationValue(tester, 'Precio de venta MXN', '120');
       await verifyValidResultAndSave(tester);
@@ -642,17 +637,13 @@ Date 2 jul 2026 12:00
       expect(records, hasLength(2));
       expect(records.first['alertLabel'], 'Alerta de venta');
 
-      // Rotación: cambiar al modo superior mediante su callback tipado.
-      final Finder simulationModeFinder =
-          find.byType(SegmentedButton<SimulationMode>);
-      expect(simulationModeFinder, findsOneWidget);
-      final SegmentedButton<SimulationMode> simulationMode =
-          tester.widget<SegmentedButton<SimulationMode>>(
-        simulationModeFinder,
+      // Rotación: volver al selector superior y tocar el segmento visible.
+      await tester.scrollUntilVisible(
+        find.text('Rotar'),
+        -250,
+        scrollable: find.byType(Scrollable).last,
       );
-      simulationMode.onSelectionChanged!(<SimulationMode>{
-        SimulationMode.rotation,
-      });
+      await tester.tap(find.text('Rotar'));
       await tester.pumpAndSettle();
       // LINK -> BTC, ambos precios y comisiones válidos.
       await enterSimulationValue(tester, 'Precio LINK MXN', '120');
