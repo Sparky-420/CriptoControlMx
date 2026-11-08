@@ -92,15 +92,37 @@ jobs:
       - name: Build signed release AAB (versionCode 16)
         run: flutter build appbundle --release --build-number 16
 
-      - name: Verify APK signature and metadata
+      - name: Verify Play Store signing identity and APK metadata
         shell: bash
         run: |
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
           test -s "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          APKANALYZER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name apkanalyzer | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          test -n "$APKANALYZER"
+
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\\n' "$SIGNATURE_OUTPUT"
+          ACTUAL_CERT="$(printf '%s\\n' "$SIGNATURE_OUTPUT" | awk -F': ' '/certificate SHA-256 digest:/ {print toupper($2); exit}' | tr -d ':')"
+          EXPECTED_PLAY_CERT="EDEE10475CE93EA17AC3A1F37488A78D67D696A6CF30706C703BF6C8BE5A6A82"
+          if [ "$ACTUAL_CERT" != "$EXPECTED_PLAY_CERT" ]; then
+            echo "::error::APK signing certificate does not match the Google Play-installed Beta 14 certificate."
+            echo "::error::Expected SHA-256: $EXPECTED_PLAY_CERT"
+            echo "::error::Actual SHA-256: ${ACTUAL_CERT:-missing}"
+            exit 1
+          fi
+
+          PACKAGE="$("$APKANALYZER" manifest application-id "$APK")"
+          VERSION_NAME="$("$APKANALYZER" manifest version-name "$APK")"
+          VERSION_CODE="$("$APKANALYZER" manifest version-code "$APK")"
+          echo "Package: $PACKAGE"
+          echo "Version name: $VERSION_NAME"
+          echo "Version code: $VERSION_CODE"
+          test "$PACKAGE" = "mx.criptocontrolmx.app"
+          test "$VERSION_NAME" = "1.0.0-beta.15"
+          test "$VERSION_CODE" = "16"
           sha256sum "$APK"
 
       - name: Verify AAB exists
