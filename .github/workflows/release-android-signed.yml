@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - release-candidate-fenix-20261104
+      - codex/fenix-fase-4-7-simulation-alert-label
     paths:
       - ".github/workflows/release-android-signed.yml"
       - "pubspec.yaml"
