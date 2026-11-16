@@ -1,5 +1,9 @@
 name: CriptoControl AI Integration Check
 
+concurrency:
+  group: ai-integration-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [feat/cripto-control-ai-integration]
