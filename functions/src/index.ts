@@ -46,7 +46,7 @@ async function reserveQuota(uid: string, plan: "free" | "pro", requestId: string
   const requestRef = db.doc(`ai_private_requests/${stableKey(uid, requestId)}`);
   return db.runTransaction(async tx => {
     const [quotaSnap, requestSnap] = await Promise.all([tx.get(quotaRef), tx.get(requestRef)]);
-    if (requestSnap.exists) return { duplicate: true, remaining: Number(quotaSnap.get("remaining") ?? 0) };
+    if (requestSnap.exists) return { duplicate: true, remaining: Number(quotaSnap.get("remaining") ?? 0), day };
     const used = Number(quotaSnap.get("used") ?? 0);
     const limit = LIMITS[plan];
     if (used >= limit) throw new HttpsError("resource-exhausted", "Límite diario de consultas alcanzado.");
