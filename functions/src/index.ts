@@ -115,6 +115,7 @@ export const analyzePortfolio = onCall(
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: AI_MODEL.value(),
+          reasoning: { effort: "high" },
           instructions: SYSTEM_PROMPT,
           input: [{ role: "user", content: [
             { type: "input_text", text: "CONTEXTO DE LA CONVERSACIÓN PREVIA (JSON):\n" + historyJson },
