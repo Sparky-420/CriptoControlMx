@@ -22,7 +22,7 @@ final class _PortfolioAiChatScreenState extends State<PortfolioAiChatScreen> {
   final _scrollController = ScrollController();
   final List<_ChatMessage> _messages = <_ChatMessage>[
     const _ChatMessage(
-      text: 'Soy CriptoControl AI. Puedo analizar tus movimientos, posiciones, costos, comisiones, rendimiento y escenarios hipotéticos. ¿Qué quieres saber de tu cartera?\n\nPrivacidad: al enviar una pregunta, el contexto de tu cartera se transmite a OpenAI para procesarla. CriptoControlMx no guarda esta conversación como historial.',
+      text: 'Soy Cripi, el asistente inteligente de CriptoControlMx. Puedo analizar tus movimientos, posiciones, costos, comisiones, rendimiento y escenarios hipotéticos. ¿Qué quieres saber de tu cartera?\n\nPrivacidad: al enviar una pregunta, el contexto de tu cartera se transmite a OpenAI para procesarla. CriptoControlMx no guarda esta conversación como historial.',
       fromUser: false,
     ),
   ];
@@ -91,8 +91,8 @@ final class _PortfolioAiChatScreenState extends State<PortfolioAiChatScreen> {
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('CriptoControl AI'),
-            Text('Analista conversacional de tu cartera', style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal)),
+            Text('Cripi'),
+            Text('Tu analista de cartera', style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal)),
           ],
         ),
       ),
