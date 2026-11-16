@@ -6102,8 +6102,9 @@ class _CriptoControlAppState extends State<CriptoControlApp>
                 await navigator.push(
                   MaterialPageRoute<void>(
                     builder: (_) => PortfolioAiChatScreen(
-                      onAsk: (question) async => (await aiService.ask(
+                      onAsk: (question, history) async => (await aiService.ask(
                         question: question,
+                        history: history,
                         accounting: document,
                         projection: projection,
                         currentPrices: _currentPrices,
