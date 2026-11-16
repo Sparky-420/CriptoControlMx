@@ -24,6 +24,7 @@ final class PortfolioAiService {
 
   Future<PortfolioAiAnswer> ask({
     required String question,
+    List<Map<String, String>> history = const <Map<String, String>>[],
     required AccountingDocument accounting,
     required LedgerProjection projection,
     required Map<String, double> currentPrices,
@@ -39,6 +40,7 @@ final class PortfolioAiService {
     final token = await user.getIdToken();
     if (token == null || token.isEmpty) throw StateError('No se pudo validar la sesión.');
     final requestId = _requestId();
+    final safeHistory = history.length > 30 ? history.sublist(history.length - 30) : history;
     final context = _buildContext(
       accounting: accounting,
       projection: projection,
@@ -48,6 +50,7 @@ final class PortfolioAiService {
     );
     final payload = jsonEncode({'data': {
       'question': normalizedQuestion,
+      'history': safeHistory,
       'requestId': requestId,
       'portfolioContext': context,
     }});
