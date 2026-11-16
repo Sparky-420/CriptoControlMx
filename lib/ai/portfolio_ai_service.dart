@@ -70,7 +70,7 @@ final class PortfolioAiService {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final error = decoded is Map ? decoded['error'] : null;
       final message = error is Map ? error['message']?.toString() : null;
-      throw PortfolioAiException(message ?? 'Error al consultar CriptoControl AI.', response.statusCode);
+      throw PortfolioAiException(message ?? 'Error al consultar a Cripi.', response.statusCode);
     }
     final result = decoded is Map ? decoded['result'] : null;
     if (result is! Map || result['answer'] is! String) {
