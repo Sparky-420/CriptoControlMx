@@ -26,8 +26,8 @@ No se incluye ninguna API key en el repositorio. No se ha desplegado ninguna fun
 
 - La función está fijada en `us-central1`; confirmar que coincide con la región de Firebase del proyecto.
 - El claim `plan` o `subscription` debe ser asignado por el sistema de billing de confianza. Si no existe, se aplica Free.
-- Los límites iniciales Free 8 / Pro 100 consultas por día son valores de respaldo provisionales. Se pueden sobrescribir desde el documento privado Firestore `ai_private_config/plans`, con `free.dailyLimit` y `pro.dailyLimit`.
-- La política TTL de Firestore debe configurarse para el campo `expiresAt` en las colecciones `ai_private_quotas` y `ai_private_requests`.
+- Los límites iniciales Free 8 / Pro 100 consultas por día son valores de respaldo provisionales. Se pueden sobrescribir desde el documento privado Firestore `ai_private_config/plans`, con `free.dailyLimit` y `pro.dailyLimit`, por ejemplo: `free.dailyLimit=8` y `pro.dailyLimit=100`.
+- La política TTL de Firestore debe configurarse para el campo `expiresAt` en las colecciones `ai_private_quotas` y `ai_private_requests` (30 días).
 - El contexto completo se transmite en cada pregunta. Para historiales que superen 1.8 MB / 12,000 movimientos, el backend rechaza la petición en vez de truncar silenciosamente el historial.
 - Las proyecciones se recalculan localmente con el motor contable real al abrir el chat. No se crea una copia contable paralela.
 
