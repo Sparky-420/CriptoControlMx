@@ -136,6 +136,7 @@ export const analyzePortfolio = onCall(
         body: JSON.stringify({
           model: AI_MODEL.value(),
           reasoning: { effort: "high" },
+          max_output_tokens: 6000,
           instructions: SYSTEM_PROMPT,
           input: [{ role: "user", content: [
             { type: "input_text", text: "CONTEXTO DE LA CONVERSACIÓN PREVIA (JSON):\n" + historyJson },
