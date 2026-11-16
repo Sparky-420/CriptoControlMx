@@ -50,9 +50,24 @@ async function reserveQuota(uid: string, plan: "free" | "pro", requestId: string
     const used = Number(quotaSnap.get("used") ?? 0);
     const limit = LIMITS[plan];
     if (used >= limit) throw new HttpsError("resource-exhausted", "Límite diario de consultas alcanzado.");
-    tx.set(quotaRef, { used: used + 1, remaining: limit - used - 1, plan, day, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    tx.create(requestRef, { uidHash: createHash("sha256").update(uid).digest("hex"), day, createdAt: FieldValue.serverTimestamp() });
-    return { duplicate: false, remaining: limit - used - 1 };
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    tx.set(quotaRef, { used: used + 1, remaining: limit - used - 1, plan, day, expiresAt, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    tx.create(requestRef, { uidHash: createHash("sha256").update(uid).digest("hex"), day, expiresAt, createdAt: FieldValue.serverTimestamp() });
+    return { duplicate: false, remaining: limit - used - 1, day };
+  });
+}
+
+async function refundQuota(uid: string, day: string, requestId: string) {
+  const quotaRef = db.doc(`ai_private_quotas/${uid}_${day}`);
+  const requestRef = db.doc(`ai_private_requests/${stableKey(uid, requestId)}`);
+  await db.runTransaction(async tx => {
+    const [quotaSnap, requestSnap] = await Promise.all([tx.get(quotaRef), tx.get(requestRef)]);
+    if (!requestSnap.exists) return;
+    if (quotaSnap.exists) {
+      const used = Math.max(0, Number(quotaSnap.get("used") ?? 0) - 1);
+      tx.set(quotaRef, { used, remaining: Math.max(0, Number(quotaSnap.get("remaining") ?? 0) + 1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    tx.delete(requestRef);
   });
 }
 
@@ -78,11 +93,11 @@ export const analyzePortfolio = onCall(
     if (Buffer.byteLength(contextJson, "utf8") > MAX_CONTEXT_BYTES) {
       throw new HttpsError("invalid-argument", "El contexto de cartera supera el tamaño máximo; divide la consulta por periodo.");
     }
+    const key = OPENAI_API_KEY.value();
+    if (!key) throw new HttpsError("failed-precondition", "El proveedor de IA no está configurado.");
     const plan = planFor(request.auth.token as Record<string, unknown>);
     const quota = await reserveQuota(request.auth.uid, plan, requestId);
     if (quota.duplicate) throw new HttpsError("already-exists", "Esta consulta ya fue procesada.");
-    const key = OPENAI_API_KEY.value();
-    if (!key) throw new HttpsError("failed-precondition", "El proveedor de IA no está configurado.");
     const started = Date.now();
     try {
       const response = await fetch("https://api.openai.com/v1/responses", {
@@ -111,6 +126,9 @@ export const analyzePortfolio = onCall(
       if (!answer) throw new HttpsError("internal", "El analista no generó una respuesta utilizable.");
       return { answer, requestId, quota: { remaining: quota.remaining, plan }, meta: { model: AI_MODEL.value(), latencyMs: Date.now() - started, contextMovements: context.movements.length } };
     } catch (error) {
+      await refundQuota(request.auth.uid, quota.day, requestId).catch(refundError => {
+        console.error("AI quota refund failed", refundError);
+      });
       if (error instanceof HttpsError) throw error;
       console.error("AI analysis failed", error);
       throw new HttpsError("unavailable", "No fue posible completar el análisis.");
