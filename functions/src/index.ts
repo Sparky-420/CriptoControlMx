@@ -132,11 +132,27 @@ export const analyzePortfolio = onCall(
         console.error("AI provider failure", response.status, body.slice(0, 500));
         throw new HttpsError(response.status === 429 ? "resource-exhausted" : "unavailable", "El analista de IA no está disponible temporalmente.");
       }
-      const result = await response.json() as { output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-      const answer = (result.output ?? []).flatMap(item => item.content ?? [])
-        .filter(part => part.type === "output_text" && typeof part.text === "string")
-        .map(part => part.text).join("\n").trim();
-      if (!answer) throw new HttpsError("internal", "El analista no generó una respuesta utilizable.");
+      const result = await response.json() as {
+        output?: Array<{ content?: Array<{
+          type?: string;
+          text?: string;
+          annotations?: Array<{ type?: string; url?: string; title?: string }>;
+        }> }>;
+      };
+      const textParts = (result.output ?? []).flatMap(item => item.content ?? [])
+        .filter(part => part.type === "output_text" && typeof part.text === "string");
+      const answerText = textParts.map(part => part.text).join("\\n").trim();
+      const citations = new Map<string, string>();
+      for (const part of textParts) {
+        for (const annotation of part.annotations ?? []) {
+          if (annotation.type === "url_citation" && annotation.url) {
+            citations.set(annotation.url, annotation.title || annotation.url);
+          }
+        }
+      }
+      const sources = [...citations.entries()].map(([url, title]) => `- ${title}: ${url}`);
+      const answer = answerText + (sources.length ? "\\n\\nFuentes consultadas:\\n" + sources.join("\\n") : "");
+      if (!answerText) throw new HttpsError("internal", "El analista no generó una respuesta utilizable.");
       return { answer, requestId, quota: { remaining: quota.remaining, plan }, meta: { model: AI_MODEL.value(), latencyMs: Date.now() - started, contextMovements: context.movements.length } };
     } catch (error) {
       await refundQuota(request.auth.uid, quota.day, requestId).catch(refundError => {
