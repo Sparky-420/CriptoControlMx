@@ -103,8 +103,20 @@ export const analyzePortfolio = onCall(
     )) {
       throw new HttpsError("invalid-argument", "Historial conversacional inválido.");
     }
-    if (!Array.isArray(context.movements) || context.movements.length > MAX_MOVEMENTS) {
-      throw new HttpsError("invalid-argument", "El historial supera el límite admitido o tiene formato inválido.");
+    if (
+      context.schemaVersion !== 1 ||
+      !Array.isArray(context.movements) ||
+      context.movements.length > MAX_MOVEMENTS ||
+      !Array.isArray(context.positions) ||
+      context.positions.length > 500 ||
+      !Array.isArray(context.portfolioSnapshots) ||
+      context.portfolioSnapshots.length > 2000 ||
+      !context.totals ||
+      typeof context.totals !== "object" ||
+      !context.prices ||
+      typeof context.prices !== "object"
+    ) {
+      throw new HttpsError("invalid-argument", "El contexto de cartera supera los límites o tiene un formato incompatible.");
     }
     const contextJson = safeJson(context);
     const historyJson = safeJson(history);
