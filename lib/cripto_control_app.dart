@@ -17,6 +17,13 @@ import 'accounting/adapters/legacy_movement_adapter.dart';
 import 'accounting/adapters/legacy_persistence_bridge.dart';
 import 'accounting/application/wallet_image_cleanup_journal.dart';
 import 'accounting/application/wallet_lifecycle_coordinator.dart';
+import 'accounting/domain/accounting_amount.dart';
+import 'accounting/domain/movement_normalizer.dart';
+import 'accounting/projection/accounting_ledger_engine.dart';
+import 'accounting/projection/custody_projector.dart';
+import 'accounting/projection/performance_projector.dart';
+import 'ai/portfolio_ai_chat_screen.dart';
+import 'ai/portfolio_ai_service.dart';
 import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
 import 'accounting/domain/wallet.dart';
@@ -6058,6 +6065,60 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             }());
           }
 
+          void openAiChat() {
+            final navigator = Navigator.of(pageContext);
+            unawaited(() async {
+              final document = await loadWalletsScreenDocumentForApp(
+                bridge: _legacyPersistenceBridge,
+                repository: _accountingRepository,
+                runtimeDocument: _accountingDocument,
+                legacyMovements: _movements,
+                updateRuntimeDocument: (document) {
+                  if (mounted) setState(() => _accountingDocument = document);
+                },
+              );
+              if (!mounted) return;
+              final priceAmounts = <String, AccountingAmount>{
+                for (final entry in _currentPrices.entries)
+                  if (entry.value.isFinite && entry.value > 0)
+                    entry.key: AccountingAmount.parse(entry.value.toStringAsFixed(8)),
+              };
+              final projection = const AccountingLedgerEngine(
+                DefaultMovementNormalizer(),
+                DefaultCustodyProjector(),
+                DefaultPerformanceProjector(),
+              ).project(
+                LedgerInput(
+                  wallets: document.wallets,
+                  movements: document.movements,
+                  currentPrices: priceAmounts,
+                  saleCostConsumptionPolicy: SaleCostConsumptionPolicy.knownFirst,
+                  transferCostAllocationPolicy: TransferCostAllocationPolicy.proportional,
+                  legacyAccountingPolicy: document.legacyAccountingPolicy,
+                ),
+              );
+              final aiService = PortfolioAiService();
+              try {
+                await navigator.push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PortfolioAiChatScreen(
+                      onAsk: (question) async => (await aiService.ask(
+                        question: question,
+                        accounting: document,
+                        projection: projection,
+                        currentPrices: _currentPrices,
+                        pricesUpdatedAt: _pricesUpdatedAt,
+                        priceModes: _priceModes,
+                      )).answer,
+                    ),
+                  ),
+                );
+              } finally {
+                aiService.close();
+              }
+            }());
+          }
+
           Widget buildSettingsTab({
             VoidCallback? refresh,
             SettingsView view = SettingsView.all,
@@ -6393,6 +6454,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             appBar: AppBar(
               title: const Text('CriptoControlMx'),
               actions: <Widget>[
+                IconButton(
+                  tooltip: 'Preguntar a CriptoControl AI',
+                  onPressed: openAiChat,
+                  icon: const Icon(Icons.auto_awesome_rounded),
+                ),
                 if (_currentIndex != 0)
                   PremiumQuickActions(
                     onCapture: () => openMovementHistory(startWithOcr: true),
