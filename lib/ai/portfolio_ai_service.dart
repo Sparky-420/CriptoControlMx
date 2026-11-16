@@ -111,14 +111,16 @@ final class PortfolioAiService {
       'knownCostBasis': position.performance.knownCostBasis.toJson(),
       'averageCost': position.performance.averageCost.toJson(),
       'realizedPnlKnown': position.performance.realizedPnlKnown.toJson(),
-      'unrealizedPnlKnown': position.performance.unrealizedPnlKnown.toJson(),
-      'marketValue': (currentPrices[position.key.asset] ?? 0) > 0
+      'unrealizedPnlKnown': hasPrice(position.key.asset)
+          ? position.performance.unrealizedPnlKnown.toJson()
+          : null,
+      'marketValue': hasPrice(position.key.asset)
           ? position.custodyMarketValue.toJson()
           : null,
-      'knownPositionMarketValue': (currentPrices[position.key.asset] ?? 0) > 0
+      'knownPositionMarketValue': hasPrice(position.key.asset)
           ? position.knownPositionMarketValue.toJson()
           : null,
-      'marketPriceAvailable': (currentPrices[position.key.asset] ?? 0) > 0,
+      'marketPriceAvailable': hasPrice(position.key.asset),
       'completeness': position.completeness.state.name,
       'reconciliationDifference': position.reconciliationDifference.toJson(),
       'custodyDeficit': position.custodyDeficit.toJson(),
@@ -153,10 +155,14 @@ final class PortfolioAiService {
         'custodyMarketValue': positionAssets.every(hasPrice)
             ? projection.totals.custodyMarketValue.toJson()
             : null,
-        'knownPositionMarketValue': projection.totals.knownPositionMarketValue.toJson(),
+        'knownPositionMarketValue': positionAssets.every(hasPrice)
+            ? projection.totals.knownPositionMarketValue.toJson()
+            : null,
         'knownCostBasis': projection.totals.knownCostBasis.toJson(),
         'realizedPnlKnown': projection.totals.realizedPnlKnown.toJson(),
-        'unrealizedPnlKnown': projection.totals.unrealizedPnlKnown.toJson(),
+        'unrealizedPnlKnown': positionAssets.every(hasPrice)
+            ? projection.totals.unrealizedPnlKnown.toJson()
+            : null,
         'fiatCostEffect': projection.totals.fiatCostEffect.toJson(),
       },
       'prices': {
