@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// contexto de cartera completo; esta pantalla nunca modifica registros.
 final class PortfolioAiChatScreen extends StatefulWidget {
   const PortfolioAiChatScreen({super.key, required this.onAsk});
-  final Future<String> Function(String question) onAsk;
+  final Future<String> Function(String question, List<Map<String, String>> history) onAsk;
 
   @override
   State<PortfolioAiChatScreen> createState() => _PortfolioAiChatScreenState();
@@ -45,7 +45,14 @@ final class _PortfolioAiChatScreenState extends State<PortfolioAiChatScreen> {
     });
     _jumpToBottom();
     try {
-      final answer = await widget.onAsk(question);
+      final history = _messages
+          .where((message) => message.text != 'Soy CriptoControl AI. Puedo analizar tus movimientos, posiciones, costos, comisiones, rendimiento y escenarios hipotéticos. ¿Qué quieres saber de tu cartera?')
+          .map((message) => <String, String>{
+            'role': message.fromUser ? 'user' : 'assistant',
+            'content': message.text,
+          })
+          .toList(growable: false);
+      final answer = await widget.onAsk(question, history);
       if (!mounted) return;
       setState(() => _messages.add(_ChatMessage(text: answer, fromUser: false)));
     } catch (error) {
