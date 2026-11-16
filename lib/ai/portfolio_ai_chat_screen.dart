@@ -47,7 +47,7 @@ final class _PortfolioAiChatScreenState extends State<PortfolioAiChatScreen> {
     try {
       final history = _messages
           .take(_messages.length - 1)
-          .where((message) => message.text != 'Soy CriptoControl AI. Puedo analizar tus movimientos, posiciones, costos, comisiones, rendimiento y escenarios hipotéticos. ¿Qué quieres saber de tu cartera?')
+          .skip(1)
           .map((message) => <String, String>{
             'role': message.fromUser ? 'user' : 'assistant',
             'content': message.text,
