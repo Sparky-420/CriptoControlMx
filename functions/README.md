@@ -1,4 +1,4 @@
-# CriptoControl AI — integración en CriptoControlMx
+# Cripi — integración en CriptoControlMx
 
 Esta integración agrega un chat de análisis conversacional a la aplicación. El cliente construye el contexto desde el documento contable canónico y el `AccountingLedgerEngine`; el backend autenticado entrega el contexto completo de cartera e historial al modelo. La IA no escribe movimientos ni modifica la contabilidad.
 
