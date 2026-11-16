@@ -148,6 +148,10 @@ final class PortfolioAiService {
           entry.key: {
             'mxn': entry.value,
             'mode': priceModes[entry.key] ?? 'automatic',
+            'source': (priceModes[entry.key] ?? 'automatic') == 'manual' ? 'Manual' : 'CoinGecko',
+            'updatedAt': manualPriceUpdatedAtMs[entry.key] == null
+                ? pricesUpdatedAt?.toUtc().toIso8601String()
+                : DateTime.fromMillisecondsSinceEpoch(manualPriceUpdatedAtMs[entry.key]!).toUtc().toIso8601String(),
           },
       },
       'pricesUpdatedAt': pricesUpdatedAt?.toUtc().toIso8601String(),
