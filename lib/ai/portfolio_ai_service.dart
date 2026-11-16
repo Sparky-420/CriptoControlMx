@@ -88,7 +88,7 @@ final class PortfolioAiService {
       for (var i = 0; i < accounting.wallets.length; i++)
         accounting.wallets[i].id: accounting.wallets[i].name,
     };
-    final positions = projection.positions.values.map(position => {
+    final positions = projection.positions.values.map((position) => {
       'wallet': walletNames[position.key.walletId] ?? (position.key.walletId.startsWith('virtual:') ? 'Sin asignar / pendiente' : 'Cartera'),
       'asset': position.key.asset,
       'custodyQuantity': position.custody.reconciledQuantity.toJson(),
@@ -146,11 +146,11 @@ final class PortfolioAiService {
         'assigned': projection.migrationProgress.assigned,
         'total': projection.migrationProgress.total,
       },
-      'issues': projection.issues.map(issue => {
+      'issues': projection.issues.map((issue) => {
         'code': issue.code.name,
         'description': issue.message.replaceAll(RegExp(r'[0-9a-fA-F-]{20,}'), '[id]'),
       }).toList(growable: false),
-      'sales': projection.sales.map(sale => {
+      'sales': projection.sales.map((sale) => {
         'movementId': sale.movementId,
         'status': sale.status.name,
         'quantity': sale.totalQuantity.toJson(),
