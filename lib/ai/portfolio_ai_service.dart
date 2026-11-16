@@ -146,7 +146,8 @@ final class PortfolioAiService {
       'prices': {
         for (final entry in currentPrices.entries)
           entry.key: {
-            'mxn': entry.value,
+            'mxn': entry.value.isFinite && entry.value > 0 ? entry.value : null,
+            'available': entry.value.isFinite && entry.value > 0,
             'mode': priceModes[entry.key] ?? 'automatic',
             'source': (priceModes[entry.key] ?? 'automatic') == 'manual' ? 'Manual' : 'CoinGecko',
             'updatedAt': manualPriceUpdatedAtMs[entry.key] == null
