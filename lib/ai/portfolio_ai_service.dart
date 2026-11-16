@@ -107,8 +107,13 @@ final class PortfolioAiService {
       'averageCost': position.performance.averageCost.toJson(),
       'realizedPnlKnown': position.performance.realizedPnlKnown.toJson(),
       'unrealizedPnlKnown': position.performance.unrealizedPnlKnown.toJson(),
-      'marketValue': position.custodyMarketValue.toJson(),
-      'knownPositionMarketValue': position.knownPositionMarketValue.toJson(),
+      'marketValue': (currentPrices[position.key.asset] ?? 0) > 0
+          ? position.custodyMarketValue.toJson()
+          : null,
+      'knownPositionMarketValue': (currentPrices[position.key.asset] ?? 0) > 0
+          ? position.knownPositionMarketValue.toJson()
+          : null,
+      'marketPriceAvailable': (currentPrices[position.key.asset] ?? 0) > 0,
       'completeness': position.completeness.state.name,
       'reconciliationDifference': position.reconciliationDifference.toJson(),
       'custodyDeficit': position.custodyDeficit.toJson(),
@@ -135,8 +140,14 @@ final class PortfolioAiService {
         'status': wallet.status.name,
       }).toList(growable: false),
       'positions': positions,
+      'priceCoverage': {
+        'pricedAssets': currentPrices.values.where((price) => price.isFinite && price > 0).length,
+        'totalAssets': currentPrices.length,
+      },
       'totals': {
-        'custodyMarketValue': projection.totals.custodyMarketValue.toJson(),
+        'custodyMarketValue': currentPrices.values.every((price) => price.isFinite && price > 0)
+            ? projection.totals.custodyMarketValue.toJson()
+            : null,
         'knownPositionMarketValue': projection.totals.knownPositionMarketValue.toJson(),
         'knownCostBasis': projection.totals.knownCostBasis.toJson(),
         'realizedPnlKnown': projection.totals.realizedPnlKnown.toJson(),
