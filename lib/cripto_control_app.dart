@@ -6475,7 +6475,7 @@ class _CriptoControlAppState extends State<CriptoControlApp>
               title: const Text('CriptoControlMx'),
               actions: <Widget>[
                 IconButton(
-                  tooltip: 'Preguntar a CriptoControl AI',
+                  tooltip: 'Preguntar a Cripi',
                   onPressed: openAiChat,
                   icon: const Icon(Icons.auto_awesome_rounded),
                 ),
