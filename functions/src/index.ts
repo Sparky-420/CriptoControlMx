@@ -153,8 +153,8 @@ export const analyzePortfolio = onCall(
         signal: AbortSignal.timeout(100_000)
       });
       if (!response.ok) {
-        const body = await response.text();
-        console.error("AI provider failure", response.status, body.slice(0, 500));
+        await response.text();
+        console.error("AI provider failure", response.status);
         throw new HttpsError(response.status === 429 ? "resource-exhausted" : "unavailable", "El analista de IA no está disponible temporalmente.");
       }
       const result = await response.json() as {
