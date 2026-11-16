@@ -37,10 +37,19 @@ function planFor(authToken: Record<string, unknown>): "free" | "pro" {
   // Sólo claims firmados por Firebase Admin son fuente de plan confiable.
   return authToken.plan === "pro" || authToken.subscription === "pro" ? "pro" : "free";
 }
-const LIMITS = { free: 8, pro: 100 } as const;
+const DEFAULT_LIMITS = { free: 8, pro: 100 } as const;
+
+async function configuredDailyLimit(plan: "free" | "pro"): Promise<number> {
+  const config = await db.doc("ai_private_config/plans").get();
+  const configured = config.get(`${plan}.dailyLimit`);
+  return typeof configured === "number" && Number.isInteger(configured) && configured >= 1 && configured <= 10000
+    ? configured
+    : DEFAULT_LIMITS[plan];
+}
 
 async function reserveQuota(uid: string, plan: "free" | "pro", requestId: string) {
   const now = new Date();
+  const limit = await configuredDailyLimit(plan);
   const day = now.toISOString().slice(0, 10);
   const quotaRef = db.doc(`ai_private_quotas/${uid}_${day}`);
   const requestRef = db.doc(`ai_private_requests/${stableKey(uid, requestId)}`);
@@ -48,7 +57,6 @@ async function reserveQuota(uid: string, plan: "free" | "pro", requestId: string
     const [quotaSnap, requestSnap] = await Promise.all([tx.get(quotaRef), tx.get(requestRef)]);
     if (requestSnap.exists) return { duplicate: true, remaining: Number(quotaSnap.get("remaining") ?? 0), day };
     const used = Number(quotaSnap.get("used") ?? 0);
-    const limit = LIMITS[plan];
     if (used >= limit) throw new HttpsError("resource-exhausted", "Límite diario de consultas alcanzado.");
     const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     tx.set(quotaRef, { used: used + 1, remaining: limit - used - 1, plan, day, expiresAt, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
