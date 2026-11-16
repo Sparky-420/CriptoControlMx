@@ -64,7 +64,7 @@ final class PortfolioAiService {
       ..contentType = ContentType.json
       ..set(HttpHeaders.acceptHeader, 'application/json');
     request.write(payload);
-    final response = await request.close().timeout(const Duration(seconds: 110));
+    final response = await request.close().timeout(const Duration(seconds: 280));
     final body = await utf8.decoder.bind(response).join();
     final decoded = jsonDecode(body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
