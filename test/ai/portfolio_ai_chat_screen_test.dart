@@ -16,6 +16,9 @@ void main() {
       ),
     );
 
+    expect(find.text('Cripi'), findsOneWidget);
+    expect(find.text('Tu analista de cartera'), findsOneWidget);
+    expect(find.textContaining('Soy Cripi,'), findsOneWidget);
     expect(find.textContaining('Privacidad:'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), '¿Cómo va mi cartera?');
