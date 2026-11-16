@@ -117,7 +117,8 @@ export const analyzePortfolio = onCall(
           model: AI_MODEL.value(),
           instructions: SYSTEM_PROMPT,
           input: [{ role: "user", content: [
-            { type: "input_text", text: "PREGUNTA DEL USUARIO:\n" + question },
+            { type: "input_text", text: "CONTEXTO DE LA CONVERSACIÓN PREVIA (JSON):\n" + historyJson },
+            { type: "input_text", text: "PREGUNTA ACTUAL DEL USUARIO:\n" + question },
             { type: "input_text", text: "CONTEXTO COMPLETO DE CARTERA (JSON):\n" + contextJson }
           ] }],
           store: false
