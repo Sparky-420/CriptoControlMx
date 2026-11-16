@@ -97,6 +97,11 @@ final class PortfolioAiService {
       for (var i = 0; i < accounting.wallets.length; i++)
         accounting.wallets[i].id: accounting.wallets[i].name,
     };
+    final positionAssets = projection.positions.keys.map((key) => key.asset).toSet();
+    bool hasPrice(String asset) {
+      final price = currentPrices[asset];
+      return price != null && price.isFinite && price > 0;
+    }
     final positions = projection.positions.values.map((position) => {
       'wallet': walletNames[position.key.walletId] ?? (position.key.walletId.startsWith('virtual:') ? 'Sin asignar / pendiente' : 'Cartera'),
       'asset': position.key.asset,
@@ -141,11 +146,11 @@ final class PortfolioAiService {
       }).toList(growable: false),
       'positions': positions,
       'priceCoverage': {
-        'pricedAssets': currentPrices.values.where((price) => price.isFinite && price > 0).length,
-        'totalAssets': currentPrices.length,
+        'pricedAssets': positionAssets.where(hasPrice).length,
+        'totalAssets': positionAssets.length,
       },
       'totals': {
-        'custodyMarketValue': currentPrices.values.every((price) => price.isFinite && price > 0)
+        'custodyMarketValue': positionAssets.every(hasPrice)
             ? projection.totals.custodyMarketValue.toJson()
             : null,
         'knownPositionMarketValue': projection.totals.knownPositionMarketValue.toJson(),
