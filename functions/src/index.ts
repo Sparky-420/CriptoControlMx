@@ -86,11 +86,21 @@ export const analyzePortfolio = onCall(
     const question = boundedString(payload.question, "Pregunta", MAX_QUESTION);
     const requestId = boundedString(payload.requestId, "requestId", 128);
     const context = record(payload.portfolioContext, "portfolioContext");
+    const history = payload.history === undefined ? [] : payload.history;
+    if (!Array.isArray(history) || history.length > 30 || history.some(turn =>
+      !turn || typeof turn !== "object" || Array.isArray(turn) ||
+      !["user", "assistant"].includes((turn as JsonRecord).role as string) ||
+      typeof (turn as JsonRecord).content !== "string" ||
+      ((turn as JsonRecord).content as string).length > MAX_QUESTION
+    )) {
+      throw new HttpsError("invalid-argument", "Historial conversacional inválido.");
+    }
     if (!Array.isArray(context.movements) || context.movements.length > MAX_MOVEMENTS) {
       throw new HttpsError("invalid-argument", "El historial supera el límite admitido o tiene formato inválido.");
     }
     const contextJson = safeJson(context);
-    if (Buffer.byteLength(contextJson, "utf8") > MAX_CONTEXT_BYTES) {
+    const historyJson = safeJson(history);
+    if (Buffer.byteLength(contextJson, "utf8") + Buffer.byteLength(historyJson, "utf8") > MAX_CONTEXT_BYTES) {
       throw new HttpsError("invalid-argument", "El contexto de cartera supera el tamaño máximo; divide la consulta por periodo.");
     }
     const key = OPENAI_API_KEY.value();
