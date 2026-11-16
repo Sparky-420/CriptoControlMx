@@ -17,6 +17,7 @@ jobs:
           channel: stable
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test test/ai/portfolio_ai_chat_screen_test.dart
       - run: flutter test
 
   functions:
