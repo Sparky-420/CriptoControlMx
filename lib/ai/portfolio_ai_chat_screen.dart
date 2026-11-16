@@ -22,7 +22,7 @@ final class _PortfolioAiChatScreenState extends State<PortfolioAiChatScreen> {
   final _scrollController = ScrollController();
   final List<_ChatMessage> _messages = <_ChatMessage>[
     const _ChatMessage(
-      text: 'Soy CriptoControl AI. Puedo analizar tus movimientos, posiciones, costos, comisiones, rendimiento y escenarios hipotéticos. ¿Qué quieres saber de tu cartera?',
+      text: 'Soy CriptoControl AI. Puedo analizar tus movimientos, posiciones, costos, comisiones, rendimiento y escenarios hipotéticos. ¿Qué quieres saber de tu cartera?\n\nPrivacidad: al enviar una pregunta, el contexto de tu cartera se transmite a OpenAI para procesarla. CriptoControlMx no guarda esta conversación como historial.',
       fromUser: false,
     ),
   ];
