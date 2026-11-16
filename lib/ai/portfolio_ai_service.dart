@@ -30,6 +30,8 @@ final class PortfolioAiService {
     required Map<String, double> currentPrices,
     required DateTime? pricesUpdatedAt,
     required Map<String, String> priceModes,
+    List<Map<String, Object?>> snapshots = const <Map<String, Object?>>[],
+    Map<String, int> manualPriceUpdatedAtMs = const <String, int>{},
   }) async {
     final normalizedQuestion = question.trim();
     if (normalizedQuestion.isEmpty || normalizedQuestion.length > 8000) {
@@ -47,6 +49,8 @@ final class PortfolioAiService {
       currentPrices: currentPrices,
       pricesUpdatedAt: pricesUpdatedAt,
       priceModes: priceModes,
+      snapshots: snapshots,
+      manualPriceUpdatedAtMs: manualPriceUpdatedAtMs,
     );
     final payload = jsonEncode({'data': {
       'question': normalizedQuestion,
@@ -86,6 +90,8 @@ final class PortfolioAiService {
     required Map<String, double> currentPrices,
     required DateTime? pricesUpdatedAt,
     required Map<String, String> priceModes,
+    required List<Map<String, Object?>> snapshots,
+    required Map<String, int> manualPriceUpdatedAtMs,
   }) {
     final walletNames = <String, String>{
       for (var i = 0; i < accounting.wallets.length; i++)
@@ -145,6 +151,8 @@ final class PortfolioAiService {
           },
       },
       'pricesUpdatedAt': pricesUpdatedAt?.toUtc().toIso8601String(),
+      'manualPriceUpdatedAtMs': manualPriceUpdatedAtMs,
+      'portfolioSnapshots': snapshots,
       'migrationProgress': {
         'assigned': projection.migrationProgress.assigned,
         'total': projection.migrationProgress.total,
