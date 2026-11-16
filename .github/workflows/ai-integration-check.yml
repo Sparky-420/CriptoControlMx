@@ -29,7 +29,7 @@ jobs:
           gradle-version: '8.14.4'
       - name: Generate Android Gradle wrapper for native tests
         working-directory: android
-        run: gradle wrapper --gradle-version 8.14.4 --distribution-type all
+        run: gradle wrapper --gradle-version 8.14.4 --distribution-type bin
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - run: flutter test test/ai/portfolio_ai_chat_screen_test.dart
       - run: flutter test
