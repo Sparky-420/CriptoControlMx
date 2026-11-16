@@ -141,7 +141,7 @@ export const analyzePortfolio = onCall(
       };
       const textParts = (result.output ?? []).flatMap(item => item.content ?? [])
         .filter(part => part.type === "output_text" && typeof part.text === "string");
-      const answerText = textParts.map(part => part.text).join("\\n").trim();
+      const answerText = textParts.map(part => part.text).join("\n").trim();
       const citations = new Map<string, string>();
       for (const part of textParts) {
         for (const annotation of part.annotations ?? []) {
@@ -151,7 +151,7 @@ export const analyzePortfolio = onCall(
         }
       }
       const sources = [...citations.entries()].map(([url, title]) => `- ${title}: ${url}`);
-      const answer = answerText + (sources.length ? "\\n\\nFuentes consultadas:\\n" + sources.join("\\n") : "");
+      const answer = answerText + (sources.length ? "\n\nFuentes consultadas:\n" + sources.join("\n") : "");
       if (!answerText) throw new HttpsError("internal", "El analista no generó una respuesta utilizable.");
       return { answer, requestId, quota: { remaining: quota.remaining, plan }, meta: { model: AI_MODEL.value(), latencyMs: Date.now() - started, contextMovements: context.movements.length } };
     } catch (error) {
