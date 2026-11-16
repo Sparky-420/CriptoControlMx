@@ -46,11 +46,11 @@ final class PortfolioAiService {
       pricesUpdatedAt: pricesUpdatedAt,
       priceModes: priceModes,
     );
-    final payload = jsonEncode({
+    final payload = jsonEncode({'data': {
       'question': normalizedQuestion,
       'requestId': requestId,
       'portfolioContext': context,
-    });
+    }});
     final request = await _httpClient.postUrl(Uri.parse(endpoint));
     request.headers
       ..set(HttpHeaders.authorizationHeader, 'Bearer $token')
@@ -61,17 +61,19 @@ final class PortfolioAiService {
     final body = await utf8.decoder.bind(response).join();
     final decoded = jsonDecode(body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = decoded is Map ? decoded['message']?.toString() : null;
+      final error = decoded is Map ? decoded['error'] : null;
+      final message = error is Map ? error['message']?.toString() : null;
       throw PortfolioAiException(message ?? 'Error al consultar CriptoControl AI.', response.statusCode);
     }
-    if (decoded is! Map || decoded['answer'] is! String) {
+    final result = decoded is Map ? decoded['result'] : null;
+    if (result is! Map || result['answer'] is! String) {
       throw const PortfolioAiException('Respuesta inválida del analista.', 502);
     }
     return PortfolioAiAnswer(
-      answer: decoded['answer'] as String,
-      requestId: decoded['requestId']?.toString() ?? requestId,
-      remaining: (decoded['quota'] is Map ? (decoded['quota'] as Map)['remaining'] : null) as int?,
-      model: (decoded['meta'] is Map ? (decoded['meta'] as Map)['model'] : null)?.toString(),
+      answer: result['answer'] as String,
+      requestId: result['requestId']?.toString() ?? requestId,
+      remaining: (result['quota'] is Map ? (result['quota'] as Map)['remaining'] : null) as int?,
+      model: (result['meta'] is Map ? (result['meta'] as Map)['model'] : null)?.toString(),
     );
   }
 
@@ -87,7 +89,7 @@ final class PortfolioAiService {
         accounting.wallets[i].id: accounting.wallets[i].name,
     };
     final positions = projection.positions.values.map(position => {
-      'wallet': walletNames[position.key.walletId] ?? position.key.walletId.startsWith('virtual:') ? 'Sin asignar / pendiente' : 'Cartera',
+      'wallet': walletNames[position.key.walletId] ?? (position.key.walletId.startsWith('virtual:') ? 'Sin asignar / pendiente' : 'Cartera'),
       'asset': position.key.asset,
       'custodyQuantity': position.custody.reconciledQuantity.toJson(),
       'knownQuantity': position.performance.knownQuantity.toJson(),
