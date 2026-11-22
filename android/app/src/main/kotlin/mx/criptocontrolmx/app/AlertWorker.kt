@@ -17,16 +17,37 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+private val alertWorkerExecutionLock = Any()
+
 class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appContext, params) {
-    override fun doWork(): Result {
+    override fun doWork(): Result = synchronized(alertWorkerExecutionLock) {
+        doWorkLocked()
+    }
+
+    private fun doWorkLocked(): Result {
         val prefs = applicationContext.getSharedPreferences(sharedPreferencesName, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(pref(automaticEnabledKey), false)) return Result.success()
-        if (!prefs.getBoolean(pref(priceEnabledKey), false) && !prefs.getBoolean(pref(recoveryEnabledKey), false)) {
-            return Result.success()
-        }
+        val freeActive = prefs.getBoolean(pref(automaticEnabledKey), false) &&
+            (prefs.getBoolean(pref(priceEnabledKey), false) || prefs.getBoolean(pref(recoveryEnabledKey), false))
+        // Motor Pro independiente: comparte esta única consulta de precios.
+        val smartActive = SmartSimulationEngine.isActive(prefs)
+        if (!freeActive && !smartActive) return Result.success()
 
         val prices = fetchPrices()
-        if (prices.isEmpty()) return Result.retry()
+        if (prices.isEmpty()) {
+            if (smartActive) {
+                SmartSimulationEngine.recordPriceFailure(
+                    prefs,
+                    "Sin conexión o respuesta incompleta del proveedor de precios.",
+                )
+            }
+            return Result.retry()
+        }
+
+        if (smartActive) {
+            createSmartChannel()
+            SmartSimulationEngine.run(prefs, prices) { id, title, body -> notifySmart(id, title, body) }
+        }
+        if (!freeActive) return Result.success()
 
         prefs.edit()
             .putString(pref(pricesKey), JSONObject(prices as Map<*, *>).toString())
@@ -188,17 +209,27 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             if (connection.responseCode !in 200..299) return emptyMap()
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
+            val symbols = mapOf(
+                "bitcoin" to "BTC",
+                "ethereum" to "ETH",
+                "chainlink" to "LINK",
+                "litecoin" to "LTC",
+                "uniswap" to "UNI",
+                "tether" to "USDT",
+                "usd-coin" to "USDC",
+                "ripple" to "XRP",
+                "solana" to "SOL",
+                "cosmos" to "ATOM",
+            )
             buildMap {
-                put("BTC", json.getJSONObject("bitcoin").getDouble("mxn"))
-                put("ETH", json.getJSONObject("ethereum").getDouble("mxn"))
-                put("LINK", json.getJSONObject("chainlink").getDouble("mxn"))
-                put("LTC", json.getJSONObject("litecoin").getDouble("mxn"))
-                put("UNI", json.getJSONObject("uniswap").getDouble("mxn"))
-                put("USDT", json.getJSONObject("tether").getDouble("mxn"))
-                put("USDC", json.getJSONObject("usd-coin").getDouble("mxn"))
-                put("XRP", json.getJSONObject("ripple").getDouble("mxn"))
-                put("SOL", json.getJSONObject("solana").getDouble("mxn"))
-                put("ATOM", json.getJSONObject("cosmos").getDouble("mxn"))
+                for ((providerId, symbol) in symbols) {
+                    val price = json.optJSONObject(providerId)
+                        ?.optDouble("mxn", Double.NaN)
+                        ?: Double.NaN
+                    if (price.isFinite() && price > 0.0) {
+                        put(symbol, price)
+                    }
+                }
             }
         } catch (_: Exception) {
             emptyMap()
@@ -224,6 +255,35 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             .build()
         manager().notify(abs(tag.hashCode()), notification)
         return true
+    }
+
+    private fun notifySmart(id: String, title: String, body: String): Boolean {
+        if (!notificationsAllowed()) return false
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(applicationContext, SmartSimulationEngine.channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(applicationContext)
+        }
+        val notification = builder
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body.substringBefore('\n'))
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        manager().notify(abs("smart_$id".hashCode()), notification)
+        return true
+    }
+
+    private fun createSmartChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            SmartSimulationEngine.channelId,
+            "Oportunidades Pro de simulaciones",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply { description = "Notificaciones inteligentes Pro basadas en simulaciones guardadas" }
+        manager().createNotificationChannel(channel)
     }
 
     private fun createChannel() {
