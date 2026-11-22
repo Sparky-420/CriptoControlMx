@@ -45,7 +45,14 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
 
         if (smartActive) {
             createSmartChannel()
-            SmartSimulationEngine.run(prefs, prices) { id, title, body -> notifySmart(id, title, body) }
+            try {
+                SmartSimulationEngine.run(prefs, prices) { id, title, body -> notifySmart(id, title, body) }
+            } catch (e: Exception) {
+                SmartSimulationEngine.recordPriceFailure(
+                    prefs,
+                    "Motor Pro falló: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
         }
         if (!freeActive) return Result.success()
 
