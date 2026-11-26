@@ -589,7 +589,16 @@ Date 2 jul 2026 12:00
         reason: 'La simulación debe ser válida antes de guardarse.',
       );
 
-      final Finder saveButton = find.widgetWithText(TextButton, 'Guardar');
+      // TextButton.icon crea un _TextButtonWithIcon (subclase privada) y
+      // find.widgetWithText compara el tipo exacto, así que no lo encuentra.
+      // Se busca el TextButton ancestro del texto 'Guardar' con `is`.
+      final Finder saveButton = find.ancestor(
+        of: find.text('Guardar'),
+        matching: find.byWidgetPredicate(
+          (Widget widget) => widget is TextButton,
+          description: 'TextButton',
+        ),
+      );
       expect(saveButton, findsOneWidget);
       final TextButton button = tester.widget<TextButton>(saveButton);
       expect(
