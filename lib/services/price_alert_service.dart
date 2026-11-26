@@ -28,8 +28,8 @@ class PriceAlertService {
 
   static const int defaultAutomaticIntervalMinutes = 30;
   static const List<int> automaticIntervalOptions = <int>[15, 30, 60, 360, 1440];
-  static const double defaultThresholdPercent = 0.0;
-  static const double defaultRecoveryThresholdPoints = 0.0;
+  static const double defaultThresholdPercent = 2.0;
+  static const double defaultRecoveryThresholdPoints = 2.0;
   static const String _channelName = 'mx.criptocontrolmx.app/price_alerts';
 
   final MethodChannel _channel;
@@ -247,7 +247,14 @@ class PriceAlertService {
         if (currentPrice <= 0) continue;
 
         final double referencePrice = references[coin] ?? 0.0;
-        if (referencePrice <= 0) continue;
+        if (referencePrice <= 0) {
+          // Primera vista con posición: fijar la base sin notificar, igual
+          // que hace el Worker nativo con la recuperación de P&L. Sin esto,
+          // activar las alertas con referencias vacías nunca avisaba hasta
+          // pulsar manualmente "reiniciar precios base".
+          references[coin] = currentPrice;
+          continue;
+        }
 
         final double changePct =
             (currentPrice - referencePrice) / referencePrice * 100;

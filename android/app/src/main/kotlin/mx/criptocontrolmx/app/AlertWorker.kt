@@ -56,8 +56,17 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         }
         if (!freeActive) return Result.success()
 
+        // Fusionar con la caché existente: las monedas en modo manual
+        // conservan su precio guardado. Sobrescribir prices_json con los
+        // precios en vivo destruía los precios manuales del usuario.
+        val cachedPrices = readDoubleMap(prefs.getString(pref(pricesKey), null))
+        val priceModes = readStringMap(prefs.getString(pref(priceModesKey), null))
+        val mergedPrices = cachedPrices.toMutableMap()
+        for ((coin, price) in prices) {
+            if (priceModes[coin] != "manual") mergedPrices[coin] = price
+        }
         prefs.edit()
-            .putString(pref(pricesKey), JSONObject(prices as Map<*, *>).toString())
+            .putString(pref(pricesKey), JSONObject(mergedPrices as Map<*, *>).toString())
             .putLong(pref(pricesUpdatedAtKey), System.currentTimeMillis())
             .apply()
 
@@ -83,7 +92,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         val notifiedPrices = readDoubleMap(prefs.getString(pref(priceLastNotifiedPricesKey), null))
         val notifiedAt = readStringMap(prefs.getString(pref(priceLastNotifiedAtKey), null))
         val stats = computeStats(prefs.getString(pref(movementsKey), null), prices)
-        val activeCoins = coins.filter { (stats[it]?.quantity ?: 0.0) > 0.0 && references.containsKey(it) }.toSet()
+        val activeCoins = coins.filter { (stats[it]?.quantity ?: 0.0) > 0.0 }.toSet()
         var changed = false
 
         for (coin in references.keys.filter { it !in activeCoins }.toList()) {
@@ -97,7 +106,15 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             val currentPrice = prices[coin] ?: continue
             if (currentPrice <= 0) continue
             val reference = references[coin] ?: 0.0
-            if (reference <= 0) continue
+            if (reference <= 0) {
+                // Primera vista con posición: fijar la base sin notificar,
+                // igual que la recuperación de P&L. Sin esto, activar las
+                // alertas con referencias vacías nunca avisaba hasta pulsar
+                // manualmente "reiniciar precios base".
+                references[coin] = currentPrice
+                changed = true
+                continue
+            }
             val changePct = (currentPrice - reference) / reference * 100.0
             if (changePct >= threshold || changePct <= -threshold) {
                 val up = changePct > 0
@@ -182,7 +199,30 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             val quantity = movement.optDoubleCompat("quantity")
             val unitPrice = movement.optDoubleCompat("unitPrice", movement.optDoubleCompat("unit_price"))
             val fee = movement.optDoubleCompat("fee", movement.optDoubleCompat("commission"))
-            when (movementType(movement.optString("type"))) {
+            val type = movementType(movement.optString("type"))
+            if (type == "transferOut" && isStructuredOwnedTransfer(movement)) {
+                // Paridad con FinancialEngine.computeStats: un traspaso entre
+                // carteras propias no cambia la cantidad del activo; solo
+                // descuenta la comisión en cripto del activo de la comisión.
+                // Antes se trataba como una venta y vaciaba la posición.
+                val feeAsset = movement.optString("cryptoFeeAsset", coin)
+                    .ifBlank { coin }.uppercase()
+                val cryptoFee = movement.optDoubleCompat("cryptoFeeAmount")
+                val feeStat = stats[feeAsset]
+                if (feeStat != null && cryptoFee > 0) {
+                    val average = if (feeStat.quantity > 0) feeStat.costBase / feeStat.quantity else 0.0
+                    val quantityToRemove = min(cryptoFee, feeStat.quantity)
+                    feeStat.quantity -= quantityToRemove
+                    feeStat.costBase -= average * quantityToRemove
+                    if (abs(feeStat.quantity) < 0.0000000001) {
+                        feeStat.quantity = 0.0
+                        feeStat.costBase = 0.0
+                    }
+                    if (abs(feeStat.costBase) < 0.00000001) feeStat.costBase = 0.0
+                }
+                continue
+            }
+            when (type) {
                 "buy", "transferIn" -> {
                     stat.quantity += quantity
                     stat.costBase += quantity * unitPrice + fee
@@ -193,6 +233,9 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
                     val removedCost = average * quantityToRemove
                     stat.quantity -= quantityToRemove
                     stat.costBase -= removedCost
+                }
+                "balanceAdjustment" -> {
+                    // Paridad con Dart: el ajuste de saldo no mueve la posición.
                 }
             }
             if (abs(stat.quantity) < 0.0000000001) {
@@ -337,6 +380,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         private const val recoveryLastNotifiedAtKey = "recovery_alert_last_notified_at_json"
         private const val pricesKey = "prices_json"
         private const val pricesUpdatedAtKey = "prices_updated_at_ms"
+        private const val priceModesKey = "price_modes_v1_json"
         private const val movementsKey = "movements_json"
         private const val sellFeePercentKey = "sell_fee_percent"
         private fun pref(key: String) = "flutter.$key"
@@ -389,8 +433,19 @@ private fun movementType(rawType: String): String {
         "sell", "venta", "vender" -> "sell"
         "transferin", "transfer_in", "transferenciaentrada", "transferencia recibida", "entrada" -> "transferIn"
         "transferout", "transfer_out", "transferenciasalida", "transferencia enviada", "salida" -> "transferOut"
+        "balanceadjustment", "balance_adjustment", "ajuste", "ajuste de saldo" -> "balanceAdjustment"
         else -> "buy"
     }
+}
+
+private fun isStructuredOwnedTransfer(movement: JSONObject): Boolean {
+    val hasAmounts = !movement.isNull("receivedAmount") ||
+        !movement.isNull("cryptoFeeAmount") ||
+        !movement.isNull("totalDebitedAmount")
+    if (!hasAmounts) return false
+    val source = movement.optString("sourcePlatform").ifBlank { movement.optString("source") }
+    val destination = movement.optString("destinationPlatform").ifBlank { movement.optString("wallet") }
+    return source.isNotBlank() && destination.isNotBlank()
 }
 
 private fun signed(value: Double) = "${if (value >= 0) "+" else ""}${value.format(2)}"

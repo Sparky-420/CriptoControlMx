@@ -8,7 +8,7 @@ import org.json.JSONObject
  * Motor de notificaciones inteligentes Pro (segundo plano).
  *
  * Port 1:1 de lib/smart_alerts/ (SmartSimulationEvaluator + SmartSimulationMonitor):
- * mismas claves, mismas f├│rmulas del simulador y misma l├│gica anti-duplicados.
+ * mismas claves, mismas fórmulas del simulador y misma lógica anti-duplicados.
  * Se ejecuta dentro del AlertWorker existente reutilizando la misma consulta
  * de precios (no hay un Worker adicional). Nunca ejecuta operaciones.
  */
@@ -46,7 +46,7 @@ object SmartSimulationEngine {
         prefs.edit().putString(stateKey, states.toString()).commit()
     }
 
-    /** Devuelve cu├íntas notificaciones se enviaron. */
+    /** Devuelve cuántas notificaciones se enviaron. */
     fun run(
         prefs: SharedPreferences,
         prices: Map<String, Double>,
@@ -66,7 +66,7 @@ object SmartSimulationEngine {
             if (params == null) {
                 next.put("lastStatus", "missingData").put(
                     "diagnostic",
-                    "La simulaci├│n no tiene par├ímetros econ├│micos guardados; vuelve a guardarla para supervisarla.",
+                    "La simulación no tiene parámetros económicos guardados; vuelve a guardarla para supervisarla.",
                 )
                 states.put(id, next)
                 continue
@@ -329,18 +329,18 @@ object SmartSimulationEngine {
     }
 
     private fun message(p: JSONObject, e: Evaluation, prices: Map<String, Double>): Pair<String, String> {
-        val intro = "Las condiciones actuales cumplen los objetivos de tu simulaci├│n guardada."
+        val intro = "Las condiciones actuales cumplen los objetivos de tu simulación guardada."
         val outro = "Motivo: se alcanzaron las condiciones configuradas en tu estrategia. CriptoControlMx no ejecuta operaciones."
         return when (p.optString("kind")) {
             "rotation" -> {
                 val o = p.optString("originCoin").uppercase(); val t = p.optString("targetCoin").uppercase()
-                "Oportunidad de rotaci├│n $o ΓåÆ $t" to listOf(
+                "Oportunidad de rotación $o → $t" to listOf(
                     intro,
                     "Activo de origen: $o (${mxn(prices[o] ?: 0.0)}).",
                     "Activo de destino: $t (${mxn(prices[t] ?: 0.0)}).",
                     "Cantidad estimada actual: ${qty(e.currentValue)} $t.",
-                    "Cantidad objetivo de la simulaci├│n: ${qty(e.targetValue)} $t.",
-                    "Resultado estimado despu├⌐s de comisiones: ${mxn(e.netAfterFees)} convertidos (comisiones ${mxn(e.totalCommissions)}).",
+                    "Cantidad objetivo de la simulación: ${qty(e.targetValue)} $t.",
+                    "Resultado estimado después de comisiones: ${mxn(e.netAfterFees)} convertidos (comisiones ${mxn(e.totalCommissions)}).",
                     outro,
                 ).joinToString("\n")
             }
@@ -350,8 +350,8 @@ object SmartSimulationEngine {
                     intro,
                     "Precio actual $c: ${mxn(prices[c] ?: 0.0)} (simulado ${mxn(p.optDouble("simPrice"))}).",
                     "Cantidad estimada actual: ${qty(e.currentValue)} $c.",
-                    "Cantidad objetivo de la simulaci├│n: ${qty(e.targetValue)} $c.",
-                    "Capital neto despu├⌐s de comisiones: ${mxn(e.netAfterFees)}.",
+                    "Cantidad objetivo de la simulación: ${qty(e.targetValue)} $c.",
+                    "Capital neto después de comisiones: ${mxn(e.netAfterFees)}.",
                     outro,
                 ).joinToString("\n")
             }
@@ -361,8 +361,8 @@ object SmartSimulationEngine {
                     intro,
                     "Precio actual $c: ${mxn(prices[c] ?: 0.0)} (simulado ${mxn(p.optDouble("simPrice"))}).",
                     "Cantidad a vender: ${qty(p.optDouble("quantity"))} $c.",
-                    "Resultado estimado despu├⌐s de comisiones: ${mxn(e.currentValue)}.",
-                    "Objetivo de la simulaci├│n: ${mxn(e.targetValue)}.",
+                    "Resultado estimado después de comisiones: ${mxn(e.currentValue)}.",
+                    "Objetivo de la simulación: ${mxn(e.targetValue)}.",
                     outro,
                 ).joinToString("\n")
             }

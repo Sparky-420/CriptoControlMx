@@ -74,6 +74,20 @@ La auditoría del repositorio no encontró un flujo que conceda o revoque ese de
 
 Mientras no exista ese flujo, no debe interpretarse el motor implementado como una suscripción Pro operativa. Las alertas gratuitas conservan su funcionamiento independiente.
 
+### 6.1 Qué falta exactamente (auditoría 2026-11-24)
+
+Hoy ningún código de producción escribe `pro_entitlement_active_v1 = true`: solo los tests lo fijan como dato de prueba. Pro no se puede activar en la app instalada, y el flag es un booleano plano en `SharedPreferences`, sin validación de compra, sin revocación y sin restauración. Para que Pro sea comprable falta todo esto, y debe conectarse así:
+
+1. **Dependencia**: añadir `com.android.billingclient:billing-ktx` (v8+) en `android/app/build.gradle.kts`. No existe hoy.
+2. **Producto en Play Console**: crear un producto de **pago único** (`inapp`, no suscripción; es lo que pidió el dueño del proyecto) con su ID, precio y descripción. Sin ese producto no hay nada que comprar.
+3. **Cliente Billing**: conectar `BillingClient` al iniciar la app, consultar `queryProductDetailsAsync` para el producto y lanzar `launchBillingFlow` desde la pantalla Pro.
+4. **Validación**: en `onPurchasesUpdated`, verificar la compra antes de conceder nada. Como mínimo, comprobar la firma local con la clave pública de Play; lo correcto es verificar el `purchaseToken` en un backend propio o con la Google Play Developer API (o RTDN) y solo entonces escribir el entitlement. Escribir el flag directamente desde la app sin verificación permitiría activarlo manipulando el dispositivo.
+5. **Concesión**: solo tras la compra verificada, escribir `pro_entitlement_active_v1 = true` y llamar a `acknowledgePurchase` (una compra no reconocida se reembolsa sola a los 3 días). Después, llamar a `refreshBackgroundSchedule` para que WorkManager programe el Worker único con el motor Pro activo.
+6. **Restauración y revocación**: en cada inicio, `queryPurchasesAsync` debe revalidar el derecho y corregir el flag (activarlo si la compra existe, desactivarlo ante reembolso o revocación). Un reembolso o una revocación en Play debe apagar Pro y volver a llamar a `refreshBackgroundSchedule`.
+7. **Qué NO hacer**: no escribir el flag desde la UI, desde un botón de depuración ni desde ningún flujo que no sea la compra verificada; no usar el flag como prueba de pago en ningún otro sitio.
+
+Hasta que eso exista, el motor Pro sigue siendo código que solo se ejecuta en tests y en el Worker cuando el flag ya está activo por otros medios. No se activa Pro artificialmente para validar compras.
+
 ## 7. Validación técnica ejecutada
 
 Resultados reportados durante esta auditoría:
@@ -90,6 +104,33 @@ La compilación Kotlin se ejecutó con:
 `.\android\gradlew.bat -p .\android :app:compileDebugKotlin`
 
 La compilación y las pruebas anteriores acreditan esas validaciones concretas; no equivalen a una prueba de estrés de concurrencia, una prueba de todos los ciclos de vida Android ni una validación de compras reales.
+
+### 7.1 Auditoría de alertas 2026-11-24 (gratuitas + Pro)
+
+Hallazgos reparados en esta auditoría (rama `feat/cripto-control-ai-integration`, sin commit todavía):
+
+| Hallazgo | Reparación |
+|---|---|
+| `movements_json` ya no se escribía tras migrar a `accounting_document_v3`; el Worker calculaba posiciones en cero y las alertas gratuitas en segundo plano nunca se disparaban | Espejo `legacyMovementsMirrorJson` escrito en cada guardado (`_saveData`) y reparado al cargar (`_loadData`); no borra datos |
+| Umbral predeterminado Dart `0.0` contra Kotlin `2.0` y UI "Predeterminado: 2.0" | Dart pasa a `2.0` en precio y recuperación |
+| Alertas de precio sin referencia nunca avisaban hasta reiniciar la base a mano | Siembra de la referencia en la primera vista con posición, en Dart y en Kotlin, igual que ya hacía la recuperación |
+| El Worker sobrescribía `prices_json` con precios en vivo y destruía los precios manuales | Fusión que conserva el precio guardado de las monedas en modo manual |
+| `computeStats` nativo trataba un traspaso entre carteras propias como venta y vaciaba la posición; el ajuste de saldo se trataba como compra | Paridad con `FinancialEngine.computeStats`: traspaso estructurado solo descuenta la comisión en cripto; ajuste de saldo sin efecto |
+| Textos Pro del Worker con mojibake (`rotaci├│n`, `ΓåÆ`, `despu├⌐s`) | Cadenas corregidas a las mismas del monitor Dart |
+
+Validación ejecutada en esta auditoría:
+
+| Validación | Resultado |
+|---|---|
+| `flutter test test/services/price_alert_service_test.dart` (nuevo) | 7 pruebas aprobadas |
+| `flutter test test/smart_alerts/smart_simulation_monitor_test.dart` | 22 pruebas aprobadas |
+| `flutter test` (suite completa) | 321 aprobadas, 3 fallidas; las 3 son preexistentes en `test/widget_test.dart` (etiquetas de alerta de simulación Fase 4.7) y fallan igual sin estos cambios |
+| `flutter analyze` (archivos tocados) | 0 errores; 31 avisos/info preexistentes en `lib/cripto_control_app.dart`, ninguno en las líneas cambiadas |
+| `kotlinc` directo sobre `AlertWorker.kt` + `SmartSimulationEngine.kt` (con `android-35/android.jar` y stubs de `androidx.work` y `R`) | Compila sin errores |
+| `gradle :app:compileDebugKotlin` / `flutter build apk` | **No ejecutado**: el runtime bloquea el TCP de Java (`other_tcp` en Deny; "Unexpected type tag 109" al hablar con el daemon de Gradle). Lo desbloquea el dueño en Muse → Settings → Permissions → Direct network protocols (cambiar a Ask). Mismo bloqueo que impide el APK de Poleana |
+| Prueba en dispositivo real con la app cerrada | Pendiente: sin APK no se puede verificar la entrega real en segundo plano |
+
+Lo anterior no equivale a una prueba de estrés de concurrencia, una prueba de todos los ciclos de vida Android ni una validación de compras reales.
 
 ## 8. Pendientes y límites del alcance
 

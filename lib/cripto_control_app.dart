@@ -132,6 +132,14 @@ Future<AccountingDocument> persistMovementsForApp({
   );
 }
 
+/// Espejo JSON de movimientos en el formato plano que lee `AlertWorker`
+/// (`movements_json`): `coin`, `type`, `date` ISO, `quantity`, `unitPrice`,
+/// `fee` y, en su caso, los campos de traspaso estructurado. El documento
+/// canónico (`accounting_document_v3`) no lo sustituye para el Worker.
+@visibleForTesting
+String legacyMovementsMirrorJson(Iterable<Movement> movements) =>
+    jsonEncode(movements.map((Movement m) => m.toJson()).toList());
+
 @visibleForTesting
 Future<void> clearFinancialResetAccountingState({
   required LegacyPersistenceBridge bridge,
@@ -2649,6 +2657,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             (json) => Movement.fromJson(Map<String, dynamic>.from(json)),
           ),
         );
+      // Reparar instalaciones ya migradas: si el espejo quedó ausente o
+      // desactualizado, el Worker no veía los movimientos y las alertas en
+      // segundo plano no se disparaban. No borra ningún dato.
+      await prefs.setString(
+        _movementsKey,
+        legacyMovementsMirrorJson(_movements),
+      );
       final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
       _applyPriceCache(priceCache);
       _loadPriceModeState(prefs);
@@ -3240,6 +3255,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       currentDocument: current,
       movements: _movements,
       deletedMovementIds: deletedMovementIds,
+    );
+
+    // Mantener el espejo que lee AlertWorker en cada guardado; si no, el
+    // Worker seguiría viendo los movimientos viejos tras cada cambio.
+    await prefs.setString(
+      _movementsKey,
+      legacyMovementsMirrorJson(_movements),
     );
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
