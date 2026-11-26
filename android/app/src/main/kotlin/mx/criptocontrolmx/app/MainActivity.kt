@@ -46,6 +46,19 @@ class MainActivity : FlutterActivity() {
                     enqueueImmediateAlertCheck()
                     result.success(null)
                 }
+                "refreshBackgroundSchedule" -> {
+                    val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                    val automatic = prefs.getBoolean("flutter.automatic_local_alerts_enabled", false)
+                    val interval = prefs.getLong("flutter.automatic_local_alerts_interval_minutes", 30L).toInt()
+                    configureAutomaticAlerts(automatic, interval)
+                    result.success(null)
+                }
+                "showSmartAlert" -> {
+                    val id = call.argument<String>("id") ?: "sim"
+                    val title = call.argument<String>("title") ?: "Oportunidad Pro"
+                    val body = call.argument<String>("body") ?: ""
+                    result.success(showSmartAlert(id, title, body))
+                }
                 "showPriceAlert" -> {
                     val coin = call.argument<String>("coin") ?: "CRIPTO"
                     val title = call.argument<String>("title") ?: "Alerta de precio"
@@ -92,7 +105,12 @@ class MainActivity : FlutterActivity() {
 
     private fun configureAutomaticAlerts(enabled: Boolean, intervalMinutes: Int) {
         val workManager = WorkManager.getInstance(applicationContext)
-        if (!enabled) {
+        // El mismo Worker atiende alertas gratuitas y supervisión Pro; se
+        // programa si cualquiera de los dos sistemas lo necesita.
+        val smartNeeded = SmartSimulationEngine.isActive(
+            getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE),
+        )
+        if (!enabled && !smartNeeded) {
             workManager.cancelUniqueWork(automaticWorkName)
             return
         }
@@ -137,6 +155,33 @@ class MainActivity : FlutterActivity() {
             .build()
 
         notificationManager().notify(abs(coin.hashCode()), notification)
+        return true
+    }
+
+    private fun showSmartAlert(id: String, title: String, body: String): Boolean {
+        if (!areNotificationsAllowed()) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager().createNotificationChannel(
+                NotificationChannel(
+                    SmartSimulationEngine.channelId,
+                    "Oportunidades Pro de simulaciones",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "Notificaciones inteligentes Pro basadas en simulaciones guardadas" },
+            )
+        }
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, SmartSimulationEngine.channelId)
+        } else {
+            legacyNotificationBuilder()
+        }
+        val notification = builder
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body.substringBefore('\n'))
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        notificationManager().notify(abs("smart_$id".hashCode()), notification)
         return true
     }
 

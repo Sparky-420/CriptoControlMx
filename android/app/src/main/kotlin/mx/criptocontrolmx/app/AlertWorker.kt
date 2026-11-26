@@ -17,19 +17,56 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+private val alertWorkerExecutionLock = Any()
+
 class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appContext, params) {
-    override fun doWork(): Result {
+    override fun doWork(): Result = synchronized(alertWorkerExecutionLock) {
+        doWorkLocked()
+    }
+
+    private fun doWorkLocked(): Result {
         val prefs = applicationContext.getSharedPreferences(sharedPreferencesName, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(pref(automaticEnabledKey), false)) return Result.success()
-        if (!prefs.getBoolean(pref(priceEnabledKey), false) && !prefs.getBoolean(pref(recoveryEnabledKey), false)) {
-            return Result.success()
-        }
+        val freeActive = prefs.getBoolean(pref(automaticEnabledKey), false) &&
+            (prefs.getBoolean(pref(priceEnabledKey), false) || prefs.getBoolean(pref(recoveryEnabledKey), false))
+        // Motor Pro independiente: comparte esta única consulta de precios.
+        val smartActive = SmartSimulationEngine.isActive(prefs)
+        if (!freeActive && !smartActive) return Result.success()
 
         val prices = fetchPrices()
-        if (prices.isEmpty()) return Result.retry()
+        if (prices.isEmpty()) {
+            if (smartActive) {
+                SmartSimulationEngine.recordPriceFailure(
+                    prefs,
+                    "Sin conexión o respuesta incompleta del proveedor de precios.",
+                )
+            }
+            return Result.retry()
+        }
 
+        if (smartActive) {
+            createSmartChannel()
+            try {
+                SmartSimulationEngine.run(prefs, prices) { id, title, body -> notifySmart(id, title, body) }
+            } catch (e: Exception) {
+                SmartSimulationEngine.recordPriceFailure(
+                    prefs,
+                    "Motor Pro falló: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
+        }
+        if (!freeActive) return Result.success()
+
+        // Fusionar con la caché existente: las monedas en modo manual
+        // conservan su precio guardado. Sobrescribir prices_json con los
+        // precios en vivo destruía los precios manuales del usuario.
+        val cachedPrices = readDoubleMap(prefs.getString(pref(pricesKey), null))
+        val priceModes = readStringMap(prefs.getString(pref(priceModesKey), null))
+        val mergedPrices = cachedPrices.toMutableMap()
+        for ((coin, price) in prices) {
+            if (priceModes[coin] != "manual") mergedPrices[coin] = price
+        }
         prefs.edit()
-            .putString(pref(pricesKey), JSONObject(prices as Map<*, *>).toString())
+            .putString(pref(pricesKey), JSONObject(mergedPrices as Map<*, *>).toString())
             .putLong(pref(pricesUpdatedAtKey), System.currentTimeMillis())
             .apply()
 
@@ -55,7 +92,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         val notifiedPrices = readDoubleMap(prefs.getString(pref(priceLastNotifiedPricesKey), null))
         val notifiedAt = readStringMap(prefs.getString(pref(priceLastNotifiedAtKey), null))
         val stats = computeStats(prefs.getString(pref(movementsKey), null), prices)
-        val activeCoins = coins.filter { (stats[it]?.quantity ?: 0.0) > 0.0 && references.containsKey(it) }.toSet()
+        val activeCoins = coins.filter { (stats[it]?.quantity ?: 0.0) > 0.0 }.toSet()
         var changed = false
 
         for (coin in references.keys.filter { it !in activeCoins }.toList()) {
@@ -69,7 +106,15 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             val currentPrice = prices[coin] ?: continue
             if (currentPrice <= 0) continue
             val reference = references[coin] ?: 0.0
-            if (reference <= 0) continue
+            if (reference <= 0) {
+                // Primera vista con posición: fijar la base sin notificar,
+                // igual que la recuperación de P&L. Sin esto, activar las
+                // alertas con referencias vacías nunca avisaba hasta pulsar
+                // manualmente "reiniciar precios base".
+                references[coin] = currentPrice
+                changed = true
+                continue
+            }
             val changePct = (currentPrice - reference) / reference * 100.0
             if (changePct >= threshold || changePct <= -threshold) {
                 val up = changePct > 0
@@ -154,7 +199,30 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             val quantity = movement.optDoubleCompat("quantity")
             val unitPrice = movement.optDoubleCompat("unitPrice", movement.optDoubleCompat("unit_price"))
             val fee = movement.optDoubleCompat("fee", movement.optDoubleCompat("commission"))
-            when (movementType(movement.optString("type"))) {
+            val type = movementType(movement.optString("type"))
+            if (type == "transferOut" && isStructuredOwnedTransfer(movement)) {
+                // Paridad con FinancialEngine.computeStats: un traspaso entre
+                // carteras propias no cambia la cantidad del activo; solo
+                // descuenta la comisión en cripto del activo de la comisión.
+                // Antes se trataba como una venta y vaciaba la posición.
+                val feeAsset = movement.optString("cryptoFeeAsset", coin)
+                    .ifBlank { coin }.uppercase()
+                val cryptoFee = movement.optDoubleCompat("cryptoFeeAmount")
+                val feeStat = stats[feeAsset]
+                if (feeStat != null && cryptoFee > 0) {
+                    val average = if (feeStat.quantity > 0) feeStat.costBase / feeStat.quantity else 0.0
+                    val quantityToRemove = min(cryptoFee, feeStat.quantity)
+                    feeStat.quantity -= quantityToRemove
+                    feeStat.costBase -= average * quantityToRemove
+                    if (abs(feeStat.quantity) < 0.0000000001) {
+                        feeStat.quantity = 0.0
+                        feeStat.costBase = 0.0
+                    }
+                    if (abs(feeStat.costBase) < 0.00000001) feeStat.costBase = 0.0
+                }
+                continue
+            }
+            when (type) {
                 "buy", "transferIn" -> {
                     stat.quantity += quantity
                     stat.costBase += quantity * unitPrice + fee
@@ -165,6 +233,9 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
                     val removedCost = average * quantityToRemove
                     stat.quantity -= quantityToRemove
                     stat.costBase -= removedCost
+                }
+                "balanceAdjustment" -> {
+                    // Paridad con Dart: el ajuste de saldo no mueve la posición.
                 }
             }
             if (abs(stat.quantity) < 0.0000000001) {
@@ -188,17 +259,27 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             if (connection.responseCode !in 200..299) return emptyMap()
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
+            val symbols = mapOf(
+                "bitcoin" to "BTC",
+                "ethereum" to "ETH",
+                "chainlink" to "LINK",
+                "litecoin" to "LTC",
+                "uniswap" to "UNI",
+                "tether" to "USDT",
+                "usd-coin" to "USDC",
+                "ripple" to "XRP",
+                "solana" to "SOL",
+                "cosmos" to "ATOM",
+            )
             buildMap {
-                put("BTC", json.getJSONObject("bitcoin").getDouble("mxn"))
-                put("ETH", json.getJSONObject("ethereum").getDouble("mxn"))
-                put("LINK", json.getJSONObject("chainlink").getDouble("mxn"))
-                put("LTC", json.getJSONObject("litecoin").getDouble("mxn"))
-                put("UNI", json.getJSONObject("uniswap").getDouble("mxn"))
-                put("USDT", json.getJSONObject("tether").getDouble("mxn"))
-                put("USDC", json.getJSONObject("usd-coin").getDouble("mxn"))
-                put("XRP", json.getJSONObject("ripple").getDouble("mxn"))
-                put("SOL", json.getJSONObject("solana").getDouble("mxn"))
-                put("ATOM", json.getJSONObject("cosmos").getDouble("mxn"))
+                for ((providerId, symbol) in symbols) {
+                    val price = json.optJSONObject(providerId)
+                        ?.optDouble("mxn", Double.NaN)
+                        ?: Double.NaN
+                    if (price.isFinite() && price > 0.0) {
+                        put(symbol, price)
+                    }
+                }
             }
         } catch (_: Exception) {
             emptyMap()
@@ -224,6 +305,35 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             .build()
         manager().notify(abs(tag.hashCode()), notification)
         return true
+    }
+
+    private fun notifySmart(id: String, title: String, body: String): Boolean {
+        if (!notificationsAllowed()) return false
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(applicationContext, SmartSimulationEngine.channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(applicationContext)
+        }
+        val notification = builder
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body.substringBefore('\n'))
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .build()
+        manager().notify(abs("smart_$id".hashCode()), notification)
+        return true
+    }
+
+    private fun createSmartChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            SmartSimulationEngine.channelId,
+            "Oportunidades Pro de simulaciones",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply { description = "Notificaciones inteligentes Pro basadas en simulaciones guardadas" }
+        manager().createNotificationChannel(channel)
     }
 
     private fun createChannel() {
@@ -270,6 +380,7 @@ class AlertWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         private const val recoveryLastNotifiedAtKey = "recovery_alert_last_notified_at_json"
         private const val pricesKey = "prices_json"
         private const val pricesUpdatedAtKey = "prices_updated_at_ms"
+        private const val priceModesKey = "price_modes_v1_json"
         private const val movementsKey = "movements_json"
         private const val sellFeePercentKey = "sell_fee_percent"
         private fun pref(key: String) = "flutter.$key"
@@ -322,8 +433,19 @@ private fun movementType(rawType: String): String {
         "sell", "venta", "vender" -> "sell"
         "transferin", "transfer_in", "transferenciaentrada", "transferencia recibida", "entrada" -> "transferIn"
         "transferout", "transfer_out", "transferenciasalida", "transferencia enviada", "salida" -> "transferOut"
+        "balanceadjustment", "balance_adjustment", "ajuste", "ajuste de saldo" -> "balanceAdjustment"
         else -> "buy"
     }
+}
+
+private fun isStructuredOwnedTransfer(movement: JSONObject): Boolean {
+    val hasAmounts = !movement.isNull("receivedAmount") ||
+        !movement.isNull("cryptoFeeAmount") ||
+        !movement.isNull("totalDebitedAmount")
+    if (!hasAmounts) return false
+    val source = movement.optString("sourcePlatform").ifBlank { movement.optString("source") }
+    val destination = movement.optString("destinationPlatform").ifBlank { movement.optString("wallet") }
+    return source.isNotBlank() && destination.isNotBlank()
 }
 
 private fun signed(value: Double) = "${if (value >= 0) "+" else ""}${value.format(2)}"

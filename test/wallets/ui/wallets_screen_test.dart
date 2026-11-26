@@ -24,8 +24,19 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Sin carteras para resumir'), findsOneWidget);
+      // FilledButton.icon crea un _FilledButtonWithIcon (subclase privada)
+      // y find.byType compara el tipo exacto, así que no lo encuentra.
+      // Se busca el FilledButton ancestro del texto 'Nueva cartera' con `is`.
+      final Finder newWalletButton = find.ancestor(
+        of: find.text('Nueva cartera'),
+        matching: find.byWidgetPredicate(
+          (Widget widget) => widget is FilledButton,
+          description: 'FilledButton',
+        ),
+      );
+      expect(newWalletButton, findsOneWidget);
       expect(
-        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        tester.widget<FilledButton>(newWalletButton).onPressed,
         isNotNull,
       );
     });

@@ -1,0 +1,50 @@
+name: CriptoControl AI Integration Check
+
+concurrency:
+  group: ai-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [feat/cripto-control-ai-integration]
+  pull_request:
+    branches: [release-candidate-fenix-20261104]
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          channel: stable
+      - run: flutter pub get
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.4'
+      - name: Generate Android Gradle wrapper for native tests
+        working-directory: android
+        run: gradle wrapper --gradle-version 8.14.4 --distribution-type bin
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test test/ai/portfolio_ai_chat_screen_test.dart
+      - run: flutter test
+
+  functions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package.json
+      - run: npm install
+      - run: npm run build

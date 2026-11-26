@@ -17,6 +17,13 @@ import 'accounting/adapters/legacy_movement_adapter.dart';
 import 'accounting/adapters/legacy_persistence_bridge.dart';
 import 'accounting/application/wallet_image_cleanup_journal.dart';
 import 'accounting/application/wallet_lifecycle_coordinator.dart';
+import 'accounting/domain/accounting_amount.dart';
+import 'accounting/domain/movement_normalizer.dart';
+import 'accounting/projection/accounting_ledger_engine.dart';
+import 'accounting/projection/custody_projector.dart';
+import 'accounting/projection/performance_projector.dart';
+import 'ai/portfolio_ai_chat_screen.dart';
+import 'ai/portfolio_ai_service.dart';
 import 'accounting/domain/accounting_movement.dart';
 import 'accounting/domain/movement_type.dart';
 import 'accounting/domain/wallet.dart';
@@ -31,6 +38,10 @@ import 'accounting/persistence/method_channel_wallet_image_processor.dart';
 import 'accounting/persistence/accounting_repository.dart';
 import 'accounting/persistence/shared_preferences_accounting_repository.dart';
 import 'accounting/persistence/wallet_image_store.dart';
+import 'entitlements/pro_entitlement.dart';
+import 'smart_alerts/simulation_snapshot.dart';
+import 'smart_alerts/smart_alert_store.dart';
+import 'smart_alerts/smart_simulation_monitor.dart';
 export 'accounting/domain/movement_type.dart';
 
 import 'package:flutter_svg/flutter_svg.dart';
@@ -120,6 +131,14 @@ Future<AccountingDocument> persistMovementsForApp({
     deletedIds: deletedMovementIds,
   );
 }
+
+/// Espejo JSON de movimientos en el formato plano que lee `AlertWorker`
+/// (`movements_json`): `coin`, `type`, `date` ISO, `quantity`, `unitPrice`,
+/// `fee` y, en su caso, los campos de traspaso estructurado. El documento
+/// canónico (`accounting_document_v3`) no lo sustituye para el Worker.
+@visibleForTesting
+String legacyMovementsMirrorJson(Iterable<Movement> movements) =>
+    jsonEncode(movements.map((Movement m) => m.toJson()).toList());
 
 @visibleForTesting
 Future<void> clearFinancialResetAccountingState({
@@ -2638,6 +2657,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             (json) => Movement.fromJson(Map<String, dynamic>.from(json)),
           ),
         );
+      // Reparar instalaciones ya migradas: si el espejo quedó ausente o
+      // desactualizado, el Worker no veía los movimientos y las alertas en
+      // segundo plano no se disparaban. No borra ningún dato.
+      await prefs.setString(
+        _movementsKey,
+        legacyMovementsMirrorJson(_movements),
+      );
       final PriceCache priceCache = await _priceService.loadCachedPrices(prefs);
       _applyPriceCache(priceCache);
       _loadPriceModeState(prefs);
@@ -3229,6 +3255,13 @@ class _CriptoControlAppState extends State<CriptoControlApp>
       currentDocument: current,
       movements: _movements,
       deletedMovementIds: deletedMovementIds,
+    );
+
+    // Mantener el espejo que lee AlertWorker en cada guardado; si no, el
+    // Worker seguiría viendo los movimientos viejos tras cada cambio.
+    await prefs.setString(
+      _movementsKey,
+      legacyMovementsMirrorJson(_movements),
     );
 
     await prefs.setString(_pricesKey, jsonEncode(_currentPrices));
@@ -6058,6 +6091,80 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             }());
           }
 
+          void openAiChat() {
+            final navigator = Navigator.of(pageContext);
+            unawaited(() async {
+              final document = await loadWalletsScreenDocumentForApp(
+                bridge: _legacyPersistenceBridge,
+                repository: _accountingRepository,
+                runtimeDocument: _accountingDocument,
+                legacyMovements: _movements,
+                updateRuntimeDocument: (document) {
+                  if (mounted) setState(() => _accountingDocument = document);
+                },
+              );
+              if (!mounted) return;
+              final priceAmounts = <String, AccountingAmount>{
+                for (final entry in _currentPrices.entries)
+                  if (entry.value.isFinite && entry.value > 0)
+                    entry.key: AccountingAmount.parse(entry.value.toStringAsFixed(8)),
+              };
+              final projection = const AccountingLedgerEngine(
+                DefaultMovementNormalizer(),
+                DefaultCustodyProjector(),
+                DefaultPerformanceProjector(),
+              ).project(
+                LedgerInput(
+                  wallets: document.wallets,
+                  movements: document.movements,
+                  currentPrices: priceAmounts,
+                  saleCostConsumptionPolicy: SaleCostConsumptionPolicy.knownFirst,
+                  transferCostAllocationPolicy: TransferCostAllocationPolicy.proportional,
+                  legacyAccountingPolicy: document.legacyAccountingPolicy,
+                ),
+              );
+              final aiService = PortfolioAiService();
+              try {
+                await navigator.push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PortfolioAiChatScreen(
+                      onAsk: (question, history) async => (await aiService.ask(
+                        question: question,
+                        history: history,
+                        accounting: document,
+                        projection: projection,
+                        currentPrices: _currentPrices,
+                        pricesUpdatedAt: _pricesUpdatedAt,
+                        priceModes: _priceModes,
+                        manualPriceUpdatedAtMs: _manualPriceUpdatedAtMs,
+                        snapshots: _snapshots.map((snapshot) => <String, Object?>{
+                          'id': snapshot.id,
+                          'createdAt': snapshot.createdAt.toUtc().toIso8601String(),
+                          'totalCostBase': snapshot.totalCostBase,
+                          'totalCurrentValue': snapshot.totalCurrentValue,
+                          'totalUnrealizedPL': snapshot.totalUnrealizedPL,
+                          'totalRealizedPL': snapshot.totalRealizedPL,
+                          'movementCount': snapshot.movementCount,
+                          'coins': snapshot.coins.map((coin) => <String, Object?>{
+                            'coin': coin.coin,
+                            'quantity': coin.quantity,
+                            'costBase': coin.costBase,
+                            'avgPrice': coin.avgPrice,
+                            'currentValue': coin.currentValue,
+                            'unrealizedPL': coin.unrealizedPL,
+                            'realizedPL': coin.realizedPL,
+                          }).toList(growable: false),
+                        }).toList(growable: false),
+                      )).answer,
+                    ),
+                  ),
+                );
+              } finally {
+                aiService.close();
+              }
+            }());
+          }
+
           Widget buildSettingsTab({
             VoidCallback? refresh,
             SettingsView view = SettingsView.all,
@@ -6393,6 +6500,11 @@ class _CriptoControlAppState extends State<CriptoControlApp>
             appBar: AppBar(
               title: const Text('CriptoControlMx'),
               actions: <Widget>[
+                IconButton(
+                  tooltip: 'Preguntar a Cripi',
+                  onPressed: openAiChat,
+                  icon: const Icon(Icons.auto_awesome_rounded),
+                ),
                 if (_currentIndex != 0)
                   PremiumQuickActions(
                     onCapture: () => openMovementHistory(startWithOcr: true),
@@ -10672,28 +10784,52 @@ class _SimulationTabState extends State<SimulationTab> {
   }
 
   Future<void> _loadSavedSimulations() async {
+    SharedPreferences? prefs;
     try {
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      prefs = await SharedPreferences.getInstance();
       final String? raw = prefs.getString(_savedSimulationsKey);
-      if (raw == null || raw.trim().isEmpty) return;
-      final dynamic decoded = jsonDecode(raw);
-      if (decoded is! List) return;
-      final List<_SavedSimulationRecord> loaded = decoded
-          .whereType<Map<dynamic, dynamic>>()
-          .map(
-            (Map<dynamic, dynamic> json) => _SavedSimulationRecord.fromJson(
-              Map<String, dynamic>.from(json),
-            ),
-          )
-          .whereType<_SavedSimulationRecord>()
-          .toList();
-      if (!mounted) return;
-      setState(() {
-        _savedSimulations
-          ..clear()
-          ..addAll(loaded.take(_savedSimulationsLimit));
-      });
-    } catch (_) {}
+      List<_SavedSimulationRecord> loaded = <_SavedSimulationRecord>[];
+
+      if (raw != null && raw.trim().isNotEmpty) {
+        try {
+          final dynamic decoded = jsonDecode(raw);
+          if (decoded is List) {
+            loaded = decoded
+                .whereType<Map<dynamic, dynamic>>()
+                .map(
+                  (Map<dynamic, dynamic> json) =>
+                      _SavedSimulationRecord.fromJson(
+                        Map<String, dynamic>.from(json),
+                      ),
+                )
+                .whereType<_SavedSimulationRecord>()
+                .toList();
+          }
+        } catch (_) {
+          // Un historial inválido no debe impedir reconciliar el monitoreo.
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _savedSimulations
+            ..clear()
+            ..addAll(loaded.take(_savedSimulationsLimit));
+        });
+      }
+    } catch (_) {
+      // La carga visual no debe bloquear el resto de la aplicación.
+    } finally {
+      if (prefs != null) {
+        try {
+          await SmartAlertStore(prefs).reconcileMonitoredIds();
+          await const MethodChannelSmartAlertNotifier()
+              .refreshBackgroundSchedule();
+        } catch (_) {
+          // No bloquear la pantalla si falla la programación nativa.
+        }
+      }
+    }
   }
 
   Future<void> _persistSavedSimulations() async {
@@ -10740,6 +10876,7 @@ class _SimulationTabState extends State<SimulationTab> {
     required bool valid,
     required String primaryLabel,
     required String primaryValue,
+    SimulationSnapshot? smartParams,
   }) async {
     if (!valid) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -10763,6 +10900,7 @@ class _SimulationTabState extends State<SimulationTab> {
         alertLabel: _currentSimulationAlertLabel(valid),
         strategyScore: _currentStrategyScore(valid),
         strategyLabel: _strategyLabelForScore(_currentStrategyScore(valid)),
+        smartParams: smartParams?.toJson(),
       ),
     );
     if (!mounted) return;
@@ -10782,6 +10920,11 @@ class _SimulationTabState extends State<SimulationTab> {
       }
     });
     await _persistSavedSimulations();
+
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await SmartAlertStore(prefs).reconcileMonitoredIds();
+    await const MethodChannelSmartAlertNotifier()
+        .refreshBackgroundSchedule();
   }
 
   Future<void> _duplicateSavedSimulation(_SavedSimulationRecord record) async {
@@ -10799,6 +10942,13 @@ class _SimulationTabState extends State<SimulationTab> {
       );
     });
     await _persistSavedSimulations();
+
+    // Una simulación eliminada deja de supervisarse.
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await SmartAlertStore(prefs).reconcileMonitoredIds();
+    await const MethodChannelSmartAlertNotifier()
+        .refreshBackgroundSchedule();
+
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
@@ -11207,6 +11357,15 @@ class _SimulationTabState extends State<SimulationTab> {
           primaryValue: result.valid
               ? _simulationMoney(result.avgAfter)
               : 'Sin resultado',
+          smartParams: result.valid
+              ? BuySimulationSnapshot(
+                  coin: _buyCoin,
+                  grossAmount: _parseInput(_buyGrossAmountController),
+                  buyFeePercent: _parseInput(_buyFeeController),
+                  simPrice: _parseInput(_buyPriceController),
+                  targetQuantity: result.quantityBought,
+                )
+              : null,
         ),
         child: result.valid
             ? _SimulationMetricGrid(
@@ -11420,6 +11579,15 @@ class _SimulationTabState extends State<SimulationTab> {
           primaryValue: result.valid
               ? _simulationMoney(result.realizedPLEstimate)
               : 'Sin resultado',
+          smartParams: result.valid
+              ? SellSimulationSnapshot(
+                  coin: _sellCoin,
+                  quantity: result.quantitySold,
+                  sellFeePercent: _parseInput(_sellFeeController),
+                  simPrice: _parseInput(_sellPriceController),
+                  targetNetReceived: result.netReceived,
+                )
+              : null,
         ),
         child: result.valid
             ? Column(
@@ -11744,6 +11912,18 @@ class _SimulationTabState extends State<SimulationTab> {
           primaryValue: result.valid
               ? _simulationCrypto(result.targetQuantityBought)
               : 'Sin resultado',
+          smartParams: result.valid
+              ? RotationSimulationSnapshot(
+                  originCoin: _rotationOriginCoin,
+                  targetCoin: _rotationTargetCoin,
+                  originQuantity: result.originQuantitySold,
+                  sellFeePercent: _parseInput(_rotationSellFeeController),
+                  buyFeePercent: _parseInput(_rotationBuyFeeController),
+                  simOriginPrice: _parseInput(_rotationOriginPriceController),
+                  simTargetPrice: _parseInput(_rotationTargetPriceController),
+                  targetQuantity: result.targetQuantityBought,
+                )
+              : null,
         ),
         child: result.valid
             ? _SimulationMetricGrid(
@@ -13281,6 +13461,9 @@ class _SavedSimulationRecord {
   final int strategyScore;
   final String strategyLabel;
 
+  /// Parámetros económicos para el motor Pro (null en registros antiguos).
+  final Map<String, Object>? smartParams;
+
   const _SavedSimulationRecord({
     required this.id,
     required this.createdAt,
@@ -13293,9 +13476,11 @@ class _SavedSimulationRecord {
     required this.alertLabel,
     this.strategyScore = 0,
     this.strategyLabel = 'Sin score',
+    this.smartParams,
   });
 
   Map<String, Object> toJson() => <String, Object>{
+    if (smartParams != null) 'smartParams': smartParams!,
     'id': id,
     'createdAt': createdAt.toIso8601String(),
     'modeLabel': modeLabel,
@@ -13321,6 +13506,7 @@ class _SavedSimulationRecord {
     alertLabel: alertLabel,
     strategyScore: strategyScore,
     strategyLabel: strategyLabel,
+    smartParams: smartParams,
   );
 
   static _SavedSimulationRecord? fromJson(Map<String, dynamic> json) {
@@ -13346,6 +13532,7 @@ class _SavedSimulationRecord {
       strategyScore:
           int.tryParse((json['strategyScore'] ?? '0').toString()) ?? 0,
       strategyLabel: (json['strategyLabel'] ?? 'Sin score').toString(),
+      smartParams: SimulationSnapshot.fromJson(json['smartParams'])?.toJson(),
     );
   }
 
@@ -13530,6 +13717,11 @@ class _SavedSimulationCard extends StatelessWidget {
                       label: record.alertLabel,
                       color: tokens.primaryAccent,
                     ),
+                    const SizedBox(height: 8),
+                    _SmartMonitorControl(
+                      simulationId: record.id,
+                      hasParams: record.smartParams != null,
+                    ),
                   ],
                 ),
               ),
@@ -13576,6 +13768,132 @@ class _SavedSimulationCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Control de supervisión Pro por simulación (historial de simulaciones).
+class _SmartMonitorControl extends StatefulWidget {
+  final String simulationId;
+  final bool hasParams;
+
+  const _SmartMonitorControl({
+    required this.simulationId,
+    required this.hasParams,
+  });
+
+  @override
+  State<_SmartMonitorControl> createState() => _SmartMonitorControlState();
+}
+
+class _SmartMonitorControlState extends State<_SmartMonitorControl> {
+  bool _loaded = false;
+  bool _isPro = false;
+  bool _monitored = false;
+  SmartMonitorState? _state;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final SmartAlertStore store = SmartAlertStore(prefs);
+    final bool isPro = await SharedPreferencesProEntitlementReader(
+      prefs,
+    ).isProActive();
+    final Set<String> ids = await store.loadMonitoredIds();
+    final Map<String, SmartMonitorState> states = await store.loadStates();
+    if (!mounted) return;
+    setState(() {
+      _loaded = true;
+      _isPro = isPro;
+      _monitored = ids.contains(widget.simulationId);
+      _state = states[widget.simulationId];
+    });
+  }
+
+  Future<void> _toggle(bool enabled) async {
+    final SharedPreferences prefs =
+    await SharedPreferences.getInstance();
+
+    await SmartAlertStore(prefs).setMonitored(
+      widget.simulationId,
+      enabled,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _monitored = enabled;
+      if (!enabled) {
+        _state = null;
+      }
+    });
+
+    await const MethodChannelSmartAlertNotifier()
+        .refreshBackgroundSchedule();
+  }
+
+  String _statusText() {
+    if (!_isPro) {
+      return 'Supervisión inteligente: función de CriptoControlMx Pro.';
+    }
+    if (!widget.hasParams) {
+      return 'Guardada antes del motor Pro: vuelve a guardarla para '
+          'supervisarla.';
+    }
+    if (!_monitored) return 'Supervisión inactiva.';
+    final SmartMonitorState? s = _state;
+    if (s == null || s.lastEvaluatedAt == null) {
+      return 'Supervisada · pendiente de la primera evaluación.';
+    }
+    final String when = shortDate(s.lastEvaluatedAt!);
+    return switch (s.lastStatus) {
+      'favorable' =>
+        'Oportunidad detectada'
+            '${s.lastNotifiedAt != null ? ' · avisada ${shortDate(s.lastNotifiedAt!)}' : ''}'
+            '. ${s.diagnostic}',
+      'notFavorable' => 'Supervisada · sin oportunidad ($when).',
+      _ => 'Supervisada · no se pudo evaluar ($when): ${s.diagnostic}',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ccmx.CcmxVisualTokens tokens = ccmx.CcmxVisualTokens.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    if (!_loaded) return const SizedBox.shrink();
+    final bool canToggle = _isPro && widget.hasParams;
+    final bool opportunity = _monitored && _state?.lastStatus == 'favorable';
+    return Row(
+      key: ValueKey<String>('smart-monitor-${widget.simulationId}'),
+      children: <Widget>[
+        Icon(
+          opportunity
+              ? Icons.notifications_active_outlined
+              : (_isPro ? Icons.radar_outlined : Icons.lock_outline),
+          size: 18,
+          color: _monitored ? tokens.primaryAccent : colors.onSurfaceVariant,
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            _statusText(),
+            style: TextStyle(
+              color: colors.onSurfaceVariant,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Switch(
+          value: _monitored && canToggle,
+          onChanged: canToggle ? _toggle : null,
+        ),
+      ],
     );
   }
 }
@@ -13774,10 +14092,7 @@ class _SimulationComparatorCard extends StatelessWidget {
             color: accentColor,
           ),
           const SizedBox(height: 8),
-          _SimulationAlertBadge(
-            label: record.alertLabel,
-            color: accentColor,
-          ),
+          _SimulationAlertBadge(label: record.alertLabel, color: accentColor),
           const SizedBox(height: 10),
           Text(
             record.primaryLabel,
